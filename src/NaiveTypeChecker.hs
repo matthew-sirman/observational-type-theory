@@ -67,6 +67,7 @@ subst x e (Var (Bound x')) | x == x' = e
 subst x e (Lambda x' a t) = Lambda x' (subst x e a) (subst (x + 1) e t)
 subst x e (Pi s x' a b) = Pi s x' (subst x e a) (subst (x + 1) e b)
 subst x e (Exists x' a b) = Exists x' (subst x e a) (subst (x + 1) e b)
+subst x e (Let x' a t u) = Let x' (subst x e a) (subst x e t) (subst (x + 1) e u)
 subst x e (Fix e') = Fix (fmap (subst x e) e')
 
 shift :: Ix -> Term Var -> Term Var
@@ -74,49 +75,49 @@ shift i (Var (Bound x)) | i <= x = Var (Bound (x + 1))
 shift i (Lambda x a e) = Lambda x (shift i a) (shift (i + 1) e)
 shift i (Pi s x a b) = Pi s x (shift i a) (shift (i + 1) b)
 shift i (Exists x a b) = Exists x (shift i a) (shift (i + 1) b)
+shift i (Let x' a t u) = Let x' (shift i a) (shift i t) (shift (i + 1) u)
 shift i (Fix e) = Fix (fmap (shift i) e)
 
 type Env = [Term Var]
 
-eval :: Env -> Term Var -> Term Var
-eval env (Var (Bound (Ix x))) = env !! x
-eval _ (Var free) = Var free
-eval _ (U s) = U s
-eval _ (Lambda x a e) = Lambda x a e
-eval env (App t u) =
-  case eval env t of
-    Lambda _ _ e -> traceShow (length env) (eval (eval env u : env) e)
+eval :: Term Var -> Term Var
+eval (Var x) = Var x
+eval (U s) = U s
+eval (Lambda x a e) = Lambda x a e
+eval (App t u) =
+  case eval t of
+    Lambda _ _ e -> eval (subst 0 (eval u) e)
     t -> App t u
-eval _ (Pi s x a b) = Pi s x a b
-eval _ Zero = Zero
-eval _ (Succ n) = Succ n
-eval env (NElim a t0 ts n) = recurse (eval env n)
+eval (Pi s x a b) = Pi s x a b
+eval Zero = Zero
+eval (Succ n) = Succ n
+eval (NElim a t0 ts n) = recurse (eval n)
   where
     recurse :: Term Var -> Term Var
-    recurse Zero = eval env t0
+    recurse Zero = eval t0
     recurse (Succ n) =
-      let vn = eval env n
-       in eval env (App (App ts vn) (recurse vn))
+      let vn = eval n
+       in eval (App (App ts vn) (recurse vn))
     recurse n' = NElim a t0 ts n'
-eval _ Nat = Nat
+eval Nat = Nat
 -- Cannot evaluate pairs (proof-irrelevant)
-eval _ e@(Pair {}) = e
+eval e@(Pair {}) = e
 -- Cannot evaluate fst (proof-irrelevant)
-eval _ e@(Fst {}) = e
+eval e@(Fst {}) = e
 -- Cannot evaluate snd (proof-irrelevant)
-eval _ e@(Snd {}) = e
-eval _ (Exists x a b) = Exists x a b
-eval _ (Abort a t) = Abort a t
-eval _ Empty = Empty
+eval e@(Snd {}) = e
+eval (Exists x a b) = Exists x a b
+eval (Abort a t) = Abort a t
+eval Empty = Empty
 -- Cannot evaluate one (proof-irrelevant)
-eval _ e@One = e
-eval _ Unit = Unit
-eval env (Eq t a u) =
-  case eval env a of
+eval e@One = e
+eval Unit = Unit
+eval (Eq t a u) =
+  case eval a of
     Pi s x a b -> Pi s x a (Eq (App t (Var (Bound 0))) b (App u (Var (Bound 0))))
     U Irrelevant -> Exists "_" (Pi Irrelevant "_" t u) (Pi Irrelevant "_" u t)
     U Relevant ->
-      case (eval env t, eval env u) of
+      case (eval t, eval u) of
         (Nat, Nat) -> Unit
         (U s, U s') | s == s' -> Unit
         (Nat, Pi {}) -> Empty
@@ -140,28 +141,28 @@ eval env (Eq t a u) =
                   )
         (t, u) -> Eq t (U Relevant) u
     Nat ->
-      case (eval env t, eval env u) of
+      case (eval t, eval u) of
         (Zero, Zero) -> Unit
         (Zero, Succ _) -> Empty
         (Succ _, Zero) -> Empty
-        (Succ m, Succ n) -> eval env (Eq m Nat n)
+        (Succ m, Succ n) -> eval (Eq m Nat n)
         (m, n) -> Eq m Nat n
     a -> Eq t a u
 -- Cannot evaluate refl (proof-irrelevant)
-eval _ e@(Refl {}) = e
+eval e@(Refl {}) = e
 -- Cannot evaluate transp (proof-irrelevant)
-eval _ e@(Transp {}) = e
-eval ctx (Cast a b e t) =
-  case (eval ctx a, eval ctx b, eval ctx t) of
+eval e@(Transp {}) = e
+eval (Cast a b e t) =
+  case (eval a, eval b, eval t) of
     (Nat, Nat, Zero) -> Zero
-    (Nat, Nat, Succ n) -> Succ (eval ctx (Cast Nat Nat e n))
+    (Nat, Nat, Succ n) -> Succ (eval (Cast Nat Nat e n))
     (U s, U s', a) | s == s' -> a
     (Pi _ x a b, Pi _ _ a' b', f) ->
       Lambda x a (Cast b (subst 0 (Cast a a' (Fst e) (Var (Bound 0))) b') (Snd e) (App f (Var (Bound 0))))
     (a, b, t) -> Cast a b e t
 -- Cannot evaluate castrefl (proof-irrelevant)
-eval _ e@(CastRefl {}) = e
-eval ctx (Let _ _ t u) = eval (eval ctx t : ctx) u
+eval e@(CastRefl {}) = e
+eval (Let _ _ t u) = eval (subst 0 (eval t) u)
 
 type Types = [(Name, Relevance, Type Var)]
 
@@ -205,7 +206,7 @@ lookupFree x gamma =
 --     at the same type [A].
 -- (2) (For the Nf variants) both terms are in weak head normal form
 typeEq :: Context -> Type Var -> Type Var -> Checker ()
-typeEq gamma t t' = typeNfEq gamma (eval (env gamma) t) (eval (env gamma) t')
+typeEq gamma t t' = typeNfEq gamma (eval t) (eval t')
 
 typeNfEq :: Context -> Type Var -> Type Var -> Checker ()
 typeNfEq _ (U s) (U s')
@@ -226,7 +227,7 @@ typeNfEq gamma (Eq t a u) (Eq t' a' u') = do
 typeNfEq gamma t t' = void (convStruct gamma t t')
 
 convStructNf :: Context -> Term Var -> Term Var -> Checker (Type Var)
-convStructNf gamma n n' = eval (env gamma) <$> convStruct gamma n n'
+convStructNf gamma n n' = eval <$> convStruct gamma n n'
 
 convStruct :: Context -> Term Var -> Term Var -> Checker (Type Var)
 convStruct gamma (Var (Free x)) (Var (Free x'))
@@ -236,7 +237,7 @@ convStruct gamma (App n u) (App n' u') = do
   case nty of
     Pi s _ a b -> do
       when (s == Relevant) (convTyped gamma u u' a)
-      pure (eval (u : env gamma) b)
+      pure (eval (subst 0 u b))
     _ -> throwError "BUG: Ill-typed application term"
 convStruct gamma (NElim a t0 ts n) (NElim a' t0' ts' n') = do
   -- We already know the type of n and n'
@@ -261,7 +262,7 @@ convStruct gamma (Cast a b _ t) (Cast a' b' _ t') = do
 convStruct _ _ _ = throwError "Type conversion failed"
 
 convTyped :: Context -> Term Var -> Term Var -> Type Var -> Checker ()
-convTyped gamma t t' ty = convTypedNf gamma t t' (eval (env gamma) ty)
+convTyped gamma t t' ty = convTypedNf gamma t t' (eval ty)
 
 convTypedNf :: Context -> Term Var -> Term Var -> Type Var -> Checker ()
 convTypedNf gamma (Lambda x _ e) (Lambda _ _ e') (Pi s _ a b) =
@@ -283,7 +284,7 @@ convTypedNf _ _ _ (Eq {}) = pure ()
 convTypedNf _ (Transp {}) _ _ = pure ()
 convTypedNf _ _ (Transp {}) _ = pure ()
 convTypedNf gamma t t' (U _) = typeEq gamma t t'
-convTypedNf gamma t t' _ = void (convStruct gamma (eval (env gamma) t) (eval (env gamma) t'))
+convTypedNf gamma t t' _ = void (convStruct gamma (eval t) (eval t'))
 
 inferVar :: Types -> Name -> Checker (Term Var, Relevance, Type Var)
 inferVar types id = do
@@ -310,8 +311,8 @@ infer gamma (App t u) = do
   case tty of
     Pi _ _ a b -> do
       u <- check gamma u a
-      let vu = eval (env gamma) u
-      pure (App t u, s, eval (vu : env gamma) b)
+      let vu = eval u
+      pure (App t u, s, eval (subst 0 vu b))
     _ -> throwError "Expected pi type"
 infer gamma (Pi s x a b) = do
   a <- check gamma a (U s)
@@ -341,8 +342,8 @@ infer gamma (Snd p) = do
   (p, _, pty) <- infer gamma p
   case pty of
     Exists _ _ b -> do
-      let vfst = eval (env gamma) (Fst p)
-      pure (Snd p, Irrelevant, eval (vfst : env gamma) b)
+      let vfst = eval (Fst p)
+      pure (Snd p, Irrelevant, eval (subst 0 vfst b))
     _ -> throwError "Expected existential type in second projection"
 infer gamma (Exists x a b) = do
   a <- check gamma a (U Irrelevant)
@@ -386,7 +387,8 @@ infer gamma (CastRefl a t) = do
 infer gamma (Let x a t u) = do
   (a, s) <- checkType gamma a
   t <- check gamma t a
-  let vt = eval (env gamma) t
+  let vt = eval t
+  -- TODO: Pretty sure this is wrong as-is
   (u, s, uty) <- infer (define x s vt a gamma) u
   pure (Let x a t u, s, uty)
 
@@ -399,15 +401,16 @@ checkType gamma t = do
 
 check :: Context -> Term Name -> Type Var -> Checker (Term Var)
 check gamma t tty =
-  case (t, eval (env gamma) tty) of
+  case (t, eval tty) of
     (Pair t u, Exists _ a b) -> do
       t <- check gamma t a
-      u <- check gamma u (eval (t : env gamma) b)
+      u <- check gamma u (eval (subst 0 t b))
       pure (Pair t u)
     (Let x a t u, uty) -> do
       (a, s) <- checkType gamma a
       t <- check gamma t a
-      let vt = eval (env gamma) t
+      let vt = eval t
+      -- TODO: Pretty sure this is wrong as-is
       u <- check (define x s vt a gamma) u uty
       pure (Let x a t u)
     (t, tty) -> do

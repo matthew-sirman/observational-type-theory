@@ -4,6 +4,8 @@
 
 module Syntax
   ( Name,
+    SourceLoc (..),
+    Loc (..),
     Ix (..),
     Lvl (..),
     ULevel,
@@ -45,6 +47,19 @@ import Text.Printf (IsChar (toChar))
 
 -- Language source identifiers
 type Name = String
+
+-- Source code location data
+data SourceLoc = SLoc
+  { slocStart :: Int,
+    slocEnd :: Int,
+    slocLine :: Int
+  }
+
+-- Syntactic element tagged with a source code location
+data Loc a = L
+  { loc :: SourceLoc,
+    syntax :: a
+  }
 
 -- Internal de Bruijn indices
 newtype Ix = Ix Int
