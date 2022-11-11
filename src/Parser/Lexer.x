@@ -7,8 +7,6 @@ import Syntax
 
 %wrapper "monad"
 
-$alpha = [a-zA-Z]
-
 tokens :-
        $white+                  ;
        "--".*                   ;
@@ -16,7 +14,7 @@ tokens :-
        "Ω"                      { symbol SymUnivIrrelevant }
        "O"                      { symbol SymUnivIrrelevant }
        "λ"                      { symbol SymLambda }
-       "\\"                     { symbol SymLambda }
+       "\"                      { symbol SymLambda }
        "("                      { symbol TokOpenParenthesis }
        ")"                      { symbol TokCloseParenthesis }
        ":"                      { symbol TokColon }
@@ -28,12 +26,17 @@ tokens :-
        "rec"                    { symbol KWNElim }
        "ℕ"                      { symbol SymNat }
        "Nat"                    { symbol SymNat }
+       "⟨"                      { symbol TokOpenAngle }
+       "<"                      { symbol TokOpenAngle }
+       ">"                      { symbol TokCloseAngle }
+       "⟩"                      { symbol TokCloseAngle }
        "fst"                    { keyword KWFst }
        "snd"                    { keyword KWSnd }
        "∃"                      { symbol SymExists }
        "."                      { symbol TokDot }
+       ","                      { symbol TokComma }
        "∧"                      { symbol SymAnd }
-       "/\\"                    { symbol SymAnd }
+       "/\"                     { symbol SymAnd }
        "⊥-elim"                 { keyword KWAbort }
        "abort"                  { keyword KWAbort }
        "⊥"                      { symbol SymEmpty }
@@ -52,7 +55,7 @@ tokens :-
        "="                      { symbol TokEquals }
        "in"                     { keyword KWIn}
 
-       [$alpha $digit \_ \']*   { identifier TokName }
+       [a-z A-Z 0-9 \_ \']+   { identifier TokName }
 {
 
 data Token
@@ -67,10 +70,13 @@ data Token
   | SymSucc
   | KWNElim
   | SymNat
+  | TokOpenAngle
+  | TokCloseAngle
   | KWFst
   | KWSnd
   | SymExists
   | TokDot
+  | TokComma
   | SymAnd
   | KWAbort
   | SymEmpty
@@ -87,14 +93,18 @@ data Token
   | TokEquals
   | KWIn
   | TokName Name
+  | TokEOF
   deriving (Show)
 
 keyword, symbol :: Token -> AlexInput -> Int -> Alex (Loc Token)
 keyword t ((AlexPn start line _), _, _, _) len = pure (L (SLoc start (start + len) line) t)
 symbol = keyword
 
-identifier :: (Identifier -> Token) -> AlexInput -> Int -> Alex (Loc Token)
+identifier :: (Name -> Token) -> AlexInput -> Int -> Alex (Loc Token)
 identifier t ((AlexPn start line _), _, _, input) len =
   pure (L (SLoc start (start + len) line) (t (take len input)))
+
+alexEOF :: Alex (Loc Token)
+alexEOF = pure (L (SLoc 0 0 0) TokEOF)
 
 }
