@@ -1,24 +1,31 @@
+{-# LANGUAGE QuasiQuotes #-}
 module Naive where
 
-import Control.Monad.Except
-import NaiveTypeChecker
+import Parser.Parser
 import Syntax
+import NaiveTypeChecker
 
-tm0 :: Term Name
+import Text.RawString.QQ
+import Control.Monad.Except
+
+-- tm0 :: Term Name
+-- tm0 =
+--   Let
+--   "add"
+--   (Pi Relevant "_" Nat (Pi Relevant "_" Nat Nat))
+--   (Lambda "m" Nat
+--    (Lambda "n" Nat
+--     (NElim (Lambda "_" Nat Nat) (Var "n") (Lambda "_" Nat (Lambda "k" Nat (Succ (Var "k")))) (Var "m"))))
+--   (App (App (Var "add") Zero) Zero)
+
+tm0 :: String
 tm0 =
-  Let
-    "add"
-    (Pi Relevant "_" Nat (Pi Relevant "_" Nat Nat))
-    ( Lambda
-        "m"
-        Nat
-        ( Lambda
-            "n"
-            Nat
-            (NElim (Lambda "_" Nat Nat) (Var "n") (Lambda "_" Nat (Lambda "k" Nat (Succ (Var "k")))) (Var "m"))
-        )
-    )
-    (App (App (Var "add") (Succ Zero)) (Succ (Succ Zero)))
+  [r|
+    let add : (_ :U Nat) -> (_ :U Nat) -> Nat =
+      \(m : Nat). \(n : Nat). rec(\(_ : Nat). Nat, n, \(_ : Nat). \(k : Nat). S k, m)
+    in
+    add 0 0
+  |]
 
 tm1 :: Term Name
 tm1 =
@@ -37,9 +44,9 @@ tm2 =
         (App (Var "f") (Var "x"))
     )
 
-test :: Term Name -> IO ()
-test t =
-  case runExcept (infer emptyContext t) of
+test :: String -> IO ()
+test input =
+  case parse input >>= runExcept . infer emptyContext . eraseSourceLocations of
     Right (t, _, tty) -> do
       putStrLn "Program:"
       putStrLn (prettyPrintTerm t)

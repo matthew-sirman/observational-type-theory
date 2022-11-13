@@ -12,6 +12,8 @@ module Syntax
     TermF (..),
     Term,
     Type,
+    RawF (..),
+    Raw,
     pattern Var,
     pattern U,
     pattern Lambda,
@@ -39,6 +41,8 @@ module Syntax
     varMap,
     VarShowable (..),
     prettyPrintTerm,
+    prettyPrintTermDebug,
+    eraseSourceLocations
   )
 where
 
@@ -55,11 +59,20 @@ data SourceLoc = SLoc
     slocLine :: Int
   }
 
+instance Show SourceLoc where
+  showsPrec _ (SLoc s e l) = ('<' :) . shows l . (':' :) . shows s . (':' :) . shows e . ('>' :)
+
 -- Syntactic element tagged with a source code location
 data Loc a = L
-  { loc :: SourceLoc,
+  { location :: SourceLoc,
     syntax :: a
   }
+
+instance Show a => Show (Loc a) where
+  showsPrec prec = showsPrec prec . syntax
+
+instance Functor Loc where
+  fmap f (L l s) = L l (f s)
 
 -- Internal de Bruijn indices
 newtype Ix = Ix Int
@@ -108,6 +121,10 @@ data TermF v t
     CastF t t t t
   | CastReflF t t
   | LetF Name t t t
+
+newtype RawF t = R (Loc (TermF Name t))
+
+type Raw = Fix RawF
 
 type Term v = Fix (TermF v)
 
@@ -233,6 +250,9 @@ instance Functor (TermF v) where
   fmap f (CastReflF a t) = CastReflF (f a) (f t)
   fmap f (LetF x a t u) = LetF x (f a) (f t) (f u)
 
+instance Functor RawF where
+  fmap f (R t) = R (L { location = location t, syntax = fmap f (syntax t)})
+
 varMap :: forall v v'. (v -> v') -> Term v -> Term v'
 varMap f = foldFix alg
   where
@@ -276,11 +296,14 @@ instance VarShowable Ix where
 instance IsChar s => VarShowable [s] where
   showsVar x _ = showString (map toChar x)
 
-prettyPrintTerm :: forall v. VarShowable v => Term v -> String
-prettyPrintTerm tm = go 0 [] tm []
+prettyPrintTerm :: VarShowable v => Term v -> String
+prettyPrintTerm = prettyPrintTermDebug False
+
+prettyPrintTermDebug :: forall v. VarShowable v => Bool -> Term v -> String
+prettyPrintTermDebug debug tm = go 0 [] tm []
   where
     par :: Int -> Int -> ShowS -> ShowS
-    par p p' = showParen (p' < p)
+    par p p' = showParen (p' < p || debug)
 
     showRelevance :: Relevance -> ShowS
     showRelevance Relevant = ('U' :)
@@ -294,22 +317,27 @@ prettyPrintTerm tm = go 0 [] tm []
     commaSep [x] = x
     commaSep (x : xs) = x . comma . commaSep xs
 
+    tag :: String -> ShowS
+    tag t
+      | debug = ('{' :) . showString t . ('}' :)
+      | otherwise = id
+
     go :: Int -> [Name] -> Term v -> ShowS
-    go _ ns (Var x) = showsVar x ns
+    go _ ns (Var x) = tag "V" . showsVar x ns
     go _ _ (U s) = showRelevance s
     go prec ns (Lambda x a e) =
       let domain = ('λ' :) . showParen True (showString x . showString ": " . go precLet ns a)
        in par prec precLet (domain . showString ". " . go precLet (x : ns) e)
     go prec ns (App t u) =
-      par prec precApp (go precApp ns t . (' ' :) . go precAtom ns u)
+      tag "A" . par prec precApp (go precApp ns t . (' ' :) . go precAtom ns u)
     go prec ns (Pi _ "_" a b) =
       let domain = go precApp ns a
           codomain = go precPi ("_" : ns) b
-       in par prec precPi (domain . showString " → " . codomain)
+       in tag "Π" . par prec precPi (domain . showString " → " . codomain)
     go prec ns (Pi s x a b) =
       let domain = showParen True (showString x . showString " :" . showRelevance s . (' ' :) . go precLet ns a)
           codomain = go precPi (x : ns) b
-       in par prec precPi (domain . showString " → " . codomain)
+       in tag "Π" . par prec precPi (domain . showString " → " . codomain)
     go _ _ Zero = ('Z' :)
     go prec ns (Succ n) = par prec precApp (showString "S " . go precAtom ns n)
     go prec ns (NElim a t0 ts n) =
@@ -323,9 +351,9 @@ prettyPrintTerm tm = go 0 [] tm []
     go prec ns (Fst p) = par prec precApp (showString "fst " . go precAtom ns p)
     go prec ns (Snd p) = par prec precApp (showString "snd " . go precAtom ns p)
     go prec ns (Exists "_" a b) =
-      let domain = go precLet ns a
-          codomain = go precPi ("_" : ns) b
-       in par prec precPi (domain . showString " ∧ " . codomain)
+      let domain = go precApp ns a
+          codomain = go precApp ("_" : ns) b
+       in tag "∃" . par prec precPi (domain . showString " ∧ " . codomain)
     go prec ns (Exists x a b) =
       let domain = showParen True (showString x . showString " : " . go precLet ns a)
           codomain = go precPi (x : ns) b
@@ -338,7 +366,7 @@ prettyPrintTerm tm = go 0 [] tm []
     go _ _ One = ('*' :)
     go _ _ Unit = ('⊤' :)
     go prec ns (Eq t a u) =
-      par prec precApp (go precPi ns t . showString " ~" . go precAtom ns a . (' ' :) . go precPi ns u)
+      par prec precPi (go precPi ns t . showString " ~" . go precAtom ns a . (' ' :) . go precPi ns u)
     go prec ns (Refl t) = par prec precApp (showString "refl " . go precAtom ns t)
     go prec ns (Transp t b u v e) =
       let t' = go precLet ns t
@@ -368,6 +396,12 @@ prettyPrintTerm tm = go 0 [] tm []
                 . showString "\nin\n"
                 . u'
             )
+
+eraseSourceLocations :: Raw -> Term Name
+eraseSourceLocations = foldFix alg
+  where
+    alg :: RawF (Term Name) -> Term Name
+    alg (R l) = Fix (syntax l)
 
 -- type Env = [Val]
 
