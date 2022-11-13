@@ -296,11 +296,11 @@ instance VarShowable Ix where
 instance IsChar s => VarShowable [s] where
   showsVar x _ = showString (map toChar x)
 
-prettyPrintTerm :: VarShowable v => Term v -> String
+prettyPrintTerm :: VarShowable v => [Name] -> Term v -> String
 prettyPrintTerm = prettyPrintTermDebug False
 
-prettyPrintTermDebug :: forall v. VarShowable v => Bool -> Term v -> String
-prettyPrintTermDebug debug tm = go 0 [] tm []
+prettyPrintTermDebug :: forall v. VarShowable v => Bool -> [Name] -> Term v -> String
+prettyPrintTermDebug debug names tm = go 0 names tm []
   where
     par :: Int -> Int -> ShowS -> ShowS
     par p p' = showParen (p' < p || debug)
