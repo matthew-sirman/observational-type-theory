@@ -9,16 +9,6 @@ import Text.RawString.QQ
 import Control.Monad.Except
 import Control.Monad.State
 
--- tm0 :: Term Name
--- tm0 =
---   Let
---   "add"
---   (Pi Relevant "_" Nat (Pi Relevant "_" Nat Nat))
---   (Lambda "m" Nat
---    (Lambda "n" Nat
---     (NElim (Lambda "_" Nat Nat) (Var "n") (Lambda "_" Nat (Lambda "k" Nat (Succ (Var "k")))) (Var "m"))))
---   (App (App (Var "add") Zero) Zero)
-
 tm0 :: String
 tm0 =
   [r|
@@ -49,10 +39,30 @@ tm3 :: String
 tm3 =
   [r|
     let peano1 : (n :U ℕ) -> (_ :Ω S n ~[ℕ] 0) -> ⊥ =
-      \(n : ℕ). \(p : S n ~[ℕ] 0).
-        transp(S n, \(x : ℕ). \(_ : S n ~[ℕ] x). rec(\(_ : ℕ). Ω, ⊥, \(_ : ℕ). \(_ : Ω). ⊤, x), *, 0, p)
+      λ(n : ℕ). λ(p : S n ~[ℕ] 0).
+        transp(S n, λ(x : ℕ). λ(_ : S n ~[ℕ] x). rec(λ(_ : ℕ). Ω, ⊥, λ(_ : ℕ). λ(_ : Ω). ⊤, x), *, 0, p)
     in
     peano1
+  |]
+
+tm4 :: String
+tm4 =
+  [r|
+    let peano2 : (x :U ℕ) -> (y :U ℕ) -> (_ :Ω S x ~[ℕ] S y) -> x ~[ℕ] y =
+      let pred : (_ :U ℕ) -> ℕ =
+        λ(n : ℕ). rec(λ(_ : ℕ). ℕ, 0, λ(k : ℕ). λ(_ : ℕ). k, n)
+      in
+      λ(x : ℕ). λ(y : ℕ). λ(p : S x ~[ℕ] S y).
+        -- transp(S x, λ(n : ℕ). λ(_ : n ~[ℕ] S x). pred n)
+        p
+    in
+    peano2
+  |]
+
+tm5 :: String
+tm5 =
+  [r|
+    λ(A : U). λ(p : S 0 ~[ℕ] 0). abort(A, p)
   |]
 
 leftMap :: (a -> b) -> Either a c -> Either b c
