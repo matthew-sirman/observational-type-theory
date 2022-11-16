@@ -41,12 +41,23 @@ tm3 =
     let peano1 : (n :U ℕ) -> (_ :Ω S n ~[ℕ] 0) -> ⊥ =
       λ(n : ℕ). λ(p : S n ~[ℕ] 0).
         transp(S n, λ(x : ℕ). λ(_ : S n ~[ℕ] x). rec(λ(_ : ℕ). Ω, ⊥, λ(_ : ℕ). λ(_ : Ω). ⊤, x), *, 0, p)
+        -- p
     in
     peano1
   |]
 
 tm4 :: String
 tm4 =
+  [r|
+    let ap : (A :U U) -> (B :U U) -> (x :U A) -> (y :U A) -> (f :U (z :U A) -> B) -> (_ :Ω x ~[A] y) -> f x ~[B] f y =
+      λ(A : U). λ(B : U). λ(x : A). λ(y : A). λ(f : (_ :U A) -> B). λ(p : x ~[A] y).
+        transp(x, λ(t : A). λ(_ : x ~[A] t). f x ~[B] f t, refl (f x), y, p)
+    in
+    ap
+  |]
+
+tm5 :: String
+tm5 =
   [r|
     let peano2 : (x :U ℕ) -> (y :U ℕ) -> (_ :Ω S x ~[ℕ] S y) -> x ~[ℕ] y =
       let pred : (_ :U ℕ) -> ℕ =
@@ -59,8 +70,8 @@ tm4 =
     peano2
   |]
 
-tm5 :: String
-tm5 =
+tm6 :: String
+tm6 =
   [r|
     λ(A : U). λ(p : S 0 ~[ℕ] 0). abort(A, p)
   |]
@@ -69,23 +80,23 @@ leftMap :: (a -> b) -> Either a c -> Either b c
 leftMap f (Left a) = Left (f a)
 leftMap _ (Right b) = Right b
 
-printFailTrace :: [CheckerTrace] -> IO ()
-printFailTrace [] = pure ()
-printFailTrace (Complete tid : trace) = printFailTrace (filter (not . completes tid) trace)
+printFailTrace :: Bool -> [CheckerTrace] -> IO ()
+printFailTrace _ [] = pure ()
+printFailTrace False (Complete tid : trace) = printFailTrace False (filter (not . completes tid) trace)
   where
     completes :: Int -> CheckerTrace -> Bool
     completes tid (Check _ _ _ i) = tid == i
     completes tid (Infer _ _ i) = tid == i
     completes tid (Conv _ _ _ i) = tid == i
     completes _ _ = False
-printFailTrace (t : trace) = do
+printFailTrace showAll (t : trace) = do
   print t
-  printFailTrace trace
+  printFailTrace showAll trace
 
 showError :: Bool -> (String, [CheckerTrace]) -> IO ()
 showError withTrace (e, trace) = do
   putStrLn e
-  when withTrace (printFailTrace trace)
+  when withTrace (printFailTrace True trace)
 
 test :: String -> IO ()
 test input =

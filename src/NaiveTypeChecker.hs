@@ -103,13 +103,13 @@ subst x e (Exists x' a b) = Exists x' (subst x e a) (subst (x + 1) e b)
 subst x e (Let x' a t u) = Let x' (subst x e a) (subst x e t) (subst (x + 1) e u)
 subst x e (Fix e') = Fix (fmap (subst x e) e')
 
-shift :: Ix -> Term Var -> Term Var
-shift i (Var (Bound (x, n))) | i <= x = Var (Bound (x + 1, n))
-shift i (Lambda x a e) = Lambda x (shift i a) (shift (i + 1) e)
-shift i (Pi s x a b) = Pi s x (shift i a) (shift (i + 1) b)
-shift i (Exists x a b) = Exists x (shift i a) (shift (i + 1) b)
-shift i (Let x' a t u) = Let x' (shift i a) (shift i t) (shift (i + 1) u)
-shift i (Fix e) = Fix (fmap (shift i) e)
+shift :: Ix -> Ix -> Term Var -> Term Var
+shift i j (Var (Bound (x, n))) | i <= x = Var (Bound (x + j, n))
+shift i j (Lambda x a e) = Lambda x (shift i j a) (shift (i + 1) j e)
+shift i j (Pi s x a b) = Pi s x (shift i j a) (shift (i + 1) j b)
+shift i j (Exists x a b) = Exists x (shift i j a) (shift (i + 1) j b)
+shift i j (Let x' a t u) = Let x' (shift i j a) (shift i j t) (shift (i + 1) j u)
+shift i j (Fix e) = Fix (fmap (shift i j) e)
 
 -- type Env = [Term Var]
 
@@ -169,8 +169,8 @@ eval (Eq t a u) =
                   ( Pi
                       s
                       "$a"
-                      (shift 0 a)
-                      (Eq (shift 1 b) (U Relevant) (subst 0 va' (shift 1 b')))
+                      (shift 0 1 a)
+                      (Eq (shift 1 1 b) (U Relevant) (subst 0 va' (shift 1 1 b')))
                   )
         (t, u) -> Eq t (U Relevant) u
     Nat ->
@@ -340,7 +340,8 @@ convTypedNf gamma t t' _ = void (convStruct gamma (eval t) (eval t'))
 inferVar :: Types -> Name -> Checker (Term Var, Relevance, Type Var)
 inferVar types name = do
   (i, s, ty) <- find types name
-  pure (Var (Bound (i, name)), s, ty)
+  -- TODO: Check if this is actually valid
+  pure (Var (Bound (i, name)), s, shift 0 (i + 1) ty)
   where
     find :: Types -> Name -> Checker (Ix, Relevance, Type Var)
     find [] name = throwErrorWithTrace ("Variable not in scope: \"" ++ name ++ "\"")
@@ -368,7 +369,7 @@ infer' gamma (App t u) = do
     Pi _ _ a b -> do
       u <- check gamma u a
       let vu = eval u
-      pure (App t u, s, eval (subst 0 vu b))
+      pure (App t u, s, shift 0 (-1) (eval (subst 0 vu b)))
     _ -> throwErrorWithTrace "Expected pi type"
 infer' gamma (Pi s x a b) = do
   a <- check gamma a (U s)
@@ -425,7 +426,7 @@ infer' gamma (Transp t b u t' e) = do
   (t, s, a) <- infer gamma t
   unless (s == Relevant) (throwErrorWithTrace "Can only transport along equality of proof-relevant types")
   t' <- check gamma t' a
-  b <- check gamma b (Pi Relevant "$x" a (Pi Irrelevant "_" (Eq (shift 0 t) (shift 0 a) (Var (Bound (0, "$x")))) (U Irrelevant)))
+  b <- check gamma b (Pi Relevant "$x" a (Pi Irrelevant "_" (Eq (shift 0 1 t) (shift 0 1 a) (Var (Bound (0, "$x")))) (U Irrelevant)))
   u <- check gamma u (App (App b t) (Refl t))
   e <- check gamma e (Eq t a t')
   pure (Transp t b u t' e, Irrelevant, App (App b t') e)

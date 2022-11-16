@@ -80,8 +80,9 @@ newtype Ix = Ix Int
 
 -- Internal de Bruijn levels
 newtype Lvl = Lvl Int
-  deriving (Eq, Show, Num) -- Universe levels
+  deriving (Eq, Ord, Show, Num)
 
+-- Universe levels
 type ULevel = Int
 
 -- Relevance of a universe.
