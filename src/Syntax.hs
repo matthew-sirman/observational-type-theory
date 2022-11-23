@@ -8,6 +8,7 @@ module Syntax
     Loc (..),
     Ix (..),
     Lvl (..),
+    Relevance (..),
     ULevel,
     TermF (..),
     Term,
@@ -37,7 +38,10 @@ module Syntax
     pattern Cast,
     pattern CastRefl,
     pattern Let,
-    Relevance (..),
+    Val (..),
+    VTy,
+    Closure (..),
+    Env,
     varMap,
     VarShowable (..),
     prettyPrintTerm,
@@ -403,6 +407,36 @@ eraseSourceLocations = foldFix alg
   where
     alg :: RawF (Term Name) -> Term Name
     alg (R l) = Fix (syntax l)
+
+type Env v = [Val v]
+
+data Closure v = Closure (Term v) (Env v)
+
+type VTy = Val
+
+data Val v
+  = VVar Lvl
+  | VU Relevance
+  | VLambda Name (Closure v)
+  | VApp (Val v) (Val v)
+  | VPi Name (VTy v) (Closure v)
+  | VZero
+  | VSucc (Val v)
+  | VNElim (Val v) (Val v) (Val v) (Val v)
+  | VNat
+  | VPair (Term v) (Term v)
+  | VFst (Term v)
+  | VSnd (Term v)
+  | VExists Name (VTy v) (Closure v)
+  | VAbort (Term v)
+  | VEmpty
+  | VOne
+  | VUnit
+  | VEq (Val v) (Val v) (Val v)
+  | VRefl (Term v)
+  | VTransp (Term v) (Term v) (Term v) (Term v) (Term v)
+  | VCast (VTy v) (VTy v) (Term v) (Val v)
+  | VCastRefl (Term v)
 
 -- type Env = [Val]
 
