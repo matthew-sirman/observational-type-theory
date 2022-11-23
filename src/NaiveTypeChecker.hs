@@ -1,3 +1,6 @@
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE PatternSynonyms #-}
+
 module NaiveTypeChecker where
 
 import Syntax
@@ -95,21 +98,43 @@ neutral (Cast (U _) Nat _ _) = True
 neutral (Cast (U _) (Pi {}) _ _) = True
 neutral _ = False
 
-subst :: Ix -> Term Var -> Term Var -> Term Var
-subst x e (Var (Bound (x', _))) | x == x' = e
-subst x e (Lambda x' a t) = Lambda x' (subst x e a) (subst (x + 1) e t)
-subst x e (Pi s x' a b) = Pi s x' (subst x e a) (subst (x + 1) e b)
-subst x e (Exists x' a b) = Exists x' (subst x e a) (subst (x + 1) e b)
-subst x e (Let x' a t u) = Let x' (subst x e a) (subst x e t) (subst (x + 1) e u)
-subst x e (Fix e') = Fix (fmap (subst x e) e')
+class Shiftable a where
+  shift :: Ix -> a -> a
 
-shift :: Ix -> Ix -> Term Var -> Term Var
-shift i j (Var (Bound (x, n))) | i <= x = Var (Bound (x + j, n))
-shift i j (Lambda x a e) = Lambda x (shift i j a) (shift (i + 1) j e)
-shift i j (Pi s x a b) = Pi s x (shift i j a) (shift (i + 1) j b)
-shift i j (Exists x a b) = Exists x (shift i j a) (shift (i + 1) j b)
-shift i j (Let x' a t u) = Let x' (shift i j a) (shift i j t) (shift (i + 1) j u)
-shift i j (Fix e) = Fix (fmap (shift i j) e)
+data Subst
+  = IdGamma Ix [Name]
+  | Cons (Term Var) Subst
+
+pattern NullS :: Subst
+pattern NullS = IdGamma 0 []
+
+pattern ApplyS :: Term Var -> Subst
+pattern ApplyS e = Cons e NullS
+
+instance Shiftable Subst where
+  shift i (IdGamma x ns) = IdGamma (x + i) ns
+  shift i (Cons e s) = Cons (shift i e) (shift i s)
+
+lookupSubst :: Subst -> Ix -> Term Var
+lookupSubst (IdGamma shift names) (Ix x) = Var (Bound (Ix x + shift, names !! x))
+lookupSubst (Cons e _) 0 = e
+lookupSubst (Cons _ s) n = lookupSubst s (n - 1)
+
+subst :: Subst -> Term Var -> Term Var
+subst st (Var (Bound (x, _))) = lookupSubst st x
+subst st (Lambda x a t) = Lambda x (subst st a) (subst (Cons (Var (Bound (0, x))) (shift 1 st)) t)
+subst st (Pi s x a b) = Pi s x (subst st a) (subst (Cons (Var (Bound (0, x))) (shift 1 st)) b)
+subst st (Exists x a b) = Exists x (subst st a) (subst (Cons (Var (Bound (0, x))) (shift 1 st)) b)
+subst st (Let x a t u) = Let x (subst st a) (subst st t) (subst (Cons (Var (Bound (0, x))) (shift 1 st)) u)
+subst st (Fix e') = Fix (fmap (subst st) e')
+
+instance Shiftable (Term Var) where
+  shift i (Var (Bound (x, n))) = Var (Bound (x + i, n))
+  shift i (Lambda x a e) = Lambda x (shift i a) (shift (i + 1) e)
+  shift i (Pi s x a b) = Pi s x (shift i a) (shift (i + 1) b)
+  shift i (Exists x a b) = Exists x (shift i a) (shift (i + 1) b)
+  shift i (Let x' a t u) = Let x' (shift i a) (shift i t) (shift (i + 1) u)
+  shift i (Fix e) = Fix (fmap (shift i) e)
 
 -- type Env = [Term Var]
 
@@ -119,7 +144,7 @@ eval (U s) = U s
 eval (Lambda x a e) = Lambda x a e
 eval (App t u) =
   case eval t of
-    Lambda _ _ e -> eval (subst 0 (eval u) e)
+    Lambda _ _ e -> eval (subst (ApplyS (eval u)) e)
     t -> App t u
 eval (Pi s x a b) = Pi s x a b
 eval Zero = Zero
@@ -170,7 +195,7 @@ eval (Eq t a u) =
                       s
                       "$a"
                       (shift 0 1 a)
-                      (Eq (shift 1 1 b) (U Relevant) (subst 0 va' (shift 1 1 b')))
+                      (Eq (shift 1 1 b) (U Relevant) (subst (ApplyS va') (shift 1 1 b')))
                   )
         (t, u) -> Eq t (U Relevant) u
     Nat ->
