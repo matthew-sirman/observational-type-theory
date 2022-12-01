@@ -1,10 +1,12 @@
-module NaiveTypeChecker where
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE PatternSynonyms #-}
 
-import Syntax
+module NaiveTypeChecker where
 
 import Control.Monad.Except
 import Control.Monad.State
 import Data.Fix
+import Syntax
 
 data CheckerTrace
   = Check Context (Term Name) (Type Var) Int
@@ -14,13 +16,13 @@ data CheckerTrace
 
 instance Show CheckerTrace where
   show (Check gamma t tty i) =
-    "Check: (" ++ show i ++ ") " ++ show gamma ++ " ⊢ " ++ prettyPrintTerm (map fst (types gamma)) t ++ " : "
-      ++ prettyPrintTerm (map fst (types gamma)) tty
+    "Check: (" ++ show i ++ ") " ++ show gamma ++ " ⊢ " ++ prettyPrintTerm (names gamma) t ++ " : "
+      ++ prettyPrintTerm (names gamma) tty
   show (Infer gamma t i) =
-    "Infer: (" ++ show i ++ ") " ++ show gamma ++ " ⊢ " ++ prettyPrintTerm (map fst (types gamma)) t
+    "Infer: (" ++ show i ++ ") " ++ show gamma ++ " ⊢ " ++ prettyPrintTerm (names gamma) t
   show (Conv gamma t t' i) =
-    "Convert: (" ++ show i ++ ") " ++ show gamma ++ " ⊢ " ++ prettyPrintTerm (map fst (types gamma)) t ++ " ≡ "
-      ++ prettyPrintTerm (map fst (types gamma)) t'
+    "Convert: (" ++ show i ++ ") " ++ show gamma ++ " ⊢ " ++ prettyPrintTerm (names gamma) t ++ " ≡ "
+      ++ prettyPrintTerm (names gamma) t'
   show (Complete i) = "Completed item: " ++ show i
 
 type Checker a = StateT ([CheckerTrace], Int) (Except (String, [CheckerTrace])) a
@@ -95,23 +97,71 @@ neutral (Cast (U _) Nat _ _) = True
 neutral (Cast (U _) (Pi {}) _ _) = True
 neutral _ = False
 
-subst :: Ix -> Term Var -> Term Var -> Term Var
-subst x e (Var (Bound (x', _))) | x == x' = e
-subst x e (Lambda x' a t) = Lambda x' (subst x e a) (subst (x + 1) e t)
-subst x e (Pi s x' a b) = Pi s x' (subst x e a) (subst (x + 1) e b)
-subst x e (Exists x' a b) = Exists x' (subst x e a) (subst (x + 1) e b)
-subst x e (Let x' a t u) = Let x' (subst x e a) (subst x e t) (subst (x + 1) e u)
-subst x e (Fix e') = Fix (fmap (subst x e) e')
+class Shiftable a where
+  shift :: Ix -> a -> a
 
-shift :: Ix -> Ix -> Term Var -> Term Var
-shift i j (Var (Bound (x, n))) | i <= x = Var (Bound (x + j, n))
-shift i j (Lambda x a e) = Lambda x (shift i j a) (shift (i + 1) j e)
-shift i j (Pi s x a b) = Pi s x (shift i j a) (shift (i + 1) j b)
-shift i j (Exists x a b) = Exists x (shift i j a) (shift (i + 1) j b)
-shift i j (Let x' a t u) = Let x' (shift i j a) (shift i j t) (shift (i + 1) j u)
-shift i j (Fix e) = Fix (fmap (shift i j) e)
+data Subst
+  = IdGamma Ix [Name]
+  | Cons (Term Var) Subst
 
--- type Env = [Term Var]
+pattern NullS :: Subst
+pattern NullS = IdGamma 0 []
+
+pattern ApplyS :: Term Var -> Subst
+pattern ApplyS e = Cons e NullS
+
+instance Shiftable Subst where
+  shift i (IdGamma x ns) = IdGamma (x + i) ns
+  shift i (Cons e s) = Cons (shift i e) (shift i s)
+
+lookupSubst :: Subst -> Ix -> Term Var
+lookupSubst (IdGamma shift names) (Ix x) = Var (Bound (Ix x + shift, names !! x))
+lookupSubst (Cons e _) 0 = e
+lookupSubst (Cons _ s) n = lookupSubst s (n - 1)
+
+subst :: Subst -> Term Var -> Term Var
+subst st (Var (Bound (x, _))) = lookupSubst st x
+subst st (Lambda x a t) = Lambda x (subst st a) (subst (Cons (Var (Bound (0, x))) (shift 1 st)) t)
+subst st (Pi s x a b) = Pi s x (subst st a) (subst (Cons (Var (Bound (0, x))) (shift 1 st)) b)
+subst st (Exists x a b) = Exists x (subst st a) (subst (Cons (Var (Bound (0, x))) (shift 1 st)) b)
+subst st (Let x a t u) = Let x (subst st a) (subst st t) (subst (Cons (Var (Bound (0, x))) (shift 1 st)) u)
+subst st (Fix e') = Fix (fmap (subst st) e')
+
+substRaw :: Name -> Term Name -> Term Name -> Term Name
+substRaw x e (Var x')
+  | x == x' = e
+  | otherwise = Var x'
+substRaw x e (Lambda x' a t)
+  | x == x' = Lambda x' (substRaw x e a) t
+  | otherwise = Lambda x' (substRaw x e a) (substRaw x e t)
+substRaw x e (Pi s x' a b)
+  | x == x' = Pi s x' (substRaw x e a) b
+  | otherwise = Pi s x' (substRaw x e a) (substRaw x e b)
+substRaw x e (Exists x' a b)
+  | x == x' = Exists x' (substRaw x e a) b
+  | otherwise = Exists x' (substRaw x e a) (substRaw x e b)
+substRaw x e (Let x' a t u)
+  | x == x' = Let x' (substRaw x e a) (substRaw x e t) u
+  | otherwise = Let x' (substRaw x e a) (substRaw x e t) (substRaw x e u)
+substRaw x e (Fix e') = Fix (fmap (substRaw x e) e')
+
+instance Shiftable (Term Var) where
+  shift = shift' 0
+    where
+      shift' :: Ix -> Ix -> Term Var -> Term Var
+      shift' i j (Var (Bound (x, n))) | i <= x = Var (Bound (x + j, n))
+      shift' i j (Lambda x a e) = Lambda x (shift' i j a) (shift' (i + 1) j e)
+      shift' i j (Pi s x a b) = Pi s x (shift' i j a) (shift' (i + 1) j b)
+      shift' i j (Exists x a b) = Exists x (shift' i j a) (shift' (i + 1) j b)
+      shift' i j (Let x' a t u) = Let x' (shift' i j a) (shift' i j t) (shift' (i + 1) j u)
+      shift' i j (Fix e) = Fix (fmap (shift' i j) e)
+
+-- Helper function for constructing a symmetric path witness
+sym :: Term Var -> Type Var -> Term Var -> Term Var -> Term Var
+sym t a u e =
+  let x ix = Var (Bound (ix, "$x"))
+      motive = Lambda "$x" a (Lambda "_" (Eq t a (x 0)) (Eq (x 1) a t))
+   in Transp t motive (Refl t) u e
 
 eval :: Term Var -> Term Var
 eval (Var x) = Var x
@@ -119,7 +169,7 @@ eval (U s) = U s
 eval (Lambda x a e) = Lambda x a e
 eval (App t u) =
   case eval t of
-    Lambda _ _ e -> eval (subst 0 (eval u) e)
+    Lambda _ _ e -> eval (subst (ApplyS (eval u)) e)
     t -> App t u
 eval (Pi s x a b) = Pi s x a b
 eval Zero = Zero
@@ -160,18 +210,12 @@ eval (Eq t a u) =
         (U _, Nat) -> Empty
         (U _, Pi {}) -> Empty
         (U s, U s') | s /= s' -> Empty
-        (Pi s _ a b, Pi s' _ a' b')
+        (Pi s x a b, Pi s' _ a' b')
           | s == s' ->
-            let va' = Cast a a' (Var (Bound (1, "$e"))) (Var (Bound (0, "$a")))
-             in Exists
-                  "$e"
-                  (Eq a (U Relevant) a')
-                  ( Pi
-                      s
-                      "$a"
-                      (shift 0 1 a)
-                      (Eq (shift 1 1 b) (U Relevant) (subst 0 va' (shift 1 1 b')))
-                  )
+            let va = Var (Bound (0, x))
+                va' = Cast a a' (Var (Bound (1, "$e"))) va
+                cod = Eq (subst (ApplyS va) b) (U Relevant) (subst (ApplyS va') b')
+             in Exists "$e" (Eq a (U Relevant) a') (Pi s x a cod)
         (t, u) -> Eq t (U Relevant) u
     Nat ->
       case (eval t, eval u) of
@@ -190,44 +234,59 @@ eval (Cast a b e t) =
     (Nat, Nat, Zero) -> Zero
     (Nat, Nat, Succ n) -> Succ (eval (Cast Nat Nat e n))
     (U s, U s', a) | s == s' -> a
-    (Pi _ x a b, Pi _ _ a' b', f) ->
-      Lambda x a (Cast b (subst 0 (Cast a a' (Fst e) (Var (Bound (0, x)))) b') (Snd e) (App f (Var (Bound (0, x)))))
+    (Pi s _ a b, Pi _ x' a' b', f) ->
+      let va' = Var (Bound (0, x'))
+          eSym = sym a (U s) a' (Fst e)
+          va = Cast a' a eSym va
+       in Lambda x' a' (Cast (subst (ApplyS va) b) (subst (ApplyS va') b') (App (Snd e) va) (App f va))
     (a, b, t) -> Cast a b e t
 -- Cannot evaluate castrefl (proof-irrelevant)
 eval e@(CastRefl {}) = e
-eval (Let _ _ t u) = eval (subst 0 (eval t) u)
+eval (Let _ _ t u) = eval (subst (ApplyS (eval t)) u)
 
 type Types = [(Name, (Relevance, Type Var))]
 
 data Context = Context
   { types :: Types,
+    env :: Subst,
     lvl :: Lvl
   }
+
+names :: Context -> [Name]
+names = map fst . types
 
 instance Show Context where
   show gamma =
     let typeStrings = foldr (\(_, (_, t)) ls -> prettyPrintTerm ls t : ls) [] (types gamma)
         showAsTuple [] = ""
         showAsTuple [x] = x
-        showAsTuple (x:xs) = x ++ ", " ++ showAsTuple xs
+        showAsTuple (x : xs) = x ++ ", " ++ showAsTuple xs
      in "(" ++ showAsTuple (reverse (zipWith (\t (x, _) -> x ++ " : " ++ t) typeStrings (types gamma))) ++ ")"
 
 emptyContext :: Context
 emptyContext =
   Context
     { types = [],
+      env = NullS,
       lvl = 0
     }
 
-bind :: Name -> Relevance -> Type Var -> Context -> Context
-bind x s tty ctx =
+define :: Name -> Relevance -> Term Var -> Type Var -> Context -> Context
+define x s t tty ctx =
   ctx
     { types = (x, (s, tty)) : types ctx,
+      env = Cons t (env ctx),
       lvl = 1 + lvl ctx
     }
 
+
 bindWithVar :: Name -> Relevance -> Type Var -> Context -> (Context, Term Var)
-bindWithVar x s tty ctx = (bind x s tty ctx, Var (Free (lvl ctx)))
+bindWithVar x s tty ctx =
+  let v = Var (Free (lvl ctx))
+   in (define x s v tty ctx, v)
+
+bind :: Name -> Relevance -> Type Var -> Context -> Context
+bind x s tty ctx = fst (bindWithVar x s tty ctx)
 
 lookupFree :: Lvl -> Context -> Type Var
 lookupFree l gamma =
@@ -281,7 +340,7 @@ convStruct gamma (App n u) (App n' u') = do
   case nty of
     Pi s _ a b -> do
       when (s == Relevant) (convTyped gamma u u' a)
-      pure (eval (subst 0 u b))
+      pure (eval (subst (Cons u (IdGamma 0 (names gamma))) b))
     _ -> throwErrorWithTrace "BUG: Ill-typed application term"
 convStruct gamma (NElim a t0 ts n) (NElim a' t0' ts' n') = do
   -- We already know the type of n and n'
@@ -306,9 +365,9 @@ convStruct gamma (Cast a b _ t) (Cast a' b' _ t') = do
 convStruct gamma t t' =
   throwErrorWithTrace
     ( "Type conversion ["
-        ++ prettyPrintTerm (map fst (types gamma)) t
+        ++ prettyPrintTerm (names gamma) t
         ++ " ≡ "
-        ++ prettyPrintTerm (map fst (types gamma)) t'
+        ++ prettyPrintTerm (names gamma) t'
         ++ "] failed"
     )
 
@@ -340,8 +399,7 @@ convTypedNf gamma t t' _ = void (convStruct gamma (eval t) (eval t'))
 inferVar :: Types -> Name -> Checker (Term Var, Relevance, Type Var)
 inferVar types name = do
   (i, s, ty) <- find types name
-  -- TODO: Check if this is actually valid
-  pure (Var (Bound (i, name)), s, shift 0 (i + 1) ty)
+  pure (Var (Bound (i, name)), s, shift (i + 1) ty)
   where
     find :: Types -> Name -> Checker (Ix, Relevance, Type Var)
     find [] name = throwErrorWithTrace ("Variable not in scope: \"" ++ name ++ "\"")
@@ -369,7 +427,7 @@ infer' gamma (App t u) = do
     Pi _ _ a b -> do
       u <- check gamma u a
       let vu = eval u
-      pure (App t u, s, shift 0 (-1) (eval (subst 0 vu b)))
+      pure (App t u, s, eval (subst (Cons vu (IdGamma 0 (names gamma))) b))
     _ -> throwErrorWithTrace "Expected pi type"
 infer' gamma (Pi s x a b) = do
   a <- check gamma a (U s)
@@ -400,7 +458,7 @@ infer' gamma (Snd p) = do
   case pty of
     Exists _ _ b -> do
       let vfst = eval (Fst p)
-      pure (Snd p, Irrelevant, eval (subst 0 vfst b))
+      pure (Snd p, Irrelevant, eval (subst (Cons vfst (IdGamma 0 (names gamma))) b))
     _ -> throwErrorWithTrace "Expected exists type in second projection"
 infer' gamma (Exists x a b) = do
   a <- check gamma a (U Irrelevant)
@@ -426,7 +484,7 @@ infer' gamma (Transp t b u t' e) = do
   (t, s, a) <- infer gamma t
   unless (s == Relevant) (throwErrorWithTrace "Can only transport along equality of proof-relevant types")
   t' <- check gamma t' a
-  b <- check gamma b (Pi Relevant "$x" a (Pi Irrelevant "_" (Eq (shift 0 1 t) (shift 0 1 a) (Var (Bound (0, "$x")))) (U Irrelevant)))
+  b <- check gamma b (Pi Relevant "$x" a (Pi Irrelevant "_" (Eq (shift 1 t) (shift 1 a) (Var (Bound (0, "$x")))) (U Irrelevant)))
   u <- check gamma u (App (App b t) (Refl t))
   e <- check gamma e (Eq t a t')
   pure (Transp t b u t' e, Irrelevant, App (App b t') e)
@@ -443,10 +501,10 @@ infer' gamma (CastRefl a t) = do
   pure (CastRefl a t, Irrelevant, Eq t a (Cast a a (Refl t) t))
 infer' gamma (Let x a t u) = do
   (a, s) <- checkType gamma a
-  t <- check gamma t a
-  -- TODO: Pretty sure this is wrong as-is
-  (u, s, uty) <- infer (bind x s a gamma) u
-  pure (Let x a t u, s, uty)
+  t' <- check gamma t a
+  -- Not nice to do a raw term substitution, but it works
+  (u, s, uty) <- infer (bind x s a gamma) (substRaw x t u)
+  pure (Let x a t' u, s, uty)
 
 checkType :: Context -> Type Name -> Checker (Term Var, Relevance)
 checkType gamma t = do
@@ -465,14 +523,14 @@ check' gamma t tty =
   case (t, eval tty) of
     (Pair t u, Exists _ a b) -> do
       t <- check gamma t a
-      u <- check gamma u (eval (subst 0 t b))
+      u <- check gamma u (eval (subst (Cons t (IdGamma 0 (names gamma))) b))
       pure (Pair t u)
     (Let x a t u, uty) -> do
       (a, s) <- checkType gamma a
-      t <- check gamma t a
-      -- TODO: Pretty sure this is wrong as-is
-      u <- check (bind x s a gamma) u uty
-      pure (Let x a t u)
+      t' <- check gamma t a
+      -- Not nice to do a raw term substitution, but it works
+      u <- check (bind x s a gamma) (substRaw x t u) uty
+      pure (Let x a t' u)
     (t, tty) -> do
       (t, _, tty') <- infer gamma t
       typeEq gamma tty tty'
