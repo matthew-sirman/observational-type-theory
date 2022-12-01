@@ -59,13 +59,18 @@ tm4 =
 tm5 :: String
 tm5 =
   [r|
+    let ap : (A :U U) -> (B :U U) -> (x :U A) -> (y :U A) -> (f :U (z :U A) -> B) -> (_ :Ω x ~[A] y) -> f x ~[B] f y =
+      λ(A : U). λ(B : U). λ(x : A). λ(y : A). λ(f : (_ :U A) -> B). λ(p : x ~[A] y).
+        transp(x, λ(t : A). λ(_ : x ~[A] t). f x ~[B] f t, refl (f x), y, p)
+    in
+    let pred : (_ :U ℕ) -> ℕ =
+      λ(n : ℕ). rec(λ(_ : ℕ). ℕ, 0, λ(k : ℕ). λ(_ : ℕ). k, n)
+    in
     let peano2 : (x :U ℕ) -> (y :U ℕ) -> (_ :Ω S x ~[ℕ] S y) -> x ~[ℕ] y =
-      let pred : (_ :U ℕ) -> ℕ =
-        λ(n : ℕ). rec(λ(_ : ℕ). ℕ, 0, λ(k : ℕ). λ(_ : ℕ). k, n)
-      in
       λ(x : ℕ). λ(y : ℕ). λ(p : S x ~[ℕ] S y).
-        -- transp(S x, λ(n : ℕ). λ(_ : n ~[ℕ] S x). pred n)
-        p
+        ap ℕ ℕ (S x) (S y) pred p
+        -- transp(S x, λ(n : ℕ). λ(_ : n ~[ℕ] S x). rec(λ(_ : ℕ). ℕ, 0, λ(k : ℕ). λ(_ : ℕ). k, n))
+        -- p
     in
     peano2
   |]
@@ -96,7 +101,7 @@ printFailTrace showAll (t : trace) = do
 showError :: Bool -> (String, [CheckerTrace]) -> IO ()
 showError withTrace (e, trace) = do
   putStrLn e
-  when withTrace (printFailTrace True trace)
+  when withTrace (printFailTrace False trace)
 
 test :: String -> IO ()
 test input =
