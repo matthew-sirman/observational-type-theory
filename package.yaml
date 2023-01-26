@@ -41,6 +41,7 @@ library:
     - mtl
     - data-fix
     - array
+    - diagnose
   build-tools:
     - happy
     - alex
@@ -69,3 +70,4 @@ tests:
     - text
     - raw-strings-qq
     - mtl
+    - diagnose

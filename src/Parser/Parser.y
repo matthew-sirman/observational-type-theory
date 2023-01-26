@@ -6,6 +6,7 @@ import Parser.Lexer
 import Syntax
 
 import Data.Fix (Fix (..))
+import qualified Error.Diagnose.Position as P
 
 }
 
@@ -59,55 +60,55 @@ import Data.Fix (Fix (..))
 %%
 
 rel :: { Loc Relevance }
-  : U                                                           { loc Relevant $1 $> }
-  | O                                                           { loc Irrelevant $1 $> }
+  : U                                                               { loc Relevant $1 $> }
+  | O                                                               { loc Irrelevant $1 $> }
 
 exp :: { Raw }
-  : '\\' '(' var ':' exp ')' '.' exp                            { rloc (LambdaF (projName $3) $5 $8) $1 $> }
-  | let var ':' exp '=' exp in exp                              { rloc (LetF (projName $2) $4 $6 $8) $1 $> }
-  | term                                                        { $1 }
+  : '\\' var '.' exp                                                { rloc (LambdaF (projName $2) $4) $1 $> }
+  | let var ':' exp '=' exp in exp                                  { rloc (LetF (projName $2) $4 $6 $8) $1 $> }
+  | term                                                            { $1 }
 
 term :: { Raw }
-  : '(' var ':' rel exp ')' '->' term                           { rloc (PiF (syntax $4) (projName $2) $5 $8) $1 $> }
-  | Exists '(' var ':' exp ')' '.' term                         { rloc (ExistsF (projName $3) $5 $8) $1 $> }
-  | apps '/\\' apps                                             { rloc (ExistsF "_" $1 $3) $1 $> }
-  | term '~' '[' exp ']' term                                   { rloc (EqF $1 $4 $6) $1 $> }
-  | apps                                                        { $1 }
+  : '(' var ':' rel exp ')' '->' term                               { rloc (PiF (syntax $4) (projName $2) $5 $8) $1 $> }
+  | Exists '(' var ':' exp ')' '.' term                             { rloc (ExistsF (projName $3) $5 $8) $1 $> }
+  | apps '/\\' apps                                                 { rloc (ExistsF "_" $1 $3) $1 $> }
+  | term '~' '[' exp ']' term                                       { rloc (EqF $1 $4 $6) $1 $> }
+  | apps                                                            { $1 }
 
 apps :: { Raw }
-  : apps atom                                                   { rloc (AppF $1 $2) $1 $> }
-  | S atom                                                      { rloc (SuccF $2) $1 $> }
-  | rec '(' exp ',' exp ',' exp ',' exp ')'                     { rloc (NElimF $3 $5 $7 $9) $1 $> }
-  | fst atom                                                    { rloc (FstF $2) $1 $> }
-  | snd atom                                                    { rloc (SndF $2) $1 $> }
-  | abort '(' exp ',' exp ')'                                   { rloc (AbortF $3 $5) $1 $> }
-  | refl atom                                                   { rloc (ReflF $2) $1 $> }
-  | transp '(' exp ',' exp ',' exp ',' exp ',' exp ')'          { rloc (TranspF $3 $5 $7 $9 $11) $1 $> }
-  | cast '(' exp ',' exp ',' exp ',' exp ')'                    { rloc (CastF $3 $5 $7 $9) $1 $> }
-  | castrefl '(' exp ',' exp ')'                                { rloc (CastReflF $3 $5) $1 $> }
-  | atom                                                        { $1 }
+  : apps atom                                                       { rloc (AppF $1 $2) $1 $> }
+  | S atom                                                          { rloc (SuccF $2) $1 $> }
+  | rec '(' var '.' exp ',' exp ',' var var '.' exp ',' exp ')'     { rloc (NElimF (projName $3) $5 $7 (projName $9) (projName $10) $12 $14) $1 $> }
+  | fst atom                                                        { rloc (FstF $2) $1 $> }
+  | snd atom                                                        { rloc (SndF $2) $1 $> }
+  | abort '(' exp ',' exp ')'                                       { rloc (AbortF $3 $5) $1 $> }
+  | refl atom                                                       { rloc (ReflF $2) $1 $> }
+  | transp '(' exp ',' var var '.' exp ',' exp ',' exp ',' exp ')'  { rloc (TranspF $3 (projName $5) (projName $6) $8 $10 $12 $14) $1 $> }
+  | cast '(' exp ',' exp ',' exp ',' exp ')'                        { rloc (CastF $3 $5 $7 $9) $1 $> }
+  | castrefl '(' exp ',' exp ')'                                    { rloc (CastReflF $3 $5) $1 $> }
+  | atom                                                            { $1 }
 
 atom :: { Raw }
-  : var                                                         { rloc (VarF (projName $1)) $1 $> }
-  | rel                                                         { Fix (R (fmap UF $1)) }
-  | '0'                                                         { rloc ZeroF $1 $> }
-  | Nat                                                         { rloc NatF $1 $> }
-  | '<' exp ',' exp '>'                                         { rloc (PairF $2 $4) $1 $> }
-  | Empty                                                       { rloc EmptyF $1 $> }
-  | '*'                                                         { rloc OneF $1 $> }
-  | Unit                                                        { rloc UnitF $1 $> }
-  | '(' exp ')'                                                 { $2 }
+  : var                                                             { rloc (VarF (projName $1)) $1 $> }
+  | rel                                                             { Fix (RawF (fmap UF $1)) }
+  | '0'                                                             { rloc ZeroF $1 $> }
+  | Nat                                                             { rloc NatF $1 $> }
+  | '<' exp ',' exp '>'                                             { rloc (PairF $2 $4) $1 $> }
+  | Empty                                                           { rloc EmptyF $1 $> }
+  | '*'                                                             { rloc OneF $1 $> }
+  | Unit                                                            { rloc UnitF $1 $> }
+  | '(' exp ')'                                                     { $2 }
 
 {
 
 class Located a where
-  projectLoc :: a -> SourceLoc
+  projectLoc :: a -> P.Position
 
 instance Located (Loc a) where
   projectLoc = location
 
 instance Located (RawF a) where
-  projectLoc (R l) = projectLoc l
+  projectLoc (RawF l) = projectLoc l
 
 instance Located (Fix RawF) where
   projectLoc (Fix r) = projectLoc r
@@ -117,18 +118,16 @@ projName (L _ (TokName n)) = n
 projName (L _ t) = error ("BUG: Tried to project the name of token " ++ show t)
 
 loc :: (Located start, Located end) => a -> start -> end -> Loc a
-loc e start end =
-  L
-    { syntax = e,
-      location = SLoc
-        { slocStart = slocStart (projectLoc start),
-          slocEnd = slocEnd (projectLoc end),
-          slocLine = slocLine (projectLoc start)
-        }
-    }
+loc element start end =
+  let s = projectLoc start
+      e = projectLoc end
+  in L
+       { syntax = element,
+         location = P.Position (P.begin s) (P.end e) (P.file s)
+       }
 
 rloc :: (Located start, Located end) => TermF Name Raw -> start -> end -> Raw
-rloc e start end = Fix (R (loc e start end))
+rloc e start end = Fix (RawF (loc e start end))
 
 parseError :: Loc Token -> Alex a
 parseError (L _ t) = do
