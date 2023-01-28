@@ -1,6 +1,7 @@
 module TypeChecker where
 
 import Control.Monad.Except
+import Data.Fix (Fix(..))
 import Error.Diagnose
 import Syntax
 
@@ -24,8 +25,24 @@ createError message context =
 emptyContext :: Context
 emptyContext = Context { env = [], types = [], lvl = 0 }
 
-subst :: Lvl -> [Term Ix] -> Term Ix -> Term Ix
-subst lvl env (Var )
+-- Only used in quoting proof irrelevant terms. This is to avoid
+-- capturing incorrect indices in elaborated terms.
+substNonLocal :: [Term Ix] -> Term Ix -> Term Ix
+substNonLocal env = subst 0
+  where
+    subst :: Lvl -> Term Ix -> Term Ix
+    subst (Lvl l) v@(Var (Ix x))
+      | x < l = v
+      | otherwise = env !! (x - l)
+    subst lvl (Lambda x t) = Lambda x (subst (lvl + 1) t)
+    subst lvl (Pi s x a b) = Pi s x (subst lvl a) (subst (lvl + 1) b)
+    subst lvl (NElim z p t0 x ih ts n) =
+      NElim z (subst (lvl + 1) p) (subst lvl t0) x ih (subst (lvl + 2) ts) (subst lvl n)
+    subst lvl (Exists x a b) = Exists x (subst lvl a) (subst (lvl + 1) b)
+    subst lvl (Transp t x pf b u t' e) =
+      Transp (subst lvl t) x pf (subst (lvl + 2) b) (subst lvl b) (subst lvl u) (subst lvl t') (subst lvl e)
+    subst lvl (Let x a t u) = Let x (subst lvl a) (subst lvl t) (subst (lvl + 1) u)
+    subst lvl (Fix e) = Fix (fmap (subst lvl) e)
 
 eqReduce :: Env Ix -> Val Ix -> VTy Ix -> Val Ix -> Val Ix
 eqReduce env vt va vu = eqReduceType va
