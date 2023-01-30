@@ -42,6 +42,9 @@ library:
     - data-fix
     - array
     - diagnose
+
+    - raw-strings-qq
+    - HUnit
   build-tools:
     - happy
     - alex
@@ -71,3 +74,4 @@ tests:
     - raw-strings-qq
     - mtl
     - diagnose
+    - HUnit

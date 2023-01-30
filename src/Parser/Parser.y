@@ -1,12 +1,15 @@
 {
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 module Parser.Parser where
 
 import Parser.Lexer
 import Syntax
 
+import Control.Monad.State
+import Control.Monad.Except
 import Data.Fix (Fix (..))
-import qualified Error.Diagnose.Position as P
+import qualified Error.Diagnose as Err
 
 }
 
@@ -14,7 +17,7 @@ import qualified Error.Diagnose.Position as P
 
 %tokentype { Loc Token }
 %error { parseError }
-%monad { Alex }
+%monad { Parser }
 %lexer { lexer } { L _ TokEOF }
 
 %token
@@ -97,12 +100,23 @@ atom :: { Raw }
   | Empty                                                           { rloc EmptyF $1 $> }
   | '*'                                                             { rloc OneF $1 $> }
   | Unit                                                            { rloc UnitF $1 $> }
+  | '(' exp ':' exp ')'                                             { rloc (AnnotationF $2 $4) $1 $>}
   | '(' exp ')'                                                     { $2 }
 
 {
 
+type Parser a = StateT AlexState (Except (Err.Report String)) a
+
+liftAlex :: forall a. Alex a -> Parser a
+liftAlex alex =
+  StateT (boxError . unAlex alex)
+  where
+    boxError :: Either String (AlexState, a) -> Except (Err.Report String) (a, AlexState)
+    boxError (Left msg) = throwError (Err.Err Nothing msg [] [])
+    boxError (Right (s, a)) = pure (a, s)
+
 class Located a where
-  projectLoc :: a -> P.Position
+  projectLoc :: a -> Err.Position
 
 instance Located (Loc a) where
   projectLoc = location
@@ -123,24 +137,38 @@ loc element start end =
       e = projectLoc end
   in L
        { syntax = element,
-         location = P.Position (P.begin s) (P.end e) (P.file s)
+         location = Err.Position (Err.begin s) (Err.end e) (Err.file s)
        }
 
 rloc :: (Located start, Located end) => TermF Name Raw -> start -> end -> Raw
 rloc e start end = Fix (RawF (loc e start end))
 
-parseError :: Loc Token -> Alex a
-parseError (L _ t) = do
-  ((AlexPn _ line column), _, _, _) <- alexGetInput
-  alexError ("Parse error at <" ++ show line ++ ":" ++ show column ++ ">. " ++
-             "Unexpected token " ++ show t ++ ".")
+parseError :: Loc Token -> Parser a
+parseError (L _ TokEOF) = do
+  ((AlexPn _ line col), _, _, input) <- liftAlex alexGetInput
+  let msg = "Unexpected end of file."
+      pos = Err.Position (line, col) (line, col) "<test-file>"
+  throwError (Err.Err Nothing "Parse error." [(pos, Err.This msg)] [])
+parseError (L pos t) = do
+  let msg = "Unexpected token " ++ show t ++ "."
+  throwError (Err.Err Nothing "Parse error." [(pos, Err.This msg)] [])
 
-lexer :: (Loc Token -> Alex a) -> Alex a
+lexer :: (Loc Token -> Parser a) -> Parser a
 lexer continuation = do
-  nextToken <- alexMonadScan
+  nextToken <- liftAlex alexMonadScan
   continuation nextToken
 
-parse :: String -> Either String Raw
-parse input = runAlex input parser
+parse :: String -> Either (Err.Report String) Raw
+parse input = runExcept (evalStateT parser initState)
+  where
+    initState :: AlexState
+    initState =
+      AlexState
+        { alex_pos = alexStartPos
+        , alex_inp = input
+        , alex_chr = '\n'
+        , alex_scd = 0
+        , alex_bytes = []
+        }
 
 }

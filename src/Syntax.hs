@@ -38,6 +38,7 @@ module Syntax
     pattern Cast,
     pattern CastRefl,
     pattern Let,
+    pattern Annotation,
     Val (..),
     VTy,
     vFun,
@@ -124,6 +125,7 @@ data TermF v t
     CastF t t t t
   | CastReflF t t
   | LetF Name t t t
+  | AnnotationF t t
 
 newtype RawF t = RawF (Loc (TermF Name t))
 
@@ -207,6 +209,9 @@ pattern CastRefl a t = Fix (CastReflF a t)
 pattern Let :: Name -> Type v -> Term v -> Term v -> Term v
 pattern Let x a t u = Fix (LetF x a t u)
 
+pattern Annotation :: Term v -> Type v -> Term v
+pattern Annotation t a = Fix (AnnotationF t a)
+
 {-# COMPLETE
   Var,
   U,
@@ -230,7 +235,8 @@ pattern Let x a t u = Fix (LetF x a t u)
   Transp,
   Cast,
   CastRefl,
-  Let
+  Let,
+  Annotation
   #-}
 
 instance Functor (TermF v) where
@@ -257,6 +263,7 @@ instance Functor (TermF v) where
   fmap f (CastF a b e t) = CastF (f a) (f b) (f e) (f t)
   fmap f (CastReflF a t) = CastReflF (f a) (f t)
   fmap f (LetF x a t u) = LetF x (f a) (f t) (f u)
+  fmap f (AnnotationF t a) = AnnotationF (f t) (f a)
 
 instance Functor RawF where
   fmap f (RawF t) = RawF (L { location = location t, syntax = fmap f (syntax t)})
@@ -288,6 +295,7 @@ varMap f = foldFix alg
     alg (CastF a b e t) = Cast a b e t
     alg (CastReflF a t) = CastRefl a t
     alg (LetF x a t u) = Let x a t u
+    alg (AnnotationF t a) = Annotation t a
 
 precAtom, precApp, precPi, precLet :: Int
 precAtom = 3
@@ -299,7 +307,7 @@ class VarShowable v where
   showsVar :: v -> [Name] -> ShowS
 
 instance VarShowable Ix where
-  showsVar (Ix x) ns = shows x -- showString (ns !! x)
+  showsVar (Ix x) ns = showString (ns !! x)
 
 instance IsChar s => VarShowable [s] where
   showsVar x _ = showString (map toChar x)
@@ -374,7 +382,7 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
     go _ _ One = ('*' :)
     go _ _ Unit = ('⊤' :)
     go prec ns (Eq t a u) =
-      par prec precPi (go precPi ns t . showString " ~" . go precAtom ns a . (' ' :) . go precPi ns u)
+      par prec precPi (go precPi ns t . showString " ~[" . go precAtom ns a . showString "] " . go precPi ns u)
     go prec ns (Refl t) = par prec precApp (showString "refl " . go precAtom ns t)
     go prec ns (Transp t x pf b u v e) =
       let t' = go precLet ns t
@@ -404,6 +412,8 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
                 . showString "\nin\n"
                 . u'
             )
+    go _ ns (Annotation t a) =
+      showParen True (go precLet ns t . showString " : " . go precLet ns a)
 
 eraseSourceLocations :: Raw -> Term Name
 eraseSourceLocations = foldFix alg
@@ -433,19 +443,19 @@ data Val v
   | VSucc (Val v)
   | VNElim Name (Closure1 v) (Val v) Name Name (Closure2 v) (Val v)
   | VNat
-  | VPair (Term v) (Term v)
-  | VFst (Term v)
-  | VSnd (Term v)
+  | VPair (Val v) (Val v)
+  | VFst (Val v)
+  | VSnd (Val v)
   | VExists Name (VTy v) (Closure1 v)
-  | VAbort (VTy v) (Term v)
+  | VAbort (VTy v) (Val v)
   | VEmpty
   | VOne
   | VUnit
   | VEq (Val v) (VTy v) (Val v)
-  | VRefl (Term v)
-  | VTransp (Term v) Name Name (Term v) (Term v) (Term v) (Term v)
-  | VCast (VTy v) (VTy v) (Term v) (Val v)
-  | VCastRefl (VTy v) (Term v)
+  | VRefl (Val v)
+  | VTransp (Val v) Name Name (Closure2 v) (Val v) (Val v) (Val v)
+  | VCast (VTy v) (VTy v) (Val v) (Val v)
+  | VCastRefl (VTy v) (Val v)
 
 vFun :: Relevance -> VTy v -> VTy v -> VTy v
 vFun s a b = VPi s "_" a (const b)
