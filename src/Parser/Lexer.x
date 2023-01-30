@@ -2,6 +2,7 @@
 module Parser.Lexer where
 
 import Syntax
+import Error.Diagnose.Position(Position(..))
 
 }
 
@@ -97,14 +98,14 @@ data Token
   deriving (Show)
 
 keyword, symbol :: Token -> AlexInput -> Int -> Alex (Loc Token)
-keyword t ((AlexPn start line _), _, _, _) len = pure (L (SLoc start (start + len) line) t)
+keyword t ((AlexPn _ line col), _, _, _) len = pure (L (Position (line, col) (line, col + len) "<test-file>") t)
 symbol = keyword
 
 identifier :: (Name -> Token) -> AlexInput -> Int -> Alex (Loc Token)
-identifier t ((AlexPn start line _), _, _, input) len =
-  pure (L (SLoc start (start + len) line) (t (take len input)))
+identifier t ((AlexPn _ line col), _, _, input) len =
+  pure (L (Position (line, col) (line, col + len) "<test-file>") (t (take len input)))
 
 alexEOF :: Alex (Loc Token)
-alexEOF = pure (L (SLoc 0 0 0) TokEOF)
+alexEOF = pure (L (Position (0, 0) (0, 0) "<test-file>") TokEOF)
 
 }

@@ -4,7 +4,6 @@
 
 module Syntax
   ( Name,
-    SourceLoc (..),
     Loc (..),
     Ix (..),
     Lvl (..),
@@ -15,6 +14,7 @@ module Syntax
     Type,
     RawF (..),
     Raw,
+    pattern R,
     pattern Var,
     pattern U,
     pattern Lambda,
@@ -38,9 +38,13 @@ module Syntax
     pattern Cast,
     pattern CastRefl,
     pattern Let,
+    pattern Annotation,
     Val (..),
     VTy,
-    Closure (..),
+    vFun,
+    vAnd,
+    Closure1,
+    Closure2,
     Env,
     varMap,
     VarShowable (..),
@@ -52,23 +56,14 @@ where
 
 import Data.Fix
 import Text.Printf (IsChar (toChar))
+import Error.Diagnose.Position (Position(..))
 
 -- Language source identifiers
 type Name = String
 
--- Source code location data
-data SourceLoc = SLoc
-  { slocStart :: Int,
-    slocEnd :: Int,
-    slocLine :: Int
-  }
-
-instance Show SourceLoc where
-  showsPrec _ (SLoc s e l) = ('<' :) . shows l . (':' :) . shows s . (':' :) . shows e . ('>' :)
-
 -- Syntactic element tagged with a source code location
 data Loc a = L
-  { location :: SourceLoc,
+  { location :: Position,
     syntax :: a
   }
 
@@ -94,19 +89,23 @@ type ULevel = Int
 data Relevance
   = Relevant
   | Irrelevant
-  deriving (Eq, Show)
+  deriving Eq
+
+instance Show Relevance where
+  show Relevant = "U"
+  show Irrelevant = "Ω"
 
 data TermF v t
   = VarF v
   | -- Universe terms have a relevance and a level
     UF Relevance
-  | LambdaF Name t t
+  | LambdaF Name t
   | AppF t t
   | -- Pi types are annotated with their domain type's relevance and level, and the co-domain level
     PiF Relevance Name t t
   | ZeroF
   | SuccF t
-  | NElimF t t t t
+  | NElimF Name t t Name Name t t
   | NatF
   | PairF t t
   | FstF t
@@ -121,15 +120,21 @@ data TermF v t
     EqF t t t
   | ReflF t
   | -- Transport a value along a proof of equality
-    TranspF t t t t t
+    TranspF t Name Name t t t t
   | -- Type casting
     CastF t t t t
   | CastReflF t t
   | LetF Name t t t
+  | AnnotationF t t
 
-newtype RawF t = R (Loc (TermF Name t))
+newtype RawF t = RawF (Loc (TermF Name t))
 
 type Raw = Fix RawF
+
+pattern R :: Position -> TermF Name Raw -> Raw
+pattern R sl term = Fix (RawF (L sl term))
+
+{-# COMPLETE R #-}
 
 type Term v = Fix (TermF v)
 
@@ -141,8 +146,8 @@ pattern Var x = Fix (VarF x)
 pattern U :: Relevance -> Term v
 pattern U s = Fix (UF s)
 
-pattern Lambda :: Name -> Term v -> Type v -> Term v
-pattern Lambda x a e = Fix (LambdaF x a e)
+pattern Lambda :: Name -> Term v -> Term v
+pattern Lambda x e = Fix (LambdaF x e)
 
 pattern App :: Term v -> Term v -> Term v
 pattern App t u = Fix (AppF t u)
@@ -156,8 +161,8 @@ pattern Zero = Fix ZeroF
 pattern Succ :: Term v -> Term v
 pattern Succ n = Fix (SuccF n)
 
-pattern NElim :: Term v -> Term v -> Term v -> Term v -> Term v
-pattern NElim a t0 ts n = Fix (NElimF a t0 ts n)
+pattern NElim :: Name -> Term v -> Term v -> Name -> Name -> Term v -> Term v -> Term v
+pattern NElim z p t0 x ih ts n = Fix (NElimF z p t0 x ih ts n)
 
 pattern Nat :: Term v
 pattern Nat = Fix NatF
@@ -192,8 +197,8 @@ pattern Eq t a u = Fix (EqF t a u)
 pattern Refl :: Term v -> Term v
 pattern Refl t = Fix (ReflF t)
 
-pattern Transp :: Term v -> Term v -> Term v -> Term v -> Term v -> Term v
-pattern Transp t b u t' e = Fix (TranspF t b u t' e)
+pattern Transp :: Term v -> Name -> Name -> Term v -> Term v -> Term v -> Term v -> Term v
+pattern Transp t x pf b u t' e = Fix (TranspF t x pf b u t' e)
 
 pattern Cast :: Type v -> Type v -> Term v -> Term v -> Term v
 pattern Cast a b e t = Fix (CastF a b e t)
@@ -203,6 +208,9 @@ pattern CastRefl a t = Fix (CastReflF a t)
 
 pattern Let :: Name -> Type v -> Term v -> Term v -> Term v
 pattern Let x a t u = Fix (LetF x a t u)
+
+pattern Annotation :: Term v -> Type v -> Term v
+pattern Annotation t a = Fix (AnnotationF t a)
 
 {-# COMPLETE
   Var,
@@ -227,18 +235,19 @@ pattern Let x a t u = Fix (LetF x a t u)
   Transp,
   Cast,
   CastRefl,
-  Let
+  Let,
+  Annotation
   #-}
 
 instance Functor (TermF v) where
   fmap _ (VarF x) = VarF x
   fmap _ (UF s) = UF s
-  fmap f (LambdaF x a e) = LambdaF x (f a) (f e)
+  fmap f (LambdaF x e) = LambdaF x (f e)
   fmap f (AppF t u) = AppF (f t) (f u)
   fmap f (PiF s x a b) = PiF s x (f a) (f b)
   fmap _ ZeroF = ZeroF
   fmap f (SuccF n) = SuccF (f n)
-  fmap f (NElimF a t0 ts n) = NElimF (f a) (f t0) (f ts) (f n)
+  fmap f (NElimF z p t0 x ih ts n) = NElimF z (f p) (f t0) x ih (f ts) (f n)
   fmap _ NatF = NatF
   fmap f (PairF t u) = PairF (f t) (f u)
   fmap f (FstF p) = FstF (f p)
@@ -250,13 +259,14 @@ instance Functor (TermF v) where
   fmap _ UnitF = UnitF
   fmap f (EqF t a u) = EqF (f t) (f a) (f u)
   fmap f (ReflF t) = ReflF (f t)
-  fmap f (TranspF t b u t' e) = TranspF (f t) (f b) (f u) (f t') (f e)
+  fmap f (TranspF t x pf b u t' e) = TranspF (f t) x pf (f b) (f u) (f t') (f e)
   fmap f (CastF a b e t) = CastF (f a) (f b) (f e) (f t)
   fmap f (CastReflF a t) = CastReflF (f a) (f t)
   fmap f (LetF x a t u) = LetF x (f a) (f t) (f u)
+  fmap f (AnnotationF t a) = AnnotationF (f t) (f a)
 
 instance Functor RawF where
-  fmap f (R t) = R (L { location = location t, syntax = fmap f (syntax t)})
+  fmap f (RawF t) = RawF (L { location = location t, syntax = fmap f (syntax t)})
 
 varMap :: forall v v'. (v -> v') -> Term v -> Term v'
 varMap f = foldFix alg
@@ -264,12 +274,12 @@ varMap f = foldFix alg
     alg :: TermF v (Term v') -> Term v'
     alg (VarF x) = Var (f x)
     alg (UF s) = U s
-    alg (LambdaF x a e) = Lambda x a e
+    alg (LambdaF x e) = Lambda x e
     alg (AppF t u) = App t u
     alg (PiF s x a b) = Pi s x a b
     alg ZeroF = Zero
     alg (SuccF n) = Succ n
-    alg (NElimF a t0 ts n) = NElim a t0 ts n
+    alg (NElimF z p t0 x ih ts n) = NElim z p t0 x ih ts n
     alg NatF = Nat
     alg (PairF t u) = Pair t u
     alg (FstF p) = Fst p
@@ -281,10 +291,11 @@ varMap f = foldFix alg
     alg UnitF = Unit
     alg (EqF t a u) = Eq t a u
     alg (ReflF t) = Refl t
-    alg (TranspF t b u t' e) = Transp t b u t' e
+    alg (TranspF t x pf b u t' e) = Transp t x pf b u t' e
     alg (CastF a b e t) = Cast a b e t
     alg (CastReflF a t) = CastRefl a t
     alg (LetF x a t u) = Let x a t u
+    alg (AnnotationF t a) = Annotation t a
 
 precAtom, precApp, precPi, precLet :: Int
 precAtom = 3
@@ -330,8 +341,8 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
     go :: Int -> [Name] -> Term v -> ShowS
     go _ ns (Var x) = tag "V" . showsVar x ns
     go _ _ (U s) = showRelevance s
-    go prec ns (Lambda x a e) =
-      let domain = ('λ' :) . showParen True (showString x . showString ": " . go precLet ns a)
+    go prec ns (Lambda x e) =
+      let domain = ('λ' :) . showString x
        in par prec precLet (domain . showString ". " . go precLet (x : ns) e)
     go prec ns (App t u) =
       tag "A" . par prec precApp (go precApp ns t . (' ' :) . go precAtom ns u)
@@ -345,12 +356,12 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
        in tag "Π" . par prec precPi (domain . showString " → " . codomain)
     go _ _ Zero = ('Z' :)
     go prec ns (Succ n) = par prec precApp (showString "S " . go precAtom ns n)
-    go prec ns (NElim a t0 ts n) =
-      let a' = go precLet ns a
+    go prec ns (NElim z p t0 x ih ts n) =
+      let p' = showString z . showString ". " . go precLet (z : ns) p
           t0' = go precLet ns t0
-          ts' = go precLet ns ts
+          ts' = showString x . showString " " . showString ih . showString ". " . go precLet (ih : x : ns) ts
           n' = go precLet ns n
-       in par prec precApp (showString "ℕ-elim" . showParen True (commaSep [a', t0', ts', n']))
+       in par prec precApp (showString "ℕ-elim" . showParen True (commaSep [p', t0', ts', n']))
     go _ _ Nat = ('ℕ' :)
     go _ ns (Pair t u) = ('⟨' :) . go precLet ns t . comma . go precLet ns u . ('⟩' :)
     go prec ns (Fst p) = par prec precApp (showString "fst " . go precAtom ns p)
@@ -371,11 +382,11 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
     go _ _ One = ('*' :)
     go _ _ Unit = ('⊤' :)
     go prec ns (Eq t a u) =
-      par prec precPi (go precPi ns t . showString " ~" . go precAtom ns a . (' ' :) . go precPi ns u)
+      par prec precPi (go precPi ns t . showString " ~[" . go precAtom ns a . showString "] " . go precPi ns u)
     go prec ns (Refl t) = par prec precApp (showString "refl " . go precAtom ns t)
-    go prec ns (Transp t b u v e) =
+    go prec ns (Transp t x pf b u v e) =
       let t' = go precLet ns t
-          b' = go precLet ns b
+          b' = showString x . showString " " . showString pf . showString ". " . go precLet (pf : x : ns) b
           u' = go precLet ns u
           v' = go precLet ns v
           e' = go precLet ns e
@@ -401,69 +412,59 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
                 . showString "\nin\n"
                 . u'
             )
+    go _ ns (Annotation t a) =
+      showParen True (go precLet ns t . showString " : " . go precLet ns a)
 
 eraseSourceLocations :: Raw -> Term Name
 eraseSourceLocations = foldFix alg
   where
     alg :: RawF (Term Name) -> Term Name
-    alg (R l) = Fix (syntax l)
+    alg (RawF l) = Fix (syntax l)
 
 type Env v = [Val v]
 
-data Closure v = Closure (Term v) (Env v)
+-- data Closure v
+--   = Closure (Term v) (Env v)
+--   | Const (Val v)
+
+-- TODO: Defunctionalise closures
+type Closure1 v = Val v -> Val v
+type Closure2 v = Val v -> Val v -> Val v
 
 type VTy = Val
 
 data Val v
   = VVar Lvl
   | VU Relevance
-  | VLambda Name (Closure v)
+  | VLambda Name (Closure1 v)
   | VApp (Val v) (Val v)
-  | VPi Name (VTy v) (Closure v)
+  | VPi Relevance Name (VTy v) (Closure1 v)
   | VZero
   | VSucc (Val v)
-  | VNElim (Val v) (Val v) (Val v) (Val v)
+  | VNElim Name (Closure1 v) (Val v) Name Name (Closure2 v) (Val v)
   | VNat
-  | VPair (Term v) (Term v)
-  | VFst (Term v)
-  | VSnd (Term v)
-  | VExists Name (VTy v) (Closure v)
-  | VAbort (Term v)
+  | VPair (Val v) (Val v)
+  | VFst (Val v)
+  | VSnd (Val v)
+  | VExists Name (VTy v) (Closure1 v)
+  | VAbort (VTy v) (Val v)
   | VEmpty
   | VOne
   | VUnit
-  | VEq (Val v) (Val v) (Val v)
-  | VRefl (Term v)
-  | VTransp (Term v) (Term v) (Term v) (Term v) (Term v)
-  | VCast (VTy v) (VTy v) (Term v) (Val v)
-  | VCastRefl (Term v)
+  | VEq (Val v) (VTy v) (Val v)
+  | VRefl (Val v)
+  | VTransp (Val v) Name Name (Closure2 v) (Val v) (Val v) (Val v)
+  | VCast (VTy v) (VTy v) (Val v) (Val v)
+  | VCastRefl (VTy v) (Val v)
 
--- type Env = [Val]
+vFun :: Relevance -> VTy v -> VTy v -> VTy v
+vFun s a b = VPi s "_" a (const b)
 
--- data Closure
---   = Closure (Term Ix) Env
+vAnd :: VTy v -> VTy v -> VTy v
+vAnd a b = VExists "_" a (const b)
 
--- type VTy = Val
+-- pattern VFun :: Relevance -> VTy v -> VTy v -> VTy v
+-- pattern VFun s a b = VPi s "_" a (Const b)
 
--- data Val
---   = VVar Lvl
---   | VU Relevance
---   | VLambda Name Closure
---   | VApp Val Val
---   | VPi Relevance (Maybe Name) VTy Closure
---   | VZero
---   | VSucc Val
---   | VNElim Val Val Val Val
---   | VNat
---   | VExists (Maybe Name) VTy Closure
---   | VAbort VTy Val
---   | VEmpty
---   | VUnit
---   | VEq Val VTy Val
---   | VCast VTy VTy (Term Ix) Val
-
--- pattern VFun :: Relevance -> VTy -> VTy -> VTy
--- pattern VFun s a b = VPi s Nothing a (Closure (Lambda "_" (Var 1)) [b])
-
--- pattern VAnd :: VTy -> VTy -> VTy
--- pattern VAnd a b = VExists Nothing a (Closure (Lambda "_" (Var 1)) [b])
+-- pattern VAnd :: VTy v -> VTy v -> VTy v
+-- pattern VAnd a b = VExists "_" a (Const b)
