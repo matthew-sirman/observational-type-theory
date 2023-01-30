@@ -4,8 +4,6 @@ import Control.Monad.Except
 import Error.Diagnose
 import Syntax
 
-import Debug.Trace
-
 type Checker a = Except (Report String) a
 
 type Types = [(Name, (Relevance, VTy Ix))]
@@ -61,7 +59,7 @@ eqReduce vt va vu = eqReduceType va
       | s == s' =
         let a'_eq_a = VEq a' (VU Relevant) a
             cast_a'_a = cast a' a
-            b_eq_b' e = VPi s x' a' (\v -> VEq (b (cast_a'_a e v)) (VU Relevant) (b' v))
+            b_eq_b' _ = VPi s x' a' (\v -> VEq (b (cast_a'_a v)) (VU Relevant) (b' v))
          in VExists "e" a'_eq_a b_eq_b'
     -- Rule Eq-Zero
     eqReduceAll VZero VNat VZero = VUnit
@@ -74,21 +72,21 @@ eqReduce vt va vu = eqReduceType va
     -- No reduction rule
     eqReduceAll t a u = VEq t a u
 
-cast :: VTy Ix -> VTy Ix -> Val Ix -> Val Ix -> Val Ix
+cast :: VTy Ix -> VTy Ix -> Val Ix -> Val Ix
 -- Rule Cast-Zero
-cast VNat VNat _ VZero = VZero
+cast VNat VNat VZero = VZero
 -- Rule Cast-Succ
-cast VNat VNat e (VSucc n) = VSucc (cast VNat VNat e n)
+cast VNat VNat (VSucc n) = VSucc (cast VNat VNat n)
 -- Rule Cast-Univ
-cast (VU s) (VU s') _ a
+cast (VU s) (VU s') a
   | s == s' = a
 -- Rule Cast-Pi
-cast (VPi _ _ a b) (VPi _ x' a' b') e f =
-  let cast_a'_a = cast a' a (VFst e)
+cast (VPi _ _ a b) (VPi _ x' a' b') f =
+  let cast_a'_a = cast a' a
    in VLambda x' (\va' ->
                     let a = cast_a'_a va'
-                    in cast (b a) (b' va') (VSnd e) (f $$ a))
-cast a b e t = VCast a b e t
+                    in cast (b a) (b' va') (f $$ a))
+cast a b t = VCast a b t
 
 eval :: Env Ix -> Term Ix -> Val Ix
 eval env (Var (Ix x)) = env !! x
@@ -105,20 +103,19 @@ eval env (NElim z p t0 x ih ts n) = recurse (eval env n)
     recurse (VSucc n) = eval (recurse n : n : env) ts
     recurse ne = VNElim z (\vz -> eval (vz : env) p) (eval env t0) x ih (\vx vih -> eval (vih : vx : env) ts) ne
 eval _ Nat = VNat
-eval env (Pair t u) = VPair (eval env t) (eval env u)
-eval env (Fst t) = VFst (eval env t)
-eval env (Snd t) = VSnd (eval env t)
+eval _ (Pair {}) = VOne
+eval _ (Fst _) = VOne
+eval _ (Snd _) = VOne
 eval env (Exists x a b) = VExists x (eval env a) (\v -> eval (v : env) b)
-eval env (Abort a t) = VAbort (eval env a) (eval env t)
+eval env (Abort a _) = VAbort (eval env a)
 eval _ Empty = VEmpty
 eval _ One = VOne
 eval _ Unit = VUnit
 eval env (Eq t a u) = eqReduce (eval env t) (eval env a) (eval env u)
-eval env (Refl t) = VRefl (eval env t)
-eval env (Transp t x pf b u t' e) =
-  VTransp (eval env t) x pf (\vx vpf -> eval (vpf : vx: env) b) (eval env u) (eval env t') (eval env e)
-eval env (Cast a b e t) = cast (eval env a) (eval env b) (eval env e) (eval env t)
-eval env (CastRefl a t) = VCastRefl (eval env a) (eval env t)
+eval _ (Refl _) = VOne
+eval _ (Transp {}) = VOne
+eval env (Cast a b _ t) = cast (eval env a) (eval env b) (eval env t)
+eval _ (CastRefl {}) = VOne
 eval env (Let _ _ t u) =
   let vt = eval env t
    in eval (vt : env) u
@@ -138,28 +135,19 @@ quote lvl (VNElim z p t0 x ih ts n) = NElim z p' (quote lvl t0) x ih ts' (quote 
     p' = quote (lvl + 1) (p (VVar lvl))
     ts' = quote (lvl + 2) (ts (VVar lvl) (VVar (lvl + 1)))
 quote _ VNat = Nat
-quote lvl (VPair t u) = Pair (quote lvl t) (quote lvl u)
-quote lvl (VFst t) = Fst (quote lvl t)
-quote lvl (VSnd t) = Snd (quote lvl t)
 quote lvl (VExists x a b) = Exists x (quote lvl a) (quote (lvl + 1) (b (VVar lvl)))
-quote lvl (VAbort a t) = Abort (quote lvl a) (quote lvl t)
+quote lvl (VAbort a) = Abort (quote lvl a) One
 quote _ VEmpty = Empty
 quote _ VOne = One
 quote _ VUnit = Unit
 quote lvl (VEq t a u) = Eq (quote lvl t) (quote lvl a) (quote lvl u)
-quote lvl (VRefl t) = Refl (quote lvl t)
-quote lvl (VTransp t x pf b u t' e) =
-  Transp (quote lvl t) x pf b' (quote lvl u) (quote lvl t') (quote lvl e)
-  where
-    b' :: Term Ix
-    b' = quote (lvl + 2) (b (VVar lvl) (VVar (lvl + 1)))
-quote lvl (VCast a b e t) = Cast (quote lvl a) (quote lvl b) (quote lvl e) (quote lvl t)
-quote lvl (VCastRefl a t) = CastRefl (quote lvl a) (quote lvl t)
+quote lvl (VCast a b t) = Cast (quote lvl a) (quote lvl b) One (quote lvl t)
 
 infixl 8 $$
 
 ($$) :: Val Ix -> Val Ix -> Val Ix
 (VLambda _ c) $$ u = c u
+VOne $$ _ = VOne
 t $$ u = VApp t u
 
 normalForm :: Env Ix -> Term Ix -> Term Ix
@@ -230,10 +218,6 @@ conv pos names = conv' names names
       conv' ns ns' lvl n n'
     conv' _ _ _ VNat VNat = pure ()
     -- Proof irrelevant, so always convertible
-    conv' _ _ _ (VFst _) _ = pure ()
-    conv' _ _ _ _ (VFst _) = pure ()
-    conv' _ _ _ (VSnd _) _ = pure ()
-    conv' _ _ _ _ (VSnd _) = pure ()
     conv' ns ns' lvl (VExists x a b) (VExists x' a' b') = do
       conv' ns ns' lvl a a'
       conv' (x : ns) (x' : ns') (lvl + 1) (b (VVar lvl)) (b' (VVar lvl))
@@ -250,19 +234,12 @@ conv pos names = conv' names names
       conv' ns ns' lvl a a'
       conv' ns ns' lvl u u'
     -- Proof irrelevant, so always convertible
-    conv' _ _ _ (VRefl _) _ = pure ()
-    conv' _ _ _ _ (VRefl _) = pure ()
-    conv' _ _ _ (VTransp {}) _ = pure ()
-    conv' _ _ _ _ (VTransp {}) = pure ()
-    conv' ns ns' lvl (VCast a b _ t) (VCast a' b' _ t') = do
+    conv' ns ns' lvl (VCast a b t) (VCast a' b' t') = do
       conv' ns ns' lvl a a'
       conv' ns ns' lvl b b'
       -- [e ≡ e'] follows from proof irrelevance, given [a ≡ a'] and [b ≡ b']
       conv' ns ns' lvl t t'
     -- Proof irrelevant, so always convertible
-    conv' _ _ _ (VCastRefl {}) _ = pure ()
-    conv' _ _ _ _ (VCastRefl {}) = pure ()
-    -- TODO: Proper error messages
     conv' ns ns' lvl a b =
       createError
         "Type conversion failed."
@@ -325,9 +302,7 @@ infer gamma (R _ (FstF t@(R pos _))) = do
 infer gamma (R _ (SndF t@(R pos _))) = do
   (t, _, tty) <- infer gamma t
   case tty of
-    VExists _ _ b ->
-      let vt = eval (env gamma) t
-      in pure (Snd t, Irrelevant, b (VFst vt))
+    VExists _ _ b -> pure (Snd t, Irrelevant, b VOne)
     _ ->
       let msg  = "Expected ∃ type, but found ̈[" ++ ppVal gamma tty ++ "]"
       in createError "Expected ∃ (Exists) type in second projection" [(pos, msg)]
@@ -368,7 +343,7 @@ infer gamma (R _ (TranspF t@(R pos _) x pf b u t' e)) = do
   let gamma' = bind x Relevant va gamma
       gamma'' = bind pf Irrelevant (eqReduce vt va (head (env gamma'))) gamma'
   b <- check gamma'' b (VU Irrelevant)
-  let b_t_refl = eval (VRefl vt : vt : env gamma) b
+  let b_t_refl = eval (VOne : vt : env gamma) b
   u <- check gamma u b_t_refl
   e <- check gamma e (eqReduce vt va vt')
   let ve = eval (env gamma) e
@@ -390,7 +365,7 @@ infer gamma (R _ (CastReflF a t)) = do
   let va = eval (env gamma) a
   t <- check gamma t va
   let vt = eval (env gamma) t
-      cast_a_a_t = cast va va (VRefl vt) vt
+      cast_a_a_t = cast va va vt
       t_eq_cast_a_a_t = eqReduce vt va cast_a_a_t
   pure (CastRefl a t, Irrelevant, t_eq_cast_a_a_t)
 infer gamma (R _ (LetF x a t u)) = do

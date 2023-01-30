@@ -43,8 +43,7 @@ tm3 =
   [r|
     let peano1 : (n :U ℕ) -> (_ :Ω S n ~[ℕ] 0) -> ⊥ =
       λn. λp.
-       transp(S n, x _. rec(_. Ω, ⊥, _ _. ⊤, x), *, 0, p)
-        -- p
+        transp(S n, x _. rec(_. Ω, ⊥, _ _. ⊤, x), *, 0, p)
     in
     peano1
   |]
@@ -97,7 +96,7 @@ tm7 =
 tm8 :: String
 tm8 =
   [r|
-    λA. A
+    (λA. A : (_ :U ℕ) -> ℕ)
   |]
 
 tm9 :: String
@@ -202,7 +201,7 @@ tm13 =
 tm14 :: String
 tm14 =
   [r|
-    castrefl((x :U ℕ) -> ℕ, λx. x) (S (S 0))
+    castrefl((x :U ℕ) -> ℕ, λx. x) 0
   |]
 
 test :: String -> IO ()

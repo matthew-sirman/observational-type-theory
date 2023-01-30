@@ -443,19 +443,13 @@ data Val v
   | VSucc (Val v)
   | VNElim Name (Closure1 v) (Val v) Name Name (Closure2 v) (Val v)
   | VNat
-  | VPair (Val v) (Val v)
-  | VFst (Val v)
-  | VSnd (Val v)
   | VExists Name (VTy v) (Closure1 v)
-  | VAbort (VTy v) (Val v)
+  | VAbort (VTy v)
   | VEmpty
   | VOne
   | VUnit
   | VEq (Val v) (VTy v) (Val v)
-  | VRefl (Val v)
-  | VTransp (Val v) Name Name (Closure2 v) (Val v) (Val v) (Val v)
-  | VCast (VTy v) (VTy v) (Val v) (Val v)
-  | VCastRefl (VTy v) (Val v)
+  | VCast (VTy v) (VTy v) (Val v)
 
 vFun :: Relevance -> VTy v -> VTy v -> VTy v
 vFun s a b = VPi s "_" a (const b)
