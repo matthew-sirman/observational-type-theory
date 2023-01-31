@@ -120,7 +120,7 @@ tm9 =
     let right_unit : (n :U ℕ) -> add n 0 ~[ℕ] n =
       λn. rec(z. add z 0 ~[ℕ] z, refl 0, k pf. cong ℕ ℕ (add k 0) k (λm. S m) pf, n)
     in
-    let succ_comm_left : (n :U ℕ) -> (m :U ℕ) -> add n (S m) ~[ℕ] S (add n m) =
+    let succ_comm_right : (n :U ℕ) -> (m :U ℕ) -> add n (S m) ~[ℕ] S (add n m) =
       λn. λm. rec(k. add k (S m) ~[ℕ] S (add k m),
                   refl (S m),
                   k ih. cong ℕ ℕ (add k (S m)) (S (add k m)) (λx. S x) ih,
@@ -132,7 +132,7 @@ tm9 =
             right_unit n,
             k ih.
               let ap_succ : S (add n k) ~[ℕ] S (add k n) = cong ℕ ℕ (add n k) (add k n) (λx. S x) ih in
-              trans ℕ (add n (S k)) (S (add n k)) (add (S k) n) (succ_comm_left n k) ap_succ,
+              trans ℕ (add n (S k)) (S (add n k)) (add (S k) n) (succ_comm_right n k) ap_succ,
             m)
     in
     add_comm (S (S 0)) (S 0)
