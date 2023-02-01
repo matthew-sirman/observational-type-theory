@@ -52,6 +52,9 @@ tokens :-
        "transp"                 { keyword KWTransp }
        "cast"                   { keyword KWCast }
        "castrefl"               { keyword KWCastRefl }
+       "Σ"                      { symbol SymSigma }
+       "×"                      { symbol SymTimes }
+       ";"                      { symbol SymSemiColon }
        "let"                    { keyword KWLet }
        "="                      { symbol TokEquals }
        "in"                     { keyword KWIn}
@@ -90,6 +93,9 @@ data Token
   | KWTransp
   | KWCast
   | KWCastRefl
+  | SymSigma
+  | SymTimes
+  | SymSemiColon
   | KWLet
   | TokEquals
   | KWIn

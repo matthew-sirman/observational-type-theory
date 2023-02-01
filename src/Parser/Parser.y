@@ -51,6 +51,9 @@ import qualified Error.Diagnose as Err
   transp                { L _ KWTransp }
   cast                  { L _ KWCast }
   castrefl              { L _ KWCastRefl }
+  Sigma                 { L _ SymSigma }
+  times                 { L _ SymTimes }
+  ';'                   { L _ SymSemiColon }
   let                   { L _ KWLet }
   '='                   { L _ TokEquals }
   in                    { L _ KWIn }
@@ -75,15 +78,17 @@ term :: { Raw }
   : '(' var ':' rel exp ')' '->' term                               { rloc (PiF (syntax $4) (projName $2) $5 $8) $1 $> }
   | Exists '(' var ':' exp ')' '.' term                             { rloc (ExistsF (projName $3) $5 $8) $1 $> }
   | apps '/\\' apps                                                 { rloc (ExistsF "_" $1 $3) $1 $> }
-  | term '~' '[' exp ']' term                                       { rloc (EqF $1 $4 $6) $1 $> }
+  | apps '~' '[' exp ']' apps                                       { rloc (EqF $1 $4 $6) $1 $> }
+  | Sigma '(' var ':' exp ')' '.' term                              { rloc (SigmaF (projName $3) $5 $8) $1 $> }
+  | apps times apps                                                 { rloc (SigmaF "_" $1 $3) $1 $> }
   | apps                                                            { $1 }
 
 apps :: { Raw }
   : apps atom                                                       { rloc (AppF $1 $2) $1 $> }
   | S atom                                                          { rloc (SuccF $2) $1 $> }
   | rec '(' var '.' exp ',' exp ',' var var '.' exp ',' exp ')'     { rloc (NElimF (projName $3) $5 $7 (projName $9) (projName $10) $12 $14) $1 $> }
-  | fst atom                                                        { rloc (FstF $2) $1 $> }
-  | snd atom                                                        { rloc (SndF $2) $1 $> }
+  | fst atom                                                        { rloc (FstF () $2) $1 $> }
+  | snd atom                                                        { rloc (SndF () $2) $1 $> }
   | abort '(' exp ',' exp ')'                                       { rloc (AbortF $3 $5) $1 $> }
   | refl atom                                                       { rloc (ReflF $2) $1 $> }
   | transp '(' exp ',' var var '.' exp ',' exp ',' exp ',' exp ')'  { rloc (TranspF $3 (projName $5) (projName $6) $8 $10 $12 $14) $1 $> }
@@ -96,10 +101,11 @@ atom :: { Raw }
   | rel                                                             { Fix (RawF (fmap UF $1)) }
   | '0'                                                             { rloc ZeroF $1 $> }
   | Nat                                                             { rloc NatF $1 $> }
-  | '<' exp ',' exp '>'                                             { rloc (PairF $2 $4) $1 $> }
+  | '<' exp ',' exp '>'                                             { rloc (PropPairF $2 $4) $1 $> }
   | Empty                                                           { rloc EmptyF $1 $> }
   | '*'                                                             { rloc OneF $1 $> }
   | Unit                                                            { rloc UnitF $1 $> }
+  | '(' exp ';' exp ')'                                             { rloc (PairF $2 $4) $1 $> }
   | '(' exp ':' exp ')'                                             { rloc (AnnotationF $2 $4) $1 $>}
   | '(' exp ')'                                                     { $2 }
 
@@ -140,7 +146,7 @@ loc element start end =
          location = Err.Position (Err.begin s) (Err.end e) (Err.file s)
        }
 
-rloc :: (Located start, Located end) => TermF Name Raw -> start -> end -> Raw
+rloc :: (Located start, Located end) => TermF () Name Raw -> start -> end -> Raw
 rloc e start end = Fix (RawF (loc e start end))
 
 parseError :: Loc Token -> Parser a

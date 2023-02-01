@@ -44,23 +44,25 @@ eqReduce vt va vu = eqReduceType va
     -- Then driven by terms and type
     eqReduceAll :: Val Ix -> VTy Ix -> Val Ix -> Val Ix
     -- Rules Eq-Univ and Eq-Univ-≠
+    eqReduceAll vt (VU Relevant) vu
+      | not (headEq vt vu) = VEmpty
     eqReduceAll VNat (VU Relevant) VNat = VUnit
     eqReduceAll (VU s) (VU Relevant) (VU s')
       | s == s' = VUnit
       | otherwise = VEmpty
-    eqReduceAll VNat (VU Relevant) (VPi {}) = VEmpty
-    eqReduceAll VNat (VU Relevant) (VU {}) = VEmpty
-    eqReduceAll (VPi {}) (VU Relevant) VNat = VEmpty
-    eqReduceAll (VPi {}) (VU Relevant) (VU {}) = VEmpty
-    eqReduceAll (VU {}) (VU Relevant) VNat = VEmpty
-    eqReduceAll (VU {}) (VU Relevant) (VPi {}) = VEmpty
     -- Rule Eq-Π
     eqReduceAll (VPi s _ a b) (VU Relevant) (VPi s' x' a' b')
       | s == s' =
-        let a'_eq_a = VEq a' (VU Relevant) a
+        let a_eq_a' = eqReduceAll a (VU Relevant) a'
             cast_a'_a = cast a' a
-            b_eq_b' _ = VPi s x' a' (\v -> VEq (b (cast_a'_a v)) (VU Relevant) (b' v))
-         in VExists "e" a'_eq_a b_eq_b'
+            b_eq_b' _ = VPi s x' a' (\v -> eqReduceAll (b (cast_a'_a v)) (VU Relevant) (b' v))
+         in VExists "e" a_eq_a' b_eq_b'
+    -- Rule Eq-Σ
+    eqReduceAll (VSigma _ a b) (VU Relevant) (VSigma x' a' b') =
+      let a_eq_a' = eqReduceAll a (VU Relevant) a'
+          cast_a'_a = cast a' a
+          b_eq_b' v = eqReduceAll (b (cast_a'_a v)) (VU Relevant) (b' v)
+      in VExists "e" a_eq_a' (\_ -> VPi Relevant x' a' b_eq_b')
     -- Rule Eq-Zero
     eqReduceAll VZero VNat VZero = VUnit
     -- Rule Eq-Zero-Succ
@@ -69,8 +71,20 @@ eqReduce vt va vu = eqReduceType va
     eqReduceAll (VSucc _) VNat VZero = VEmpty
     -- Rule Eq-Succ
     eqReduceAll (VSucc m) VNat (VSucc n) = eqReduceAll m VNat n
+    -- Rule Eq-Pair
+    eqReduceAll (VPair t u) (VSigma _ a b) (VPair t' u') =
+      let t_eq_t' = eqReduceAll t a t'
+          u_eq_u' _ = eqReduceAll (cast (b t) (b t') u) (b t') u'
+      in VExists "e" t_eq_t' u_eq_u'
     -- No reduction rule
     eqReduceAll t a u = VEq t a u
+
+    headEq :: VTy Ix -> VTy Ix -> Bool
+    headEq VNat VNat = True
+    headEq (VPi {}) (VPi {}) = True
+    headEq (VU {}) (VU {}) = True
+    headEq (VSigma {}) (VSigma {}) = True
+    headEq _ _ = False
 
 cast :: VTy Ix -> VTy Ix -> Val Ix -> Val Ix
 -- Rule Cast-Zero
@@ -86,6 +100,10 @@ cast (VPi _ _ a b) (VPi _ x' a' b') f =
    in VLambda x' (\va' ->
                     let a = cast_a'_a va'
                     in cast (b a) (b' va') (f $$ a))
+cast (VSigma _ a b) (VSigma _ a' b') (VPair t u) =
+  let t' = cast a a' t
+      u' = cast (b t) (b' t') u
+  in VPair t' u'
 cast a b t = VCast a b t
 
 eval :: Env Ix -> Term Ix -> Val Ix
@@ -103,9 +121,9 @@ eval env (NElim z p t0 x ih ts n) = recurse (eval env n)
     recurse (VSucc n) = eval (recurse n : n : env) ts
     recurse ne = VNElim z (\vz -> eval (vz : env) p) (eval env t0) x ih (\vx vih -> eval (vih : vx : env) ts) ne
 eval _ Nat = VNat
-eval _ (Pair {}) = VOne
-eval _ (Fst _) = VOne
-eval _ (Snd _) = VOne
+eval _ (PropPair {}) = VOne
+eval _ (PropFst _) = VOne
+eval _ (PropSnd _) = VOne
 eval env (Exists x a b) = VExists x (eval env a) (\v -> eval (v : env) b)
 eval env (Abort a _) = VAbort (eval env a)
 eval _ Empty = VEmpty
@@ -116,6 +134,16 @@ eval _ (Refl _) = VOne
 eval _ (Transp {}) = VOne
 eval env (Cast a b _ t) = cast (eval env a) (eval env b) (eval env t)
 eval _ (CastRefl {}) = VOne
+eval env (Pair t u) = VPair (eval env t) (eval env u)
+eval env (Fst p) =
+  case eval env p of
+    VPair t _ -> t
+    p -> VFst p
+eval env (Snd p) =
+  case eval env p of
+    VPair _ u -> u
+    p -> VSnd p
+eval env (Sigma x a b) = VSigma x (eval env a) (\vx -> eval (vx : env) b)
 eval env (Let _ _ t u) =
   let vt = eval env t
    in eval (vt : env) u
@@ -142,6 +170,10 @@ quote _ VOne = One
 quote _ VUnit = Unit
 quote lvl (VEq t a u) = Eq (quote lvl t) (quote lvl a) (quote lvl u)
 quote lvl (VCast a b t) = Cast (quote lvl a) (quote lvl b) One (quote lvl t)
+quote lvl (VPair t u) = Pair (quote lvl t) (quote lvl u)
+quote lvl (VSigma x a b) = Sigma x (quote lvl a) (quote (lvl + 1) (b (VVar lvl)))
+quote lvl (VFst t) = Fst (quote lvl t)
+quote lvl (VSnd t) = Snd (quote lvl t)
 
 infixl 8 $$
 
@@ -152,19 +184,6 @@ t $$ u = VApp t u
 
 normalForm :: Env Ix -> Term Ix -> Term Ix
 normalForm env t = quote (Lvl (length env)) (eval env t)
-
-inferVar :: Position -> Types -> Name -> Checker (Term Ix, Relevance, VTy Ix)
-inferVar pos types name = do
-  (i, s, ty) <- find types name
-  pure (Var i, s, ty)
-  where
-    find :: Types -> Name -> Checker (Ix, Relevance, VTy Ix)
-    find [] name = createError "Variable not in scope." [(pos, "Variable '" ++ name ++ "' is not defined.")]
-    find ((x, (s, a)) : types) x'
-      | x == x' = pure (0, s, a)
-      | otherwise = do
-          (i, s, a) <- find types x'
-          pure (i + 1, s, a)
 
 bind :: Name -> Relevance -> VTy Ix -> Context -> Context
 bind x s tty ctx =
@@ -217,7 +236,6 @@ conv pos names = conv' names names
       conv' (ih : x : ns) (ih' : x' : ns) (lvl + 2) (ts (VVar lvl) (VVar (lvl + 1))) (ts' (VVar lvl) (VVar (lvl + 1)))
       conv' ns ns' lvl n n'
     conv' _ _ _ VNat VNat = pure ()
-    -- Proof irrelevant, so always convertible
     conv' ns ns' lvl (VExists x a b) (VExists x' a' b') = do
       conv' ns ns' lvl a a'
       conv' (x : ns) (x' : ns') (lvl + 1) (b (VVar lvl)) (b' (VVar lvl))
@@ -233,13 +251,20 @@ conv pos names = conv' names names
       conv' ns ns' lvl t t'
       conv' ns ns' lvl a a'
       conv' ns ns' lvl u u'
-    -- Proof irrelevant, so always convertible
     conv' ns ns' lvl (VCast a b t) (VCast a' b' t') = do
       conv' ns ns' lvl a a'
       conv' ns ns' lvl b b'
       -- [e ≡ e'] follows from proof irrelevance, given [a ≡ a'] and [b ≡ b']
       conv' ns ns' lvl t t'
-    -- Proof irrelevant, so always convertible
+    -- TODO: Consider whether eta expansion for Σ types is necessary
+    conv' ns ns' lvl (VPair t u) (VPair t' u') = do
+      conv' ns ns' lvl t t'
+      conv' ns ns' lvl u u'
+    conv' ns ns' lvl (VFst t) (VFst t') = conv' ns ns' lvl t t'
+    conv' ns ns' lvl (VSnd t) (VSnd t') = conv' ns ns' lvl t t'
+    conv' ns ns' lvl (VSigma x a b) (VSigma x' a' b') = do
+      conv' ns ns' lvl a a'
+      conv' (x : ns) (x' : ns') (lvl + 1) (b (VVar lvl)) (b' (VVar lvl))
     conv' ns ns' lvl a b =
       createError
         "Type conversion failed."
@@ -255,6 +280,19 @@ ppVal gamma v = prettyPrintTerm (names gamma) (quote (lvl gamma) v)
 
 ppTerm :: Context -> Term Ix -> String
 ppTerm gamma = prettyPrintTerm (names gamma)
+
+inferVar :: Position -> Types -> Name -> Checker (Term Ix, Relevance, VTy Ix)
+inferVar pos types name = do
+  (i, s, ty) <- find types name
+  pure (Var i, s, ty)
+  where
+    find :: Types -> Name -> Checker (Ix, Relevance, VTy Ix)
+    find [] name = createError "Variable not in scope." [(pos, "Variable '" ++ name ++ "' is not defined.")]
+    find ((x, (s, a)) : types) x'
+      | x == x' = pure (0, s, a)
+      | otherwise = do
+          (i, s, a) <- find types x'
+          pure (i + 1, s, a)
 
 infer :: Context -> Raw -> Checker (Term Ix, Relevance, VTy Ix)
 infer gamma (R pos (VarF x)) = inferVar pos (types gamma) x
@@ -292,20 +330,24 @@ infer gamma (R _ (NElimF z p t0 x ih ts n)) = do
   let vn = eval (env gamma) n
   pure (NElim z p t0 x ih ts n, s, eval (vn : env gamma) p)
 infer _ (R _ NatF) = pure (Nat, Relevant, VU Relevant)
-infer gamma (R _ (FstF t@(R pos _))) = do
+infer gamma (R _ (FstF () t@(R pos _))) = do
   (t, _, tty) <- infer gamma t
   case tty of
-    VExists _ a _ -> pure (Fst t, Irrelevant, a)
+    VExists _ a _ -> pure (PropFst t, Irrelevant, a)
+    VSigma _ a _ -> pure (Fst t, Relevant, a)
     _ ->
-      let msg  = "Expected ∃ type, but found ̈[" ++ ppVal gamma tty ++ "]"
-      in createError "Expected ∃ (Exists) type in first projection." [(pos, msg)]
-infer gamma (R _ (SndF t@(R pos _))) = do
+      let msg  = "Expected ∃ or Σ type, but found ̈[" ++ ppVal gamma tty ++ "]"
+      in createError "Expected ∃ (Exists) or Σ type in first projection." [(pos, msg)]
+infer gamma (R _ (SndF () t@(R pos _))) = do
   (t, _, tty) <- infer gamma t
   case tty of
-    VExists _ _ b -> pure (Snd t, Irrelevant, b VOne)
+    VExists _ _ b -> pure (PropSnd t, Irrelevant, b VOne)
+    VSigma _ _ b ->
+      let vt = eval (env gamma) t
+      in pure (Snd t, Relevant, b (VFst vt))
     _ ->
-      let msg  = "Expected ∃ type, but found ̈[" ++ ppVal gamma tty ++ "]"
-      in createError "Expected ∃ (Exists) type in second projection" [(pos, msg)]
+      let msg  = "Expected ∃ or Σ type, but found ̈[" ++ ppVal gamma tty ++ "]"
+      in createError "Expected ∃ (Exists) or Σ type in second projection" [(pos, msg)]
 infer gamma (R _ (ExistsF x a b)) = do
   a <- check gamma a (VU Irrelevant)
   let va = eval (env gamma) a
@@ -368,6 +410,11 @@ infer gamma (R _ (CastReflF a t)) = do
       cast_a_a_t = cast va va vt
       t_eq_cast_a_a_t = eqReduce vt va cast_a_a_t
   pure (CastRefl a t, Irrelevant, t_eq_cast_a_a_t)
+infer gamma (R _ (SigmaF x a b)) = do
+  a <- check gamma a (VU Relevant)
+  let va = eval (env gamma) a
+  b <- check (bind x Relevant va gamma) b (VU Relevant)
+  pure (Sigma x a b, Relevant, VU Relevant)
 infer gamma (R _ (LetF x a t u)) = do
   (a, s) <- checkType gamma a
   let va = eval (env gamma) a
@@ -401,13 +448,20 @@ check gamma (R _ (LambdaF x t)) (VPi s _ a b) = do
 check gamma (R pos (LambdaF {})) tty =
   let msg = "Checking λ-expression against type [" ++ ppVal gamma tty ++ "] failed (expected Π type)."
   in createError "λ-expression type checking failed." [(pos, msg)]
-check gamma (R _ (PairF t u)) (VExists x a b) = do
+check gamma (R _ (PropPairF t u)) (VExists _ a b) = do
+  t <- check gamma t a
+  u <- check gamma u (b VOne)
+  pure (PropPair t u)
+check gamma (R pos (PropPairF {})) tty =
+  let msg = "Checking propositional pair against type [" ++ ppVal gamma tty ++ "] failed (expected ∃ type)."
+  in createError "Propositional pair type checking failed." [(pos, msg)]
+check gamma (R _ (PairF t u)) (VSigma _ a b) = do
   t <- check gamma t a
   let vt = eval (env gamma) t
-  u <- check (define x vt Irrelevant a gamma) u (b vt)
+  u <- check gamma u (b vt)
   pure (Pair t u)
 check gamma (R pos (PairF {})) tty =
-  let msg = "Checking pair against type [" ++ ppVal gamma tty ++ "] failed (expected ∃ type)."
+  let msg = "Checking pair against type [" ++ ppVal gamma tty ++ "] failed (expected Σ type)."
   in createError "Pair type checking failed." [(pos, msg)]
 check gamma (R _ (LetF x a t u)) uty = do
   (a, s) <- checkType gamma a

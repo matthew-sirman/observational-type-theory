@@ -24,9 +24,9 @@ module Syntax
     pattern Succ,
     pattern NElim,
     pattern Nat,
-    pattern Pair,
-    pattern Fst,
-    pattern Snd,
+    pattern PropPair,
+    pattern PropFst,
+    pattern PropSnd,
     pattern Exists,
     pattern Abort,
     pattern Empty,
@@ -37,6 +37,10 @@ module Syntax
     pattern Transp,
     pattern Cast,
     pattern CastRefl,
+    pattern Pair,
+    pattern Fst,
+    pattern Snd,
+    pattern Sigma,
     pattern Let,
     pattern Annotation,
     Val (..),
@@ -50,7 +54,7 @@ module Syntax
     VarShowable (..),
     prettyPrintTerm,
     prettyPrintTermDebug,
-    eraseSourceLocations
+    -- eraseSourceLocations
   )
 where
 
@@ -95,7 +99,7 @@ instance Show Relevance where
   show Relevant = "U"
   show Irrelevant = "Ω"
 
-data TermF v t
+data TermF proj v t
   = VarF v
   | -- Universe terms have a relevance and a level
     UF Relevance
@@ -107,9 +111,9 @@ data TermF v t
   | SuccF t
   | NElimF Name t t Name Name t t
   | NatF
-  | PairF t t
-  | FstF t
-  | SndF t
+  | PropPairF t t
+  | FstF proj t
+  | SndF proj t
   | -- Existential types are annotated with their domain and co-domain levels
     ExistsF Name t t
   | AbortF t t
@@ -124,21 +128,25 @@ data TermF v t
   | -- Type casting
     CastF t t t t
   | CastReflF t t
-  | LetF Name t t t
+  | -- Sigma Types
+    PairF t t
+  | SigmaF Name t t
+  | -- Annotations
+    LetF Name t t t
   | AnnotationF t t
 
-newtype RawF t = RawF (Loc (TermF Name t))
+newtype RawF t = RawF (Loc (TermF () Name t))
 
 type Raw = Fix RawF
 
-pattern R :: Position -> TermF Name Raw -> Raw
+pattern R :: Position -> TermF () Name Raw -> Raw
 pattern R sl term = Fix (RawF (L sl term))
 
 {-# COMPLETE R #-}
 
-type Term v = Fix (TermF v)
+type Term v = Fix (TermF Relevance v)
 
-type Type v = Fix (TermF v)
+type Type v = Fix (TermF Relevance v)
 
 pattern Var :: v -> Term v
 pattern Var x = Fix (VarF x)
@@ -167,14 +175,14 @@ pattern NElim z p t0 x ih ts n = Fix (NElimF z p t0 x ih ts n)
 pattern Nat :: Term v
 pattern Nat = Fix NatF
 
-pattern Pair :: Term v -> Term v -> Term v
-pattern Pair t u = Fix (PairF t u)
+pattern PropPair :: Term v -> Term v -> Term v
+pattern PropPair t u = Fix (PropPairF t u)
 
-pattern Fst :: Term v -> Term v
-pattern Fst p = Fix (FstF p)
+pattern PropFst :: Term v -> Term v
+pattern PropFst p = Fix (FstF Irrelevant p)
 
-pattern Snd :: Term v -> Term v
-pattern Snd p = Fix (SndF p)
+pattern PropSnd :: Term v -> Term v
+pattern PropSnd p = Fix (SndF Irrelevant p)
 
 pattern Exists :: Name -> Term v -> Term v -> Term v
 pattern Exists x a b = Fix (ExistsF x a b)
@@ -206,6 +214,18 @@ pattern Cast a b e t = Fix (CastF a b e t)
 pattern CastRefl :: Type v -> Term v -> Term v
 pattern CastRefl a t = Fix (CastReflF a t)
 
+pattern Pair :: Term v -> Term v -> Term v
+pattern Pair t u = Fix (PairF t u)
+
+pattern Fst :: Term v -> Term v
+pattern Fst p = Fix (FstF Relevant p)
+
+pattern Snd :: Term v -> Term v
+pattern Snd p = Fix (SndF Relevant p)
+
+pattern Sigma :: Name -> Type v -> Type v -> Type v
+pattern Sigma x a b = Fix (SigmaF x a b)
+
 pattern Let :: Name -> Type v -> Term v -> Term v -> Term v
 pattern Let x a t u = Fix (LetF x a t u)
 
@@ -222,9 +242,9 @@ pattern Annotation t a = Fix (AnnotationF t a)
   Succ,
   NElim,
   Nat,
-  Pair,
-  Fst,
-  Snd,
+  PropPair,
+  PropFst,
+  PropSnd,
   Exists,
   Abort,
   Empty,
@@ -235,11 +255,15 @@ pattern Annotation t a = Fix (AnnotationF t a)
   Transp,
   Cast,
   CastRefl,
+  Pair,
+  Fst,
+  Snd,
+  Sigma,
   Let,
   Annotation
   #-}
 
-instance Functor (TermF v) where
+instance Functor (TermF p v) where
   fmap _ (VarF x) = VarF x
   fmap _ (UF s) = UF s
   fmap f (LambdaF x e) = LambdaF x (f e)
@@ -249,9 +273,9 @@ instance Functor (TermF v) where
   fmap f (SuccF n) = SuccF (f n)
   fmap f (NElimF z p t0 x ih ts n) = NElimF z (f p) (f t0) x ih (f ts) (f n)
   fmap _ NatF = NatF
-  fmap f (PairF t u) = PairF (f t) (f u)
-  fmap f (FstF p) = FstF (f p)
-  fmap f (SndF p) = SndF (f p)
+  fmap f (PropPairF t u) = PropPairF (f t) (f u)
+  fmap f (FstF s p) = FstF s (f p)
+  fmap f (SndF s p) = SndF s (f p)
   fmap f (ExistsF x a b) = ExistsF x (f a) (f b)
   fmap f (AbortF a t) = AbortF (f a) (f t)
   fmap _ EmptyF = EmptyF
@@ -262,6 +286,8 @@ instance Functor (TermF v) where
   fmap f (TranspF t x pf b u t' e) = TranspF (f t) x pf (f b) (f u) (f t') (f e)
   fmap f (CastF a b e t) = CastF (f a) (f b) (f e) (f t)
   fmap f (CastReflF a t) = CastReflF (f a) (f t)
+  fmap f (PairF t u) = PairF (f t) (f u)
+  fmap f (SigmaF x a b) = SigmaF x (f a) (f b)
   fmap f (LetF x a t u) = LetF x (f a) (f t) (f u)
   fmap f (AnnotationF t a) = AnnotationF (f t) (f a)
 
@@ -271,7 +297,7 @@ instance Functor RawF where
 varMap :: forall v v'. (v -> v') -> Term v -> Term v'
 varMap f = foldFix alg
   where
-    alg :: TermF v (Term v') -> Term v'
+    alg :: TermF Relevance v (Term v') -> Term v'
     alg (VarF x) = Var (f x)
     alg (UF s) = U s
     alg (LambdaF x e) = Lambda x e
@@ -281,9 +307,9 @@ varMap f = foldFix alg
     alg (SuccF n) = Succ n
     alg (NElimF z p t0 x ih ts n) = NElim z p t0 x ih ts n
     alg NatF = Nat
-    alg (PairF t u) = Pair t u
-    alg (FstF p) = Fst p
-    alg (SndF p) = Snd p
+    alg (PropPairF t u) = PropPair t u
+    alg (FstF Irrelevant p) = PropFst p
+    alg (SndF Irrelevant p) = PropSnd p
     alg (ExistsF x a b) = Exists x a b
     alg (AbortF a t) = Abort a t
     alg EmptyF = Empty
@@ -294,6 +320,10 @@ varMap f = foldFix alg
     alg (TranspF t x pf b u t' e) = Transp t x pf b u t' e
     alg (CastF a b e t) = Cast a b e t
     alg (CastReflF a t) = CastRefl a t
+    alg (PairF t u) = Pair t u
+    alg (FstF Relevant p) = Fst p
+    alg (SndF Relevant p) = Snd p
+    alg (SigmaF x a b) = Sigma x a b
     alg (LetF x a t u) = Let x a t u
     alg (AnnotationF t a) = Annotation t a
 
@@ -363,9 +393,9 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
           n' = go precLet ns n
        in par prec precApp (showString "ℕ-elim" . showParen True (commaSep [p', t0', ts', n']))
     go _ _ Nat = ('ℕ' :)
-    go _ ns (Pair t u) = ('⟨' :) . go precLet ns t . comma . go precLet ns u . ('⟩' :)
-    go prec ns (Fst p) = par prec precApp (showString "fst " . go precAtom ns p)
-    go prec ns (Snd p) = par prec precApp (showString "snd " . go precAtom ns p)
+    go _ ns (PropPair t u) = ('⟨' :) . go precLet ns t . comma . go precLet ns u . ('⟩' :)
+    go prec ns (PropFst p) = par prec precApp (showString "fst " . go precAtom ns p)
+    go prec ns (PropSnd p) = par prec precApp (showString "snd " . go precAtom ns p)
     go prec ns (Exists "_" a b) =
       let domain = go precApp ns a
           codomain = go precApp ("_" : ns) b
@@ -382,7 +412,7 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
     go _ _ One = ('*' :)
     go _ _ Unit = ('⊤' :)
     go prec ns (Eq t a u) =
-      par prec precPi (go precPi ns t . showString " ~[" . go precAtom ns a . showString "] " . go precPi ns u)
+      par prec precPi (go precApp ns t . showString " ~[" . go precAtom ns a . showString "] " . go precApp ns u)
     go prec ns (Refl t) = par prec precApp (showString "refl " . go precAtom ns t)
     go prec ns (Transp t x pf b u v e) =
       let t' = go precLet ns t
@@ -399,6 +429,17 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
        in par prec precApp (showString "cast" . showParen True (commaSep [a', b', e', t']))
     go prec ns (CastRefl a t) =
       par prec precApp (showString "castrefl" . showParen True (go precLet ns a . comma . go precLet ns t))
+    go _ ns (Pair t u) = ('(' :) . go precLet ns t . showString "; " . go precLet ns u . (')' :)
+    go prec ns (Fst p) = par prec precApp (showString "fst " . go precAtom ns p)
+    go prec ns (Snd p) = par prec precApp (showString "snd " . go precAtom ns p)
+    go prec ns (Sigma "_" a b) =
+      let domain = go precApp ns a
+          codomain = go precApp ("_" : ns) b
+      in par prec precPi (domain . showString " × " . codomain)
+    go prec ns (Sigma x a b) =
+      let domain = showChar 'Σ' . showParen True (showString x . showString " : " . go precLet ns a)
+          codomain = go precPi (x : ns) b
+      in tag "Σ" . par prec precPi (domain . showString ". " . codomain)
     go prec ns (Let x a t u) =
       let a' = go precLet ns a
           t' = go precLet ns t
@@ -415,17 +456,13 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
     go _ ns (Annotation t a) =
       showParen True (go precLet ns t . showString " : " . go precLet ns a)
 
-eraseSourceLocations :: Raw -> Term Name
-eraseSourceLocations = foldFix alg
-  where
-    alg :: RawF (Term Name) -> Term Name
-    alg (RawF l) = Fix (syntax l)
+-- eraseSourceLocations :: Raw -> Term Name
+-- eraseSourceLocations = foldFix alg
+--   where
+--     alg :: RawF (Term Name) -> Term Name
+--     alg (RawF l) = Fix (syntax l)
 
 type Env v = [Val v]
-
--- data Closure v
---   = Closure (Term v) (Env v)
---   | Const (Val v)
 
 -- TODO: Defunctionalise closures
 type Closure1 v = Val v -> Val v
@@ -450,6 +487,10 @@ data Val v
   | VUnit
   | VEq (Val v) (VTy v) (Val v)
   | VCast (VTy v) (VTy v) (Val v)
+  | VPair (Val v) (Val v)
+  | VFst (Val v)
+  | VSnd (Val v)
+  | VSigma Name (VTy v) (Closure1 v)
 
 vFun :: Relevance -> VTy v -> VTy v -> VTy v
 vFun s a b = VPi s "_" a (const b)
