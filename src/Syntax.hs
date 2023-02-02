@@ -3,7 +3,8 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module Syntax
-  ( Name,
+  ( pattern (:>),
+    Name,
     Loc (..),
     Ix (..),
     Lvl (..),
@@ -41,6 +42,9 @@ module Syntax
     pattern Fst,
     pattern Snd,
     pattern Sigma,
+    pattern Quotient,
+    pattern QProj,
+    pattern QElim,
     pattern Let,
     pattern Annotation,
     Val (..),
@@ -61,6 +65,13 @@ where
 import Data.Fix
 import Text.Printf (IsChar (toChar))
 import Error.Diagnose.Position (Position(..))
+
+-- Snoc lists
+infixl 4 :>
+pattern (:>) :: [a] -> a -> [a]
+pattern xs :> x = x : xs
+
+{-# COMPLETE (:>), [] #-}
 
 -- Language source identifiers
 type Name = String
@@ -131,6 +142,12 @@ data TermF proj v t
   | -- Sigma Types
     PairF t t
   | SigmaF Name t t
+  | -- Quotient Types
+    -- A / (x x'. R, x. Refl, x y xy. Sym, x y z xy yz. Trans) : U
+    QuotientF t Name Name t Name t Name Name Name t Name Name Name Name Name t
+  | QProjF t
+  | -- Q-elim(z. B, x. tπ, x y e. t~, u) : B[z/u]
+    QElimF Name t Name t Name Name Name t t
   | -- Annotations
     LetF Name t t t
   | AnnotationF t t
@@ -170,7 +187,7 @@ pattern Succ :: Term v -> Term v
 pattern Succ n = Fix (SuccF n)
 
 pattern NElim :: Name -> Term v -> Term v -> Name -> Name -> Term v -> Term v -> Term v
-pattern NElim z p t0 x ih ts n = Fix (NElimF z p t0 x ih ts n)
+pattern NElim z a t0 x ih ts n = Fix (NElimF z a t0 x ih ts n)
 
 pattern Nat :: Term v
 pattern Nat = Fix NatF
@@ -226,6 +243,25 @@ pattern Snd p = Fix (SndF Relevant p)
 pattern Sigma :: Name -> Type v -> Type v -> Type v
 pattern Sigma x a b = Fix (SigmaF x a b)
 
+pattern Quotient :: Type v                                           -- Base type          [A]
+                 -> Name -> Name -> Type v                           -- Quotient relation  [R : A -> A -> Ω]
+                 -> Name -> Term v                                   -- Reflexivity proof  [Rr : (x : A) -> R x x]
+                 -> Name -> Name -> Name -> Term v                   -- Symmetry proof     [Rs : (x, y : A) -> R x y -> R y x]
+                 -> Name -> Name -> Name -> Name -> Name -> Term v   -- Transitivity proof [Rt : (x, y, z : A) -> R x y -> R y z -> R x z]
+                 -> Term v                                           -- Quotient type      [A/(R, Rr, Rs, Rt)]
+pattern Quotient a x y r rx rr sx sy sxy rs tx ty tz txy tyz rt =
+  Fix (QuotientF a x y r rx rr sx sy sxy rs tx ty tz txy tyz rt)
+
+pattern QProj :: Term v -> Term v
+pattern QProj t = Fix (QProjF t)
+
+pattern QElim :: Name -> Type v                                      -- Type family        [B : A/R -> s]
+              -> Name -> Term v                                      -- Function           [tπ : (x : A) -> B π(x)]
+              -> Name -> Name -> Name -> Type v                      -- Preservation proof [t~ : (x, y : A) -> (e : R x y) -> (tπ x) ~[B π(x)] cast(B π(y), B π(x), B e, tπ y)]
+              -> Term v                                              -- Argument           [u : A/R]
+              -> Term v                                              -- Eliminated term    [Q-elim(B, tπ, t~, u) : B u]
+pattern QElim z b x tpi px py pe p u = Fix (QElimF z b x tpi px py pe p u)
+
 pattern Let :: Name -> Type v -> Term v -> Term v -> Term v
 pattern Let x a t u = Fix (LetF x a t u)
 
@@ -259,6 +295,9 @@ pattern Annotation t a = Fix (AnnotationF t a)
   Fst,
   Snd,
   Sigma,
+  Quotient,
+  QProj,
+  QElim,
   Let,
   Annotation
   #-}
@@ -271,7 +310,7 @@ instance Functor (TermF p v) where
   fmap f (PiF s x a b) = PiF s x (f a) (f b)
   fmap _ ZeroF = ZeroF
   fmap f (SuccF n) = SuccF (f n)
-  fmap f (NElimF z p t0 x ih ts n) = NElimF z (f p) (f t0) x ih (f ts) (f n)
+  fmap f (NElimF z a t0 x ih ts n) = NElimF z (f a) (f t0) x ih (f ts) (f n)
   fmap _ NatF = NatF
   fmap f (PropPairF t u) = PropPairF (f t) (f u)
   fmap f (FstF s p) = FstF s (f p)
@@ -288,6 +327,10 @@ instance Functor (TermF p v) where
   fmap f (CastReflF a t) = CastReflF (f a) (f t)
   fmap f (PairF t u) = PairF (f t) (f u)
   fmap f (SigmaF x a b) = SigmaF x (f a) (f b)
+  fmap f (QuotientF a x y r rx rr sx sy sxy rs tx ty tz txy tyz rt) =
+    QuotientF (f a) x y (f r) rx (f rr) sx sy sxy (f rs) tx ty tz txy tyz (f rt)
+  fmap f (QProjF t) = QProjF (f t)
+  fmap f (QElimF z b x tpi px py pe p u) = QElimF z (f b) x (f tpi) px py pe (f p) (f u)
   fmap f (LetF x a t u) = LetF x (f a) (f t) (f u)
   fmap f (AnnotationF t a) = AnnotationF (f t) (f a)
 
@@ -305,7 +348,7 @@ varMap f = foldFix alg
     alg (PiF s x a b) = Pi s x a b
     alg ZeroF = Zero
     alg (SuccF n) = Succ n
-    alg (NElimF z p t0 x ih ts n) = NElim z p t0 x ih ts n
+    alg (NElimF z a t0 x ih ts n) = NElim z a t0 x ih ts n
     alg NatF = Nat
     alg (PropPairF t u) = PropPair t u
     alg (FstF Irrelevant p) = PropFst p
@@ -324,6 +367,10 @@ varMap f = foldFix alg
     alg (FstF Relevant p) = Fst p
     alg (SndF Relevant p) = Snd p
     alg (SigmaF x a b) = Sigma x a b
+    alg (QuotientF a x y r rx rr sx sy sxy rs tx ty tz txy tyz rt) =
+      Quotient a x y r rx rr sx sy sxy rs tx ty tz txy tyz rt
+    alg (QProjF t) = QProj t
+    alg (QElimF z b x tpi px py pe p u) = QElim z b x tpi px py pe p u
     alg (LetF x a t u) = Let x a t u
     alg (AnnotationF t a) = Annotation t a
 
@@ -351,110 +398,132 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
     par :: Int -> Int -> ShowS -> ShowS
     par p p' = showParen (p' < p || debug)
 
+    str :: String -> ShowS
+    str = showString
+
+    chr :: Char -> ShowS
+    chr = showChar
+
     showRelevance :: Relevance -> ShowS
-    showRelevance Relevant = ('U' :)
-    showRelevance Irrelevant = ('Ω' :)
+    showRelevance Relevant = chr 'U'
+    showRelevance Irrelevant = chr 'Ω'
 
-    comma :: ShowS
-    comma = showString ", "
+    comma, dot, space :: ShowS
+    comma = str ", "
+    dot = str ". "
+    space = chr ' '
 
-    commaSep :: [ShowS] -> ShowS
-    commaSep [] = id
-    commaSep [x] = x
-    commaSep (x : xs) = x . comma . commaSep xs
+    sep :: ShowS -> [ShowS] -> ShowS
+    sep _ [] = id
+    sep _ [x] = x
+    sep sepWith (x : xs) = x . sepWith . sep sepWith xs
 
     tag :: String -> ShowS
     tag t
-      | debug = ('{' :) . showString t . ('}' :)
+      | debug = chr '{' . str t . chr '}'
       | otherwise = id
 
     go :: Int -> [Name] -> Term v -> ShowS
     go _ ns (Var x) = tag "V" . showsVar x ns
     go _ _ (U s) = showRelevance s
     go prec ns (Lambda x e) =
-      let domain = ('λ' :) . showString x
-       in par prec precLet (domain . showString ". " . go precLet (x : ns) e)
+      let domain = chr 'λ' . str x
+       in par prec precLet (domain . dot . go precLet (ns :> x) e)
     go prec ns (App t u) =
-      tag "A" . par prec precApp (go precApp ns t . (' ' :) . go precAtom ns u)
+      tag "A" . par prec precApp (go precApp ns t . space . go precAtom ns u)
     go prec ns (Pi _ "_" a b) =
       let domain = go precApp ns a
-          codomain = go precPi ("_" : ns) b
-       in tag "Π" . par prec precPi (domain . showString " → " . codomain)
+          codomain = go precPi (ns :> "_") b
+       in tag "Π" . par prec precPi (domain . str " → " . codomain)
     go prec ns (Pi s x a b) =
-      let domain = showParen True (showString x . showString " :" . showRelevance s . (' ' :) . go precLet ns a)
-          codomain = go precPi (x : ns) b
-       in tag "Π" . par prec precPi (domain . showString " → " . codomain)
-    go _ _ Zero = ('Z' :)
-    go prec ns (Succ n) = par prec precApp (showString "S " . go precAtom ns n)
-    go prec ns (NElim z p t0 x ih ts n) =
-      let p' = showString z . showString ". " . go precLet (z : ns) p
+      let domain = showParen True (str x . str " :" . showRelevance s . space . go precLet ns a)
+          codomain = go precPi (ns :> x) b
+       in tag "Π" . par prec precPi (domain . str " → " . codomain)
+    go _ _ Zero = chr '0'
+    go prec ns (Succ n) = par prec precApp (str "S " . go precAtom ns n)
+    go prec ns (NElim z a t0 x ih ts n) =
+      let a' = str z . dot . go precLet (ns :> z) a
           t0' = go precLet ns t0
-          ts' = showString x . showString " " . showString ih . showString ". " . go precLet (ih : x : ns) ts
+          ts' = str x . space . str ih . dot . go precLet (ns :> x :> ih) ts
           n' = go precLet ns n
-       in par prec precApp (showString "ℕ-elim" . showParen True (commaSep [p', t0', ts', n']))
-    go _ _ Nat = ('ℕ' :)
-    go _ ns (PropPair t u) = ('⟨' :) . go precLet ns t . comma . go precLet ns u . ('⟩' :)
-    go prec ns (PropFst p) = par prec precApp (showString "fst " . go precAtom ns p)
-    go prec ns (PropSnd p) = par prec precApp (showString "snd " . go precAtom ns p)
+       in par prec precApp (str "ℕ-elim" . showParen True (sep comma [a', t0', ts', n']))
+    go _ _ Nat = chr 'ℕ'
+    go _ ns (PropPair t u) = chr '⟨' . go precLet ns t . comma . go precLet ns u . chr '⟩'
+    go prec ns (PropFst p) = par prec precApp (str "fst " . go precAtom ns p)
+    go prec ns (PropSnd p) = par prec precApp (str "snd " . go precAtom ns p)
     go prec ns (Exists "_" a b) =
       let domain = go precApp ns a
-          codomain = go precApp ("_" : ns) b
-       in tag "∃" . par prec precPi (domain . showString " ∧ " . codomain)
+          codomain = go precApp (ns :> "_") b
+       in tag "∃" . par prec precPi (domain . str " ∧ " . codomain)
     go prec ns (Exists x a b) =
-      let domain = showParen True (showString x . showString " : " . go precLet ns a)
-          codomain = go precPi (x : ns) b
-       in par prec precPi (('∃' :) . domain . showString ". " . codomain)
+      let domain = showParen True (str x . str " : " . go precLet ns a)
+          codomain = go precPi (ns :> x) b
+       in par prec precPi (chr '∃' . domain . dot . codomain)
     go prec ns (Abort a t) =
       let a' = go precLet ns a
           t' = go precLet ns t
-       in par prec precApp (showString "⊥-elim" . showParen True (a' . comma . t'))
-    go _ _ Empty = ('⊥' :)
-    go _ _ One = ('*' :)
-    go _ _ Unit = ('⊤' :)
+       in par prec precApp (str "⊥-elim" . showParen True (a' . comma . t'))
+    go _ _ Empty = chr '⊥'
+    go _ _ One = chr '*'
+    go _ _ Unit = chr '⊤'
     go prec ns (Eq t a u) =
-      par prec precPi (go precApp ns t . showString " ~[" . go precAtom ns a . showString "] " . go precApp ns u)
-    go prec ns (Refl t) = par prec precApp (showString "refl " . go precAtom ns t)
+      par prec precPi (go precApp ns t . str " ~[" . go precAtom ns a . str "] " . go precApp ns u)
+    go prec ns (Refl t) = par prec precApp (str "refl " . go precAtom ns t)
     go prec ns (Transp t x pf b u v e) =
       let t' = go precLet ns t
-          b' = showString x . showString " " . showString pf . showString ". " . go precLet (pf : x : ns) b
+          b' = str x . space . str pf . dot . go precLet (ns :> x :> pf) b
           u' = go precLet ns u
           v' = go precLet ns v
           e' = go precLet ns e
-       in par prec precApp (showString "transp" . showParen True (commaSep [t', b', u', v', e']))
+       in par prec precApp (str "transp" . showParen True (sep comma [t', b', u', v', e']))
     go prec ns (Cast a b e t) =
       let a' = go precLet ns a
           b' = go precLet ns b
           e' = go precLet ns e
           t' = go precLet ns t
-       in par prec precApp (showString "cast" . showParen True (commaSep [a', b', e', t']))
+       in par prec precApp (str "cast" . showParen True (sep comma [a', b', e', t']))
     go prec ns (CastRefl a t) =
-      par prec precApp (showString "castrefl" . showParen True (go precLet ns a . comma . go precLet ns t))
-    go _ ns (Pair t u) = ('(' :) . go precLet ns t . showString "; " . go precLet ns u . (')' :)
-    go prec ns (Fst p) = par prec precApp (showString "fst " . go precAtom ns p)
-    go prec ns (Snd p) = par prec precApp (showString "snd " . go precAtom ns p)
+      par prec precApp (str "castrefl" . showParen True (go precLet ns a . comma . go precLet ns t))
+    go _ ns (Pair t u) = chr '(' . go precLet ns t . str "; " . go precLet ns u . chr ')'
+    go prec ns (Fst p) = par prec precApp (str "fst " . go precAtom ns p)
+    go prec ns (Snd p) = par prec precApp (str "snd " . go precAtom ns p)
     go prec ns (Sigma "_" a b) =
       let domain = go precApp ns a
-          codomain = go precApp ("_" : ns) b
-      in par prec precPi (domain . showString " × " . codomain)
+          codomain = go precApp (ns :> "_") b
+      in par prec precPi (domain . str " × " . codomain)
     go prec ns (Sigma x a b) =
-      let domain = showChar 'Σ' . showParen True (showString x . showString " : " . go precLet ns a)
-          codomain = go precPi (x : ns) b
-      in tag "Σ" . par prec precPi (domain . showString ". " . codomain)
+      let domain = chr 'Σ' . showParen True (str x . str " : " . go precLet ns a)
+          codomain = go precPi (ns :> x) b
+      in tag "Σ" . par prec precPi (domain . dot . codomain)
+    go prec ns (Quotient a x y r rx rr sx sy sxy rs tx ty tz txy tyz rt) =
+      let a' = go precAtom ns a
+          r' = str x . space . str y . dot . go precLet (ns :> x :> y) r
+          rr' = str rx . dot . go precLet (ns :> rx) rr
+          rs' = sep space [str sx, str sy, str sxy] . dot . go precLet (ns :> sx :> sy :> sxy) rs
+          rt' = sep space [str tx, str ty, str tz, str txy, str tyz] . dot . go precLet (ns :> tx :> ty :> tz :> txy :> tyz) rt
+      in par prec precPi (a' . str "/(" . sep comma [r', rr', rs', rt'] . chr ')')
+    go prec ns (QProj t) = par prec precApp (str "π " . go precAtom ns t)
+    go prec ns (QElim z b x tpi px py pe p u) =
+      let b' = str z . dot . go precLet (ns :> z) b
+          tpi' = str x . dot . go precLet (ns :> x) tpi
+          p' = sep space [str px, str py, str pe] . dot . go precLet (ns :> px :> py :> pe) p
+          u' = go precLet ns u
+      in par prec precApp (str "Q-elim(" . sep comma [b', tpi', p', u'] . chr ')')
     go prec ns (Let x a t u) =
       let a' = go precLet ns a
           t' = go precLet ns t
-          u' = go precLet (x : ns) u
+          u' = go precLet (ns :> x) u
        in par
             prec
             precLet
-            ( showString "let " . showString x . showString " : " . a'
-                . showString " =\n    "
+            ( str "let " . str x . str " : " . a'
+                . str " =\n    "
                 . t'
-                . showString "\nin\n"
+                . str "\nin\n"
                 . u'
             )
     go _ ns (Annotation t a) =
-      showParen True (go precLet ns t . showString " : " . go precLet ns a)
+      showParen True (go precLet ns t . str " : " . go precLet ns a)
 
 -- eraseSourceLocations :: Raw -> Term Name
 -- eraseSourceLocations = foldFix alg
@@ -491,6 +560,9 @@ data Val v
   | VFst (Val v)
   | VSnd (Val v)
   | VSigma Name (VTy v) (Closure1 v)
+  | VQuotient (VTy v) Name Name (Closure2 v)
+  | VQProj (Val v)
+  | VQElim Name (Closure1 v) Name (Closure1 v) (Val v)
 
 vFun :: Relevance -> VTy v -> VTy v -> VTy v
 vFun s a b = VPi s "_" a (const b)

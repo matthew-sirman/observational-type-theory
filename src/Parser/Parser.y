@@ -54,6 +54,9 @@ import qualified Error.Diagnose as Err
   Sigma                 { L _ SymSigma }
   times                 { L _ SymTimes }
   ';'                   { L _ SymSemiColon }
+  '/'                   { L _ SymForwardSlash }
+  proj                  { L _ SymQProj }
+  Qelim                 { L _ KWQElim }
   let                   { L _ KWLet }
   '='                   { L _ TokEquals }
   in                    { L _ KWIn }
@@ -81,6 +84,14 @@ term :: { Raw }
   | apps '~' '[' exp ']' apps                                       { rloc (EqF $1 $4 $6) $1 $> }
   | Sigma '(' var ':' exp ')' '.' term                              { rloc (SigmaF (projName $3) $5 $8) $1 $> }
   | apps times apps                                                 { rloc (SigmaF "_" $1 $3) $1 $> }
+  | atom '/' '(' var var '.' exp ','
+                 var '.' exp ','
+                 var var var '.' exp ','
+                 var var var var var '.' exp
+             ')'                                                    { rloc (QuotientF $1 (projName $4) (projName $5) $7
+                                                                                         (projName $9) $11
+                                                                                         (projName $13) (projName $14) (projName $15) $17
+                                                                                         (projName $19) (projName $20) (projName $21) (projName $22) (projName $23) $25) $1 $> }
   | apps                                                            { $1 }
 
 apps :: { Raw }
@@ -94,6 +105,15 @@ apps :: { Raw }
   | transp '(' exp ',' var var '.' exp ',' exp ',' exp ',' exp ')'  { rloc (TranspF $3 (projName $5) (projName $6) $8 $10 $12 $14) $1 $> }
   | cast '(' exp ',' exp ',' exp ',' exp ')'                        { rloc (CastF $3 $5 $7 $9) $1 $> }
   | castrefl '(' exp ',' exp ')'                                    { rloc (CastReflF $3 $5) $1 $> }
+  | proj atom                                                       { rloc (QProjF $2) $1 $> }
+  | Qelim '(' var '.' exp ','
+              var '.' exp ','
+              var var var '.' exp ','
+              exp
+          ')'                                                       { rloc (QElimF (projName $3) $5
+                                                                                   (projName $7) $9
+                                                                                   (projName $11) (projName $12) (projName $13) $15
+                                                                                   $17) $1 $> }
   | atom                                                            { $1 }
 
 atom :: { Raw }

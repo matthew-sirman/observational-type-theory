@@ -204,6 +204,144 @@ tm14 =
     castrefl((x :U ℕ) -> ℕ, λx. x) 0
   |]
 
+tm15 :: String
+tm15 =
+  [r|
+    let R : (_ :U ℕ) -> (_ :U ℕ) -> Ω =
+      λx. λy. rec(_. Ω, rec(_. Ω, ⊤, _ _. ⊥, y), _ _. rec(_. Ω, ⊥, _ _. ⊤, y), x)
+    in
+    let Rr : (x :U ℕ) -> R x x =
+      λx. rec(z. R z z, *, _ _. *, x)
+    in
+    let Rs : (x :U ℕ) -> (y :U ℕ) -> (_ :Ω R x y) -> R y x =
+      λx. λy. rec(y'. (_ :Ω R x y') -> R y' x,
+                  rec(x'. (_ :Ω R x' 0) -> R 0 x', λw. w, _ _. λw. w, x),
+                  k _. rec(x'. (_ :Ω R x' (S k)) -> R (S k) x', λw. w, _ _. λw. w, x),
+                  y)
+    in
+    let Rt : (x :U ℕ) -> (y :U ℕ) -> (z :U ℕ) -> (_ :Ω R x y) -> (_ :Ω R y z) -> R x z =
+      λx. λy. λz. rec(z'. (_ :Ω R x y) -> (_ :Ω R y z') -> R x z',
+                      rec(y'. (_ :Ω R x y') -> (_ :Ω R y' 0) -> R x 0,
+                          λx0. λ_. x0,
+                          k _. λ_. λw. ⊥-elim(R x 0, w),
+                          y),
+                      k _. rec(y'. (_ :Ω R x y') -> (_ :Ω R y' (S k)) -> R x (S k),
+                               λ_. λw. ⊥-elim(R x (S k), w),
+                               l _. rec(x'. (_ :Ω R x' (S l)) -> (_ :Ω R (S l) (S k)) -> R x' (S k),
+                                        λw. λ_. w,
+                                        _ _. λ_. λ_. *,
+                                        x),
+                               y),
+                      z)
+    in
+    *
+  |]
+
+tm16 :: String
+tm16 =
+  [r|
+    let ap : (A :U U) -> (B :U U)
+          -> (x :U A) -> (y :U A)
+          -> (f :U (z :U A) -> B)
+          -> (_ :Ω x ~[A] y) -> f x ~[B] f y =
+      λA. λB. λx. λy. λf. λp.
+        transp(x, t _. f x ~[B] f t, refl (f x), y, p)
+    in
+    let eq_trans : (A :U U)
+                -> (x :U A) -> (y :U A) -> (z :U A)
+                -> (xy :Ω x ~[A] y) -> (yz :Ω y ~[A] z)
+                -> x ~[A] z =
+      λA. λx. λy. λz. λxy. transp(x, y' _. (_ :Ω y' ~[A] z) -> x ~[A] z, λw. w, y, xy)
+    in
+    let cast_compose : (A :U U) -> (B :U U) -> (C :U U)
+                    -> (AB :Ω A ~[U] B) -> (BC :Ω B ~[U] C) -> (AC :Ω A ~[U] C)
+                    -> (x :U A)
+                    -> cast(A, C, AC, x) ~[C] cast(B, C, BC, cast(A, B, AB, x)) =
+      λA. λB. λC. λAB. λBC. λAC. λx.
+        transp(B, B' BB'. cast(A, B', eq_trans U A B B' AB BB', x) ~[B'] cast(B, B', BB', cast(A, B, AB, x)),
+               castrefl(B, cast(A, B, AB, x)), C, BC)
+    in
+
+    let R : (_ :U ℕ) -> (_ :U ℕ) -> Ω =
+      λx. λy. rec(_. Ω, rec(_. Ω, ⊤, _ _. ⊥, y), _ _. rec(_. Ω, ⊥, _ _. ⊤, y), x)
+    in
+    let Rr : (x :U ℕ) -> R x x =
+      λx. rec(z. R z z, *, _ _. *, x)
+    in
+    let Rs : (x :U ℕ) -> (y :U ℕ)
+          -> (_ :Ω R x y) -> R y x =
+      λx. λy. rec(y'. (_ :Ω R x y') -> R y' x,
+                  rec(x'. (_ :Ω R x' 0) -> R 0 x', λw. w, _ _. λw. w, x),
+                  k _. rec(x'. (_ :Ω R x' (S k)) -> R (S k) x', λw. w, _ _. λw. w, x),
+                  y)
+    in
+    let Rt : (x :U ℕ) -> (y :U ℕ) -> (z :U ℕ)
+          -> (_ :Ω R x y) -> (_ :Ω R y z) -> R x z =
+      λx. λy. λz. rec(z'. (_ :Ω R x y) -> (_ :Ω R y z') -> R x z',
+                      rec(y'. (_ :Ω R x y') -> (_ :Ω R y' 0) -> R x 0,
+                          λx0. λ_. x0,
+                          k _. λ_. λw. ⊥-elim(R x 0, w),
+                          y),
+                      k _. rec(y'. (_ :Ω R x y') -> (_ :Ω R y' (S k)) -> R x (S k),
+                               λ_. λw. ⊥-elim(R x (S k), w),
+                               l _. rec(x'. (_ :Ω R x' (S l)) -> (_ :Ω R (S l) (S k)) -> R x' (S k),
+                                        λw. λ_. w,
+                                        _ _. λ_. λ_. *,
+                                        x),
+                               y),
+                      z)
+    in
+
+    let Bool : U =
+      ℕ / (x y. R x y,
+           x. Rr x,
+           x y xRy. Rs x y xRy,
+           x y z xRy yRz. Rt x y z xRy yRz)
+    in
+    let true : Bool = π 0 in
+    let false : Bool = π (S 0) in
+    let if : (B :U (_ :U Bool) -> U) -> (c :U Bool) -> (_ :U B true) -> (_ :U B false) -> B c =
+      λB. λc. λt. λf.
+        let congB : (x :U ℕ) -> (y :U ℕ) -> (_ :Ω R x y) -> B (π x) ~[U] B (π y) =
+          λx. λy. λxRy. ap Bool U (π x) (π y) B xRy
+        in
+        let choose : (x :U ℕ) -> B (π x) =
+          λx. rec(x'. B (π x'), t, k _. cast(B false, B (π (S k)),
+                                             congB (S 0) (S k) *,
+                                             f), x)
+        in
+        let presTRhs : (x :U ℕ) -> (y :U ℕ) -> (_ :Ω R x y) -> Ω =
+          λx. λy. λxRy.
+            (choose x) ~[B (π x)] cast(B (π y), B (π x), congB y x (Rs x y xRy), choose y)
+        in
+        let presT : (x :U ℕ) -> (y :U ℕ) -> Ω =
+          λx. λy. (xRy :Ω R x y) -> presTRhs x y xRy
+        in
+        let pres : (x :U ℕ) -> (y :U ℕ) -> presT x y =
+          λx. λy. rec(x'. presT x' y,
+                        rec(y'. presT 0 y',
+                            λ_. castrefl(B true, t),
+                            l _. λw. ⊥-elim(presTRhs 0 (S l) w, w),
+                            y),
+                      k _.
+                        rec(y'. presT (S k) y',
+                            λw. ⊥-elim(presTRhs (S k) 0 w, w),
+                            l _. λ_. cast_compose (B false) (B (π (S l))) (B (π (S k)))
+                                                        (congB (S 0) (S l) *)
+                                                        (congB (S l) (S k) *)
+                                                        (congB (S 0) (S k) *)
+                                                        f,
+                            y),
+                      x)
+        in
+        Q-elim(z. B z,
+               x. choose x,
+               x y e. pres x y e,
+               c)
+    in
+    if (λb. if (λ_. U) b ℕ (ℕ × ℕ)) true (S 0) (0; S (S 0))
+  |]
+
 test :: String -> IO ()
 test input =
   -- let result = do
@@ -219,7 +357,7 @@ test input =
       let diagnostic = addFile def "<test-file>" input
           diagnostic' = addReport diagnostic e
       in printDiagnostic stdout True True 4 defaultStyle diagnostic'
-    Right (t, _, tty) -> do
+    Right (t, tty, _) -> do
       putStrLn "Program:"
       putStrLn (prettyPrintTerm [] t)
       putStrLn "\nHas type:"

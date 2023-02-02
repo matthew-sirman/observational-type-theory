@@ -23,8 +23,8 @@ tokens :-
        "->"                     { symbol SymArrow }
        "0"                      { symbol SymZero }
        "S"                      { symbol SymSucc}
-       "ℕ-elim"                 { symbol KWNElim }
-       "rec"                    { symbol KWNElim }
+       "ℕ-elim"                 { keyword KWNElim }
+       "rec"                    { keyword KWNElim }
        "ℕ"                      { symbol SymNat }
        "Nat"                    { symbol SymNat }
        "⟨"                      { symbol TokOpenAngle }
@@ -55,6 +55,10 @@ tokens :-
        "Σ"                      { symbol SymSigma }
        "×"                      { symbol SymTimes }
        ";"                      { symbol SymSemiColon }
+       "/"                      { symbol SymForwardSlash }
+       "π"                      { symbol SymQProj }
+       "proj"                   { symbol SymQProj }
+       "Q-elim"                 { keyword KWQElim }
        "let"                    { keyword KWLet }
        "="                      { symbol TokEquals }
        "in"                     { keyword KWIn}
@@ -96,6 +100,9 @@ data Token
   | SymSigma
   | SymTimes
   | SymSemiColon
+  | SymForwardSlash
+  | SymQProj
+  | KWQElim
   | KWLet
   | TokEquals
   | KWIn
