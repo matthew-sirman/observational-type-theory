@@ -291,10 +291,15 @@ conv pos names = conv' names names
       conv' ns ns' lvl b b'
       -- [e ≡ e'] follows from proof irrelevance, given [a ≡ a'] and [b ≡ b']
       conv' ns ns' lvl t t'
-    -- TODO: Consider whether eta expansion for Σ types is necessary
     conv' ns ns' lvl (VPair t u) (VPair t' u') = do
       conv' ns ns' lvl t t'
       conv' ns ns' lvl u u'
+    conv' ns ns' lvl (VPair t u) t' = do
+      conv' ns ns' lvl t (VFst t')
+      conv' ns ns' lvl u (VSnd t')
+    conv' ns ns' lvl t (VPair t' u') = do
+      conv' ns ns' lvl (VFst t) t'
+      conv' ns ns' lvl (VSnd t) u'
     conv' ns ns' lvl (VFst t) (VFst t') = conv' ns ns' lvl t t'
     conv' ns ns' lvl (VSnd t) (VSnd t') = conv' ns ns' lvl t t'
     conv' ns ns' lvl (VSigma x a b) (VSigma x' a' b') = do
