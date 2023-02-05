@@ -59,6 +59,10 @@ tokens :-
        "π"                      { symbol SymQProj }
        "proj"                   { symbol SymQProj }
        "Q-elim"                 { keyword KWQElim }
+       "Idrefl"                 { keyword KWIdRefl }
+       "Idpath"                 { keyword KWIdPath }
+       "J"                      { keyword KWJ }
+       "Id"                     { keyword KWId }
        "let"                    { keyword KWLet }
        "="                      { symbol TokEquals }
        "in"                     { keyword KWIn}
@@ -103,6 +107,10 @@ data Token
   | SymForwardSlash
   | SymQProj
   | KWQElim
+  | KWIdRefl
+  | KWIdPath
+  | KWJ
+  | KWId
   | KWLet
   | TokEquals
   | KWIn

@@ -45,6 +45,10 @@ module Syntax
     pattern Quotient,
     pattern QProj,
     pattern QElim,
+    pattern IdRefl,
+    pattern IdPath,
+    pattern J,
+    pattern Id,
     pattern Let,
     pattern Annotation,
     Val (..),
@@ -148,6 +152,11 @@ data TermF proj v t
   | QProjF t
   | -- Q-elim(z. B, x. tπ, x y e. t~, u) : B[z/u]
     QElimF Name t Name t Name Name Name t t
+  | -- Inductive equality
+    IdReflF t
+  | IdPathF t
+  | JF t t Name Name t t t t
+  | IdF t t t
   | -- Annotations
     LetF Name t t t
   | AnnotationF t t
@@ -262,6 +271,18 @@ pattern QElim :: Name -> Type v                                      -- Type fam
               -> Term v                                              -- Eliminated term    [Q-elim(B, tπ, t~, u) : B u]
 pattern QElim z b x tpi px py pe p u = Fix (QElimF z b x tpi px py pe p u)
 
+pattern IdRefl :: Term v -> Term v
+pattern IdRefl t = Fix (IdReflF t)
+
+pattern IdPath :: Term v -> Term v
+pattern IdPath t = Fix (IdPathF t)
+
+pattern J :: Type v -> Term v -> Name -> Name -> Type v -> Term v -> Term v -> Term v -> Term v
+pattern J a t x pf b u t' e = Fix (JF a t x pf b u t' e)
+
+pattern Id :: Type v -> Term v -> Term v -> Type v
+pattern Id a t u = Fix (IdF a t u)
+
 pattern Let :: Name -> Type v -> Term v -> Term v -> Term v
 pattern Let x a t u = Fix (LetF x a t u)
 
@@ -298,6 +319,10 @@ pattern Annotation t a = Fix (AnnotationF t a)
   Quotient,
   QProj,
   QElim,
+  IdRefl,
+  IdPath,
+  J,
+  Id,
   Let,
   Annotation
   #-}
@@ -331,6 +356,10 @@ instance Functor (TermF p v) where
     QuotientF (f a) x y (f r) rx (f rr) sx sy sxy (f rs) tx ty tz txy tyz (f rt)
   fmap f (QProjF t) = QProjF (f t)
   fmap f (QElimF z b x tpi px py pe p u) = QElimF z (f b) x (f tpi) px py pe (f p) (f u)
+  fmap f (IdReflF t) = IdReflF (f t)
+  fmap f (IdPathF t) = IdPathF (f t)
+  fmap f (JF a t x pf b u t' e) = JF (f a) (f t) x pf (f b) (f u) (f t') (f e)
+  fmap f (IdF a t u) = IdF (f a) (f t) (f u)
   fmap f (LetF x a t u) = LetF x (f a) (f t) (f u)
   fmap f (AnnotationF t a) = AnnotationF (f t) (f a)
 
@@ -371,6 +400,10 @@ varMap f = foldFix alg
       Quotient a x y r rx rr sx sy sxy rs tx ty tz txy tyz rt
     alg (QProjF t) = QProj t
     alg (QElimF z b x tpi px py pe p u) = QElim z b x tpi px py pe p u
+    alg (IdReflF t) = IdRefl t
+    alg (IdPathF t) = IdPath t
+    alg (JF a t x pf b u t' e) = J a t x pf b u t' e
+    alg (IdF a t u) = Id a t u
     alg (LetF x a t u) = Let x a t u
     alg (AnnotationF t a) = Annotation t a
 
@@ -509,6 +542,18 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
           p' = sep space [str px, str py, str pe] . dot . go precLet (ns :> px :> py :> pe) p
           u' = go precLet ns u
       in par prec precApp (str "Q-elim(" . sep comma [b', tpi', p', u'] . chr ')')
+    go prec ns (IdRefl t) = par prec precApp (str "Idrefl " . go precAtom ns t)
+    go prec ns (IdPath t) = par prec precApp (str "Idpath " . go precAtom ns t)
+    go prec ns (J a t x pf b u v e) =
+      let a' = go precLet ns a
+          t' = go precLet ns t
+          b' = str x . space . str pf . dot . go precLet (ns :> x :> pf) b
+          u' = go precLet ns u
+          v' = go precLet ns v
+          e' = go precLet ns e
+      in par prec precApp (str "J" . showParen True (sep comma [a', t', b', u', v', e']))
+    go prec ns (Id a t u) =
+      par prec precApp (str "Id" . showParen True (sep comma [go precLet ns a, go precLet ns t, go precLet ns u]))
     go prec ns (Let x a t u) =
       let a' = go precLet ns a
           t' = go precLet ns t
@@ -563,6 +608,10 @@ data Val v
   | VQuotient (VTy v) Name Name (Closure2 v)
   | VQProj (Val v)
   | VQElim Name (Closure1 v) Name (Closure1 v) (Val v)
+  | VIdRefl (Val v)
+  | VIdPath
+  | VJ (VTy v) (Val v) Name Name (Closure2 v) (Val v) (Val v) (Val v)
+  | VId (VTy v) (Val v) (Val v)
 
 vFun :: Relevance -> VTy v -> VTy v -> VTy v
 vFun s a b = VPi s "_" a (const b)

@@ -39,6 +39,8 @@ eqReduce vt va vu = eqReduceType va
       let t_to_u = vFun Irrelevant vt vu
           u_to_t = vFun Irrelevant vu vt
        in vAnd t_to_u u_to_t
+    -- Rule Id-Proof-Eq
+    eqReduceType (VId {}) = VUnit
     -- Other cases require matching on [t] and [u]
     eqReduceType va = eqReduceAll vt va vu
 
@@ -54,20 +56,18 @@ eqReduce vt va vu = eqReduceType va
     -- Rule Eq-Π
     eqReduceAll (VPi s _ a b) (VU Relevant) (VPi s' x' a' b')
       | s == s' =
-        let a_eq_a' = eqReduceAll a (VU Relevant) a'
-            cast_a'_a = cast a' a
-            b_eq_b' _ = VPi s x' a' (\v -> eqReduceAll (b (cast_a'_a v)) (VU Relevant) (b' v))
+        let a_eq_a' = eqReduce a (VU Relevant) a'
+            b_eq_b' _ = VPi s x' a' (\v -> eqReduce (b (cast a' a v)) (VU Relevant) (b' v))
          in VExists "e" a_eq_a' b_eq_b'
     -- Rule Eq-Σ
     eqReduceAll (VSigma _ a b) (VU Relevant) (VSigma x' a' b') =
-      let a_eq_a' = eqReduceAll a (VU Relevant) a'
-          cast_a'_a = cast a' a
-          b_eq_b' v = eqReduceAll (b (cast_a'_a v)) (VU Relevant) (b' v)
+      let a_eq_a' = eqReduce a (VU Relevant) a'
+          b_eq_b' v = eqReduce (b (cast a' a v)) (VU Relevant) (b' v)
       in VExists "e" a_eq_a' (\_ -> VPi Relevant x' a' b_eq_b')
     -- Rule Eq-Quotient
     eqReduceAll (VQuotient a x y r) (VU Relevant) (VQuotient a' _ _ r') =
-      let a_eq_a' = eqReduceAll a (VU Relevant) a'
-          rxy_eq_rx'y' vx vy = eqReduceAll (r vx vy) (VU Irrelevant) (r' (cast a a' vx) (cast a a' vy))
+      let a_eq_a' = eqReduce a (VU Relevant) a'
+          rxy_eq_rx'y' vx vy = eqReduce (r vx vy) (VU Irrelevant) (r' (cast a a' vx) (cast a a' vy))
       in VExists "e" a_eq_a' (\_ -> VPi Relevant x a (VPi Relevant y a . rxy_eq_rx'y'))
     -- Rule Eq-Zero
     eqReduceAll VZero VNat VZero = VUnit
@@ -79,11 +79,17 @@ eqReduce vt va vu = eqReduceType va
     eqReduceAll (VSucc m) VNat (VSucc n) = eqReduceAll m VNat n
     -- Rule Eq-Pair
     eqReduceAll (VPair t u) (VSigma _ a b) (VPair t' u') =
-      let t_eq_t' = eqReduceAll t a t'
-          u_eq_u' _ = eqReduceAll (cast (b t) (b t') u) (b t') u'
+      let t_eq_t' = eqReduce t a t'
+          u_eq_u' _ = eqReduce (cast (b t) (b t') u) (b t') u'
       in VExists "e" t_eq_t' u_eq_u'
     -- Rule Quotient-Proj-Eq
     eqReduceAll (VQProj t) (VQuotient _ _ _ r) (VQProj u) = r t u
+    -- Rule Id-Eq
+    eqReduceAll (VId a t u) (VU Relevant) (VId a' t' u') =
+      let a_eq_a' = eqReduce a (VU Relevant) a'
+          t_eq_t' = eqReduce (cast a a' t) a' t'
+          u_eq_u' = eqReduce (cast a a' u) a' u'
+      in VExists "e" a_eq_a' (\_ -> vAnd t_eq_t' u_eq_u')
     -- No reduction rule
     eqReduceAll t a u = VEq t a u
 
@@ -114,6 +120,8 @@ cast (VSigma _ a b) (VSigma _ a' b') (VPair t u) =
       u' = cast (b t) (b' t') u
   in VPair t' u'
 cast (VQuotient a _ _ _) (VQuotient a' _ _ _) (VQProj t) = VQProj (cast a a' t)
+cast (VId {}) (VId {}) (VIdRefl _) = VIdPath
+cast (VId {}) (VId {}) VIdPath = VIdPath
 cast a b t = VCast a b t
 
 eval :: Env Ix -> Term Ix -> Val Ix
@@ -161,6 +169,27 @@ eval env (QElim z b x tpi _ _ _ _ u) =
   case eval env u of
     VQProj t -> eval (env :> t) tpi
     u -> VQElim z (\vz -> eval (env :> vz) b) x (\vx -> eval (env :> vx) tpi) u
+eval env (IdRefl t) = VIdRefl (eval env t)
+eval _ (IdPath _) = VIdPath
+eval env (J a t x pf b u t' e) =
+  case ve of
+    VIdRefl e -> eval (env :> e :> VIdRefl e) b
+    VIdPath ->
+      let vt = eval env t
+          vt' = eval env t'
+          b_t_idrefl_t = eval (env :> vt :> VIdRefl vt) b
+          b_t'_idpath_e = eval (env :> vt' :> VIdPath) b
+          vu = eval env u
+      in cast b_t_idrefl_t b_t'_idpath_e vu
+    _ -> VJ va vt x pf (\vx vpf -> eval (env :> vx :> vpf) b) vu vt' ve
+  where
+    va, vt, vu, vt', ve :: Val Ix
+    va = eval env a
+    vt = eval env t
+    vu = eval env u
+    vt' = eval env t'
+    ve = eval env e
+eval env (Id a t u) = VId (eval env a) (eval env t) (eval env u)
 eval env (Let _ _ t u) =
   let vt = eval env t
    in eval (env :> vt) u
@@ -201,6 +230,18 @@ quote lvl (VQElim z b x tpi u) =
   QElim z (quote (lvl + 1) (b (VVar lvl))) x (quote (lvl + 1) (tpi (VVar lvl)))
           "_" "_" "_" One
           (quote lvl u)
+quote lvl (VIdRefl t) = IdRefl (quote lvl t)
+quote _ VIdPath = IdPath One
+quote lvl (VJ a t x pf b u v e) = J a' t' x pf b' u' v' e'
+  where
+    a', t', b', u', v', e' :: Term Ix
+    a' = quote lvl a
+    t' = quote lvl t
+    b' = quote (lvl + 2) (b (VVar lvl) (VVar (lvl + 1)))
+    u' = quote lvl u
+    v' = quote lvl v
+    e' = quote lvl e
+quote lvl (VId a t u) = Id (quote lvl a) (quote lvl t) (quote lvl u)
 
 infixl 8 $$
 
@@ -231,10 +272,6 @@ define x t s tty ctx =
       lvl = lvl ctx + 1,
       env = env ctx :> t
     }
-
-defR, defP :: Name -> Val Ix -> VTy Ix -> Context -> Context
-defR x t = define x t Relevant
-defP x t = define x t Irrelevant
 
 mapHead :: (a -> a) -> [a] -> [a]
 mapHead _ [] = []
@@ -313,6 +350,19 @@ conv pos names = conv' names names
       conv' (ns :> z) (ns' :> z') (lvl + 1) (b (VVar lvl)) (b' (VVar lvl))
       conv' (ns :> x) (ns' :> x') (lvl + 1) (tpi (VVar lvl)) (tpi' (VVar lvl))
       conv' ns ns' lvl u u'
+    conv' ns ns' lvl (VIdRefl t) (VIdRefl t') = conv' ns ns' lvl t t'
+    conv' _ _ _ VIdPath VIdPath = pure ()
+    conv' ns ns' lvl (VJ a t x pf b u v e) (VJ a' t' x' pf' b' u' v' e') = do
+      conv' ns ns' lvl a a'
+      conv' ns ns' lvl t t'
+      conv' (ns :> x :> pf) (ns' :> x' :> pf') (lvl + 2) (b (VVar lvl) (VVar (lvl + 1))) (b' (VVar lvl) (VVar (lvl + 1)))
+      conv' ns ns' lvl u u'
+      conv' ns ns' lvl v v'
+      conv' ns ns' lvl e e'
+    conv' ns ns' lvl (VId a t u) (VId a' t' u') = do
+      conv' ns ns' lvl a a'
+      conv' ns ns' lvl t t'
+      conv' ns ns' lvl u u'
     conv' ns ns' lvl a b =
       createError
         "Type conversion failed."
@@ -373,7 +423,7 @@ infer gamma (R _ (NElimF z a t0 x ih ts n)) = do
   let vx = VVar (lvl gamma)
   let an = eval (env gamma :> vx) a
       aSn = eval (env gamma :> VSucc vx) a
-  ts <- check (gamma & defR x vx VNat & bind ih s an) ts aSn
+  ts <- check (gamma & bindR x VNat & bind ih s an) ts aSn
   -- In general, argument to inductor should be inferred, but can be checked
   -- in simple case of Nat
   n <- check gamma n VNat
@@ -434,7 +484,7 @@ infer gamma (R _ (TranspF t@(R pos _) x pf b u t' e)) = do
       vt' = eval (env gamma) t'
   let vx = VVar (lvl gamma)
       t_eq_x = eqReduce vt va vx
-  b <- check (gamma & defR x vx va & bindP pf t_eq_x) b (VU Irrelevant)
+  b <- check (gamma & bindR x va & bindP pf t_eq_x) b (VU Irrelevant)
   let b_t_refl = eval (env gamma :> vt :> VOne) b
   u <- check gamma u b_t_refl
   e <- check gamma e (eqReduce vt va vt')
@@ -472,13 +522,13 @@ infer gamma (R _ (QuotientF a x y r rx rr sx sy sxy rs tx ty tz txy tyz rt)) = d
       vy = VVar (lvl gamma + 1)
       vz = VVar (lvl gamma + 2)
   let vrxx = eval (env gamma :> vx :> vx) r
-  rr <- check (gamma & defR x vx va) rr vrxx
+  rr <- check (gamma & bindR x va) rr vrxx
   let vrxy = eval (env gamma :> vx :> vy) r
       vryx = eval (env gamma :> vy :> vx) r
-  rs <- check (gamma & defR sx vx va & defR sy vy va & bindP sxy vrxy) rs vryx
+  rs <- check (gamma & bindR sx va & bindR sy va & bindP sxy vrxy) rs vryx
   let vryz = eval (env gamma :> vy :> vz) r
       vrxz = eval (env gamma :> vx :> vz) r
-  rt <- check (gamma & defR tx vx va & defR ty vy va & defR tz vz va & bindP txy vrxy & bindP tyz vryz) rt vrxz
+  rt <- check (gamma & bindR tx va & bindR ty va & bindR tz va & bindP txy vrxy & bindP tyz vryz) rt vrxz
   pure (Quotient a x y r rx rr sx sy sxy rs tx ty tz txy tyz rt, VU Relevant, Relevant)
 infer gamma (R pos (QElimF z b x tpi px py pe p u)) = do
   (u, uty, _) <- infer gamma u
@@ -489,18 +539,44 @@ infer gamma (R pos (QElimF z b x tpi px py pe p u)) = do
           vy = VVar (lvl gamma + 1)
       let b_pix = eval (env gamma :> VQProj vx) b
           b_piy = eval (env gamma :> VQProj vy) b
-      tpi <- check (gamma & defR x vx a) tpi b_pix
+      tpi <- check (gamma & bindR x a) tpi b_pix
       let tpi_x = eval (env gamma :> vx) tpi
           tpi_y = eval (env gamma :> vy) tpi
           cast_b_piy_b_pix = cast b_piy b_pix tpi_y
           tpi_x_eq_tpi_y = eqReduce tpi_x b_pix cast_b_piy_b_pix
-      p <- check (gamma & defR px vx a & defR py vy a & bindP pe (r vx vy)) p tpi_x_eq_tpi_y
+      p <- check (gamma & bindR px a & bindR py a & bindP pe (r vx vy)) p tpi_x_eq_tpi_y
       let vu = eval (env gamma) u
           bu = eval (env gamma :> vu) b
       pure (QElim z b x tpi px py pe p u, bu, s)
     _ ->
       let msg  = "Expected Quotient (A/R) type, but found ̈[" ++ ppVal gamma uty ++ "]"
       in createError "Expected Quotient type in quotient eliminator" [(pos, msg)]
+infer gamma (R _ (IdReflF t@(R pos _))) = do
+  (t, a, s) <- infer gamma t
+  when (s == Irrelevant) (createError "Can only form inductive equality type over relevant types." [(pos, "Expected relevant type.")])
+  let vt = eval (env gamma) t
+  pure (IdRefl t, VId a vt vt, Relevant)
+infer gamma (R _ (JF a t x pf b u t' e)) = do
+  a <- check gamma a (VU Relevant)
+  let va = eval (env gamma) a
+  t <- check gamma t va
+  let vt = eval (env gamma) t
+      vx = VVar (lvl gamma)
+  (b, s) <- checkType (gamma & bindR x va & bindR pf (VId va vt vx)) b
+  let b_t_idrefl_t = eval (env gamma :> vt :> VIdRefl vt) b
+  u <- check gamma u b_t_idrefl_t
+  t' <- check gamma t' va
+  let vt' = eval (env gamma) t'
+  e <- check gamma e (VId va vt vt')
+  let ve = eval (env gamma) e
+  let b_t'_e = eval (env gamma :> vt' :> ve) b
+  pure (J a t x pf b u t' e, b_t'_e, s)
+infer gamma (R _ (IdF a t u)) = do
+  a <- check gamma a (VU Relevant)
+  let va = eval (env gamma) a
+  t <- check gamma t va
+  u <- check gamma u va
+  pure (Id a t u, VU Relevant, Relevant)
 infer gamma (R _ (LetF x a t u)) = do
   (a, s) <- checkType gamma a
   let va = eval (env gamma) a
@@ -556,6 +632,12 @@ check gamma (R _ (QProjF t)) (VQuotient a _ _ _) = do
 check gamma (R pos (QProjF {})) tty =
   let msg = "Checking quotient projection against type [" ++ ppVal gamma tty ++ "] failed (expected Quotient (A/R) type)."
   in createError "Quotient projection type checking failed." [(pos, msg)]
+check gamma (R _ (IdPathF e)) (VId a t u) = do
+  e <- check gamma e (eqReduce t a u)
+  pure (IdPath e)
+check gamma (R pos (IdPathF {})) tty =
+  let msg = "Checking Idpath argument against type [" ++ ppVal gamma tty ++ "] failed (expected inductive identity type Id(A, t, u))."
+  in createError "Idpath type checking failed." [(pos, msg)]
 check gamma (R _ (LetF x a t u)) uty = do
   (a, s) <- checkType gamma a
   let va = eval (env gamma) a

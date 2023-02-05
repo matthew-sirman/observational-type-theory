@@ -462,7 +462,7 @@ tm17 =
       λA. λB. λC. λe. λleft. λright.
         if (λt. (v :U if (λ_. U) t A B) -> C (t; v)) (fst e) left right (snd e)
     in
-    case ℕ ℕ (λ_. ℕ) (inr ℕ ℕ (S 0)) (λx. S x) (λy. rec(_. ℕ, 0, k _. k, y))
+    case Bool ℕ (λ_. ℕ) (inl Bool ℕ false) (λb. if (λ_. ℕ) b (S (S 0)) (S (S (S 0)))) (λy. rec(_. ℕ, 0, k _. k, y))
   |]
 
 test :: String -> IO ()

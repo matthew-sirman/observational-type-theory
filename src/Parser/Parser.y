@@ -57,6 +57,10 @@ import qualified Error.Diagnose as Err
   '/'                   { L _ SymForwardSlash }
   proj                  { L _ SymQProj }
   Qelim                 { L _ KWQElim }
+  Idrefl                { L _ KWIdRefl }
+  Idpath                { L _ KWIdPath }
+  J                     { L _ KWJ }
+  Id                    { L _ KWId }
   let                   { L _ KWLet }
   '='                   { L _ TokEquals }
   in                    { L _ KWIn }
@@ -114,6 +118,10 @@ apps :: { Raw }
                                                                                    (projName $7) $9
                                                                                    (projName $11) (projName $12) (projName $13) $15
                                                                                    $17) $1 $> }
+  | Idrefl atom                                                     { rloc (IdReflF $2) $1 $> }
+  | Idpath atom                                                     { rloc (IdPathF $2) $1 $> }
+  | J '(' exp',' exp',' var var'.' exp',' exp',' exp',' exp ')'     { rloc (JF $3 $5 (projName $7) (projName $8) $10 $12 $14 $16) $1 $> }
+  | Id '(' exp ',' exp ',' exp ')'                                  { rloc (IdF $3 $5 $7) $1 $> }
   | atom                                                            { $1 }
 
 atom :: { Raw }
