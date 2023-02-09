@@ -34,6 +34,8 @@ ghc-options:
 - -Wpartial-fields
 - -Wredundant-constraints
 - -Wno-name-shadowing
+# TODO: remove and account for export lists
+- -Wno-missing-export-lists
 
 library:
   source-dirs: src
@@ -42,6 +44,8 @@ library:
     - data-fix
     - array
     - diagnose
+    - lens
+    - oops
 
     - raw-strings-qq
     - HUnit

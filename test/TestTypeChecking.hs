@@ -1,14 +1,20 @@
+{-# LANGUAGE MonoLocalBinds #-}
 {-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE TypeApplications #-}
 module TestTypeChecking where
 
+import Error
 import Parser.Parser
 import Syntax
 import TypeChecker
 
+import Data.Functor.Identity
+import Data.Function ((&))
 import Text.RawString.QQ
 import Control.Monad.Except
 
 import Error.Diagnose
+import Control.Monad.Oops
 
 
 tm0 :: String
@@ -482,20 +488,13 @@ tm18 =
   |]
 
 test :: String -> IO ()
-test input =
-  -- let result = do
-  --       syntax <- parse input
-  --       runExcept (infer emptyContext syntax)
-  -- in
-  let result = do
-        syntax <- parse input
-        runExcept (infer emptyContext syntax)
-  in
+test input = do
+  result <- runOopsInEither (result
+                              & catch @ParseError showReport
+                              & catch @ConversionError showReport
+                              & catch @CheckError showReport
+                              & catch @InferenceError showReport)
   case result of
-    Left e ->
-      let diagnostic = addFile def "<test-file>" input
-          diagnostic' = addReport diagnostic e
-      in printDiagnostic stdout True True 4 defaultStyle diagnostic'
     Right (t, tty, _) -> do
       putStrLn "Program:"
       putStrLn (prettyPrintTerm [] t)
@@ -503,3 +502,17 @@ test input =
       putStrLn (prettyPrintTerm [] (quote 0 tty))
       putStrLn "\nReduces to:"
       putStrLn (prettyPrintTerm [] (normalForm [] t))
+    Left () -> pure ()
+
+  where
+    result = do
+      let parsed = hoistEither (parse input)
+      suspend (pure . runIdentity) (parsed >>= infer emptyContext)
+
+    showReport :: CouldBe e () => Reportable r => r -> ExceptT (Variant e) IO a
+    showReport r =
+      let diagnostic = addFile def "<test-file>" input
+          diagnostic' = addReport diagnostic (report r)
+      in do
+        lift (printDiagnostic stdout True True 4 defaultStyle diagnostic')
+        throw ()

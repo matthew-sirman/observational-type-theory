@@ -1,11 +1,19 @@
+{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE MonoLocalBinds #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE FlexibleContexts #-}
 module TypeChecker where
 
 import Data.Function ((&))
+import Data.Variant hiding (throw)
+import Control.Monad.Oops (throw)
 import Control.Monad.Except
 import Error.Diagnose
+
+import Error
 import Syntax
 
-type Checker a = Except (Report String) a
+type Checker e a = Except e a
 
 type Types = [(Name, (Relevance, VTy Ix))]
 
@@ -17,10 +25,6 @@ data Context = Context
 
 names :: Context -> [Name]
 names = map fst . types
-
-createError :: String -> [(Position, String)] -> Checker a
-createError message context =
-  throwError (Err Nothing message [(pos, This msg) | (pos, msg) <- context] [])
 
 emptyContext :: Context
 emptyContext = Context { env = [], types = [], lvl = 0 }
@@ -281,15 +285,16 @@ mapHead :: (a -> a) -> [a] -> [a]
 mapHead _ [] = []
 mapHead f (x : xs) = f x : xs
 
-conv ::  Position -> [Name] -> Lvl -> Val Ix -> Val Ix -> Checker ()
+conv :: forall e. e `CouldBe` ConversionError
+     => Position -> [Name] -> Lvl -> Val Ix -> Val Ix -> Checker (Variant e) ()
 conv pos names = conv' names names
   where
-    conv' :: [Name] -> [Name] -> Lvl -> Val Ix -> Val Ix -> Checker ()
+    conv' :: [Name] -> [Name] -> Lvl -> Val Ix -> Val Ix -> Checker (Variant e) ()
     conv' _ _ _ (VVar x) (VVar x')
       | x == x' = pure ()
     conv' _ _ _ (VU s) (VU s')
       | s == s' = pure ()
-      | otherwise = createError "Type conversion failed." [(pos, "Cannot convert between universes.")]
+      | otherwise = throw (ConversionBetweenUniverses pos)
     conv' ns ns' lvl (VLambda x t) (VLambda x' t') =
       conv' (ns :> x) (ns' :> x') (lvl + 1) (t (VVar lvl)) (t' (VVar lvl))
     conv' ns ns' lvl (VLambda x t) t' =
@@ -368,35 +373,34 @@ conv pos names = conv' names names
       conv' ns ns' lvl t t'
       conv' ns ns' lvl u u'
     conv' ns ns' lvl a b =
-      createError
-        "Type conversion failed."
-        [(pos, "Failed to convert ["
-           ++ prettyPrintTerm ns (quote lvl a)
-           ++ " ≡ "
-           ++ prettyPrintTerm ns' (quote lvl b)
-           ++ "]."
-         )]
+      let aTS = TS (prettyPrintTerm ns (quote lvl a))
+          bTS = TS (prettyPrintTerm ns' (quote lvl b))
+      in throw (ConversionFailure aTS bTS pos)
 
-ppVal :: Context -> Val Ix -> String
-ppVal gamma v = prettyPrintTerm (names gamma) (quote (lvl gamma) v)
+ppVal :: Context -> Val Ix -> TermString
+ppVal gamma v = TS (prettyPrintTerm (names gamma) (quote (lvl gamma) v))
 
-ppTerm :: Context -> Term Ix -> String
-ppTerm gamma = prettyPrintTerm (names gamma)
+ppTerm :: Context -> Term Ix -> TermString
+ppTerm gamma = TS . prettyPrintTerm (names gamma)
 
-inferVar :: Position -> Types -> Name -> Checker (Term Ix, VTy Ix, Relevance)
+inferVar :: forall e. e `CouldBe` InferenceError
+         => Position -> Types -> Name -> Checker (Variant e) (Term Ix, VTy Ix, Relevance)
 inferVar pos types name = do
   (i, ty, s) <- find types name
   pure (Var i, ty, s)
   where
-    find :: Types -> Name -> Checker (Ix, VTy Ix, Relevance)
-    find [] name = createError "Variable not in scope." [(pos, "Variable '" ++ name ++ "' is not defined.")]
+    find :: Types -> Name -> Checker (Variant e) (Ix, VTy Ix, Relevance)
+    find [] name = throw (VariableOutOfScope name pos)
     find (types :> (x, (s, a))) x'
       | x == x' = pure (0, a, s)
       | otherwise = do
           (i, s, a) <- find types x'
           pure (i + 1, s, a)
 
-infer :: Context -> Raw -> Checker (Term Ix, VTy Ix, Relevance)
+infer :: (e `CouldBe` InferenceError,
+          e `CouldBe` CheckError,
+          e `CouldBe` ConversionError)
+      => Context -> Raw -> Checker (Variant e) (Term Ix, VTy Ix, Relevance)
 infer gamma (R pos (VarF x)) = inferVar pos (types gamma) x
 infer _ (R _ (UF s)) = pure (U s, VU Relevant, Relevant)
 infer gamma (R _ (AppF t@(R fnPos _) u)) = do
@@ -406,9 +410,7 @@ infer gamma (R _ (AppF t@(R fnPos _) u)) = do
       u <- check gamma u a
       let vu = eval (env gamma) u
       pure (App t u, b vu, s)
-    _ ->
-      let msg = "Expected Π type but found [" ++ ppVal gamma tty ++ "]"
-      in createError "Expected Π (Pi) type." [(fnPos, msg)]
+    _ -> throw (ApplicationHead (ppVal gamma tty) fnPos)
 infer gamma (R _ (PiF s x a b)) = do
   a <- check gamma a (VU s)
   let va = eval (env gamma) a
@@ -439,9 +441,7 @@ infer gamma (R _ (FstF () t@(R pos _))) = do
   case tty of
     VExists _ a _ -> pure (PropFst t, a, Irrelevant)
     VSigma _ a _ -> pure (Fst t, a, Relevant)
-    _ ->
-      let msg  = "Expected ∃ or Σ type, but found ̈[" ++ ppVal gamma tty ++ "]"
-      in createError "Expected ∃ (Exists) or Σ type in first projection." [(pos, msg)]
+    _ -> throw (FstProjectionHead (ppVal gamma tty) pos)
 infer gamma (R _ (SndF () t@(R pos _))) = do
   (t, tty, _) <- infer gamma t
   case tty of
@@ -449,9 +449,7 @@ infer gamma (R _ (SndF () t@(R pos _))) = do
     VSigma _ _ b ->
       let vt = eval (env gamma) t
       in pure (Snd t, b (VFst vt), Relevant)
-    _ ->
-      let msg  = "Expected ∃ or Σ type, but found ̈[" ++ ppVal gamma tty ++ "]"
-      in createError "Expected ∃ (Exists) or Σ type in second projection" [(pos, msg)]
+    _ -> throw (SndProjectionHead (ppVal gamma tty) pos)
 infer gamma (R _ (ExistsF x a b)) = do
   a <- check gamma a (VU Irrelevant)
   let va = eval (env gamma) a
@@ -474,15 +472,11 @@ infer gamma (R _ (EqF t a u)) = do
 infer gamma (R _ (ReflF t@(R pos _))) = do
   (t, a, s) <- infer gamma t
   let vt = eval (env gamma) t
-  let primaryMsg = "Refl must only witness equalities of relevant types \
-                   \ (irrelevant types are trivially convertible)."
-      msg = "Term has type [" ++ ppVal gamma a ++ "] which is irrelevant."
-  when (s == Irrelevant) (createError primaryMsg [(pos, msg)])
+  when (s == Irrelevant) (throw (ReflIrrelevant (ppVal gamma a) pos))
   pure (Refl t, eqReduce vt a vt, Irrelevant)
 infer gamma (R _ (TranspF t@(R pos _) x pf b u t' e)) = do
   (t, va, s) <- infer gamma t
-  let msg = "Term has type [" ++ ppVal gamma va ++ "] which is irrelevant."
-  when (s == Irrelevant) (createError "Can only transport along relevant types." [(pos, msg)])
+  when (s == Irrelevant) (throw (TranspIrrelevant (ppVal gamma va) pos))
   t' <- check gamma t' va
   let vt = eval (env gamma) t
       vt' = eval (env gamma) t'
@@ -499,9 +493,7 @@ infer gamma (R _ (CastF a@(R aPos _) b@(R bPos _) e t)) = do
   (b, s') <- checkType gamma b
   let va = eval (env gamma) a
       vb = eval (env gamma) b
-  let aMsg = "Type [" ++ ppTerm gamma a ++ "] has sort [" ++ show s ++ "]."
-      bMsg = "Type [" ++ ppTerm gamma b ++ "] has sort [" ++ show s' ++ "]."
-  when (s /= s') (createError "Cast types must live in the same universe." [(aPos, aMsg), (bPos, bMsg)])
+  when (s /= s') (throw (CastBetweenUniverses s aPos s' bPos))
   e <- check gamma e (eqReduce va (VU s) vb)
   t <- check gamma t va
   pure (Cast a b e t, vb, s)
@@ -552,12 +544,10 @@ infer gamma (R pos (QElimF z b x tpi px py pe p u)) = do
       let vu = eval (env gamma) u
           bu = eval (env gamma :> vu) b
       pure (QElim z b x tpi px py pe p u, bu, s)
-    _ ->
-      let msg  = "Expected Quotient (A/R) type, but found ̈[" ++ ppVal gamma uty ++ "]"
-      in createError "Expected Quotient type in quotient eliminator" [(pos, msg)]
+    _ -> throw (QuotientHead (ppVal gamma uty) pos)
 infer gamma (R _ (IdReflF t@(R pos _))) = do
   (t, a, s) <- infer gamma t
-  when (s == Irrelevant) (createError "Can only form inductive equality type over relevant types." [(pos, "Expected relevant type.")])
+  when (s == Irrelevant) (throw (IdReflIrrelevant (ppVal gamma a) pos))
   let vt = eval (env gamma) t
   pure (IdRefl t, VId a vt vt, Relevant)
 infer gamma (R _ (JF a t x pf b u t' e)) = do
@@ -593,55 +583,47 @@ infer gamma (R _ (AnnotationF t a)) = do
   let va = eval (env gamma) a
   t <- check gamma t va
   pure (Annotation t a, va, s)
-infer _ (R pos _) =
-  let msg = "Could not infer type for term."
-  in createError "Type inference failed." [(pos, msg)]
+infer _ (R pos _) = throw (InferenceFailure pos)
 
-checkType :: Context -> Raw -> Checker (Term Ix, Relevance)
+checkType :: (e `CouldBe` CheckError,
+              e `CouldBe` InferenceError,
+              e `CouldBe` ConversionError)
+          => Context -> Raw -> Checker (Variant e) (Term Ix, Relevance)
 checkType gamma t@(R pos _) = do
   (t, tty, _) <- infer gamma t
   case tty of
     VU s -> pure (t, s)
-    _ ->
-      let msg = "Term has type [" ++ ppVal gamma tty ++ "]; expected a universe sort."
-      in createError "Expected type, but found term." [(pos, msg)]
+    _ -> throw (CheckType (ppVal gamma tty) pos)
 
-check :: Context -> Raw -> VTy Ix -> Checker (Term Ix)
+check :: (e `CouldBe` CheckError,
+          e `CouldBe` InferenceError,
+          e `CouldBe` ConversionError)
+      => Context -> Raw -> VTy Ix -> Checker (Variant e) (Term Ix)
 check gamma (R _ (LambdaF x t)) (VPi s _ a b) = do
   let b' = b (VVar (lvl gamma))
   t <- check (bind x s a gamma) t b'
   pure (Lambda x t)
-check gamma (R pos (LambdaF {})) tty =
-  let msg = "Checking λ-expression against type [" ++ ppVal gamma tty ++ "] failed (expected Π type)."
-  in createError "λ-expression type checking failed." [(pos, msg)]
+check gamma (R pos (LambdaF {})) tty = throw (CheckLambda (ppVal gamma tty) pos)
 check gamma (R _ (PropPairF t u)) (VExists _ a b) = do
   t <- check gamma t a
   u <- check gamma u (b VOne)
   pure (PropPair t u)
-check gamma (R pos (PropPairF {})) tty =
-  let msg = "Checking propositional pair against type [" ++ ppVal gamma tty ++ "] failed (expected ∃ type)."
-  in createError "Propositional pair type checking failed." [(pos, msg)]
+check gamma (R pos (PropPairF {})) tty = throw (CheckPropPair (ppVal gamma tty) pos)
 check gamma (R _ (PairF t u)) (VSigma _ a b) = do
   t <- check gamma t a
   let vt = eval (env gamma) t
   u <- check gamma u (b vt)
   pure (Pair t u)
-check gamma (R pos (PairF {})) tty =
-  let msg = "Checking pair against type [" ++ ppVal gamma tty ++ "] failed (expected Σ type)."
-  in createError "Pair type checking failed." [(pos, msg)]
+check gamma (R pos (PairF {})) tty = throw (CheckPair (ppVal gamma tty) pos)
 check gamma (R _ (QProjF t)) (VQuotient a _ _ _) = do
   -- Inductively, VQuotient contains an equivalent relation; no need to check that
   t <- check gamma t a
   pure (QProj t)
-check gamma (R pos (QProjF {})) tty =
-  let msg = "Checking quotient projection against type [" ++ ppVal gamma tty ++ "] failed (expected Quotient (A/R) type)."
-  in createError "Quotient projection type checking failed." [(pos, msg)]
+check gamma (R pos (QProjF {})) tty = throw (CheckQuotientProj (ppVal gamma tty) pos)
 check gamma (R _ (IdPathF e)) (VId a t u) = do
   e <- check gamma e (eqReduce t a u)
   pure (IdPath e)
-check gamma (R pos (IdPathF {})) tty =
-  let msg = "Checking Idpath argument against type [" ++ ppVal gamma tty ++ "] failed (expected inductive identity type Id(A, t, u))."
-  in createError "Idpath type checking failed." [(pos, msg)]
+check gamma (R pos (IdPathF {})) tty = throw (CheckIdPath (ppVal gamma tty) pos)
 check gamma (R _ (LetF x a t u)) uty = do
   (a, s) <- checkType gamma a
   let va = eval (env gamma) a
