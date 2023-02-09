@@ -119,6 +119,10 @@ cast (VSigma _ a b) (VSigma _ a' b') (VPair t u) =
   let t' = cast a a' t
       u' = cast (b t) (b' t') u
   in VPair t' u'
+cast (VSigma _ a b) (VSigma _ a' b') t =
+  let t' = cast a a' (VFst t)
+      u' = cast (b t) (b' t') (VSnd t)
+  in VPair t' u'
 cast (VQuotient a _ _ _) (VQuotient a' _ _ _) (VQProj t) = VQProj (cast a a' t)
 cast (VId {}) (VId {}) (VIdRefl _) = VIdPath
 cast (VId {}) (VId {}) VIdPath = VIdPath

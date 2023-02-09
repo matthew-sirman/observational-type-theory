@@ -465,6 +465,22 @@ tm17 =
     case Bool ℕ (λ_. ℕ) (inl Bool ℕ false) (λb. if (λ_. ℕ) b (S (S 0)) (S (S (S 0)))) (λy. rec(_. ℕ, 0, k _. k, y))
   |]
 
+tm18 :: String
+tm18 =
+  [r|
+    let f : (A :U U) -> (t :U A) -> (u :U A) -> (_ :Ω t ~[A] u) -> Id(A, t, u) =
+      λA. λt. λu. λe. Idpath e
+    in
+    let g : (A :U U) -> (t :U A) -> (u :U A) -> (_ :U Id(A, t, u)) -> t ~[A] u =
+      λA. λt. λu. λe. J(A, t, x _. t ~[A] x, refl t, u, e)
+    in
+    let a : (A :U U) -> (t :U A) -> (u :U A)
+         -> (λe. f A t u (g A t u e)) ~[(_ :U Id(A, t, u)) -> Id(A, t, u)] (λe. e) =
+      λA. λt. λu. λe. *
+    in
+    *
+  |]
+
 test :: String -> IO ()
 test input =
   -- let result = do
