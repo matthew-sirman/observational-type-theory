@@ -79,3 +79,6 @@ tests:
     - mtl
     - diagnose
     - HUnit
+    - test-framework
+    - test-framework-hunit
+    - oops
