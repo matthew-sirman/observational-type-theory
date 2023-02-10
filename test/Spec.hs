@@ -1,13 +1,11 @@
-import Test.HUnit
 import Test.Framework (defaultMain)
 import Test.Framework.Providers.HUnit (hUnitTestToTests)
+import Test.HUnit
 
-import qualified NbE (allTests)
+import qualified Unit.TypeChecker as TypeChecker (allTests)
 
 allTests :: Test
-allTests = TestList
-  [ NbE.allTests
-  ]
+allTests = TestList [TypeChecker.allTests]
 
 main :: IO ()
 main = defaultMain (hUnitTestToTests allTests)
