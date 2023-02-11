@@ -2,73 +2,77 @@
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
-module Syntax
-  ( pattern (:>),
-    Name,
-    Loc (..),
-    Ix (..),
-    Lvl (..),
-    Relevance (..),
-    ULevel,
-    TermF (..),
-    Term,
-    Type,
-    RawF (..),
-    Raw,
-    pattern R,
-    pattern Var,
-    pattern U,
-    pattern Lambda,
-    pattern App,
-    pattern Pi,
-    pattern Zero,
-    pattern Succ,
-    pattern NElim,
-    pattern Nat,
-    pattern PropPair,
-    pattern PropFst,
-    pattern PropSnd,
-    pattern Exists,
-    pattern Abort,
-    pattern Empty,
-    pattern One,
-    pattern Unit,
-    pattern Eq,
-    pattern Refl,
-    pattern Transp,
-    pattern Cast,
-    pattern CastRefl,
-    pattern Pair,
-    pattern Fst,
-    pattern Snd,
-    pattern Sigma,
-    pattern Quotient,
-    pattern QProj,
-    pattern QElim,
-    pattern IdRefl,
-    pattern IdPath,
-    pattern J,
-    pattern Id,
-    pattern Let,
-    pattern Annotation,
-    Val (..),
-    VTy,
-    vFun,
-    vAnd,
-    Closure1,
-    Closure2,
-    Env,
-    varMap,
-    VarShowable (..),
-    prettyPrintTerm,
-    prettyPrintTermDebug,
-    -- eraseSourceLocations
-  )
+module Syntax (
+  pattern (:>),
+  Name,
+  Loc (..),
+  Ix (..),
+  Lvl (..),
+  Relevance (..),
+  ULevel,
+  TermF (..),
+  Term,
+  Type,
+  RawF (..),
+  Raw,
+  pattern R,
+  pattern Var,
+  pattern U,
+  pattern Lambda,
+  pattern App,
+  pattern Pi,
+  pattern Zero,
+  pattern Succ,
+  pattern NElim,
+  pattern Nat,
+  pattern PropPair,
+  pattern PropFst,
+  pattern PropSnd,
+  pattern Exists,
+  pattern Abort,
+  pattern Empty,
+  pattern One,
+  pattern Unit,
+  pattern Eq,
+  pattern Refl,
+  pattern Transp,
+  pattern Cast,
+  pattern CastRefl,
+  pattern Pair,
+  pattern Fst,
+  pattern Snd,
+  pattern Sigma,
+  pattern Quotient,
+  pattern QProj,
+  pattern QElim,
+  pattern IdRefl,
+  pattern IdPath,
+  pattern J,
+  pattern Id,
+  pattern Let,
+  pattern Annotation,
+  VElim (..),
+  VSpine,
+  Val (..),
+  pattern VVar,
+  VTy,
+  vFun,
+  vAnd,
+  Closure1,
+  Closure2,
+  Env,
+  varMap,
+  VarShowable (..),
+  prettyPrintTerm,
+  prettyPrintTermDebug,
+  showElimHead,
+  -- eraseSourceLocations
+)
 where
 
 import Data.Fix
+import Error.Diagnose.Position (Position (..))
 import Text.Printf (IsChar (toChar))
-import Error.Diagnose.Position (Position(..))
 
 -- Snoc lists
 infixl 4 :>
@@ -82,8 +86,8 @@ type Name = String
 
 -- Syntactic element tagged with a source code location
 data Loc a = L
-  { location :: Position,
-    syntax :: a
+  { location :: Position
+  , syntax :: a
   }
 
 instance Show a => Show (Loc a) where
@@ -108,7 +112,7 @@ type ULevel = Int
 data Relevance
   = Relevant
   | Irrelevant
-  deriving Eq
+  deriving (Eq)
 
 instance Show Relevance where
   show Relevant = "U"
@@ -252,23 +256,41 @@ pattern Snd p = Fix (SndF Relevant p)
 pattern Sigma :: Name -> Type v -> Type v -> Type v
 pattern Sigma x a b = Fix (SigmaF x a b)
 
-pattern Quotient :: Type v                                           -- Base type          [A]
-                 -> Name -> Name -> Type v                           -- Quotient relation  [R : A -> A -> Ω]
-                 -> Name -> Term v                                   -- Reflexivity proof  [Rr : (x : A) -> R x x]
-                 -> Name -> Name -> Name -> Term v                   -- Symmetry proof     [Rs : (x, y : A) -> R x y -> R y x]
-                 -> Name -> Name -> Name -> Name -> Name -> Term v   -- Transitivity proof [Rt : (x, y, z : A) -> R x y -> R y z -> R x z]
-                 -> Term v                                           -- Quotient type      [A/(R, Rr, Rs, Rt)]
+pattern Quotient
+  :: Type v -- Base type          [A]
+  -> Name
+  -> Name
+  -> Type v -- Quotient relation  [R : A -> A -> Ω]
+  -> Name
+  -> Term v -- Reflexivity proof  [Rr : (x : A) -> R x x]
+  -> Name
+  -> Name
+  -> Name
+  -> Term v -- Symmetry proof     [Rs : (x, y : A) -> R x y -> R y x]
+  -> Name
+  -> Name
+  -> Name
+  -> Name
+  -> Name
+  -> Term v -- Transitivity proof [Rt : (x, y, z : A) -> R x y -> R y z -> R x z]
+  -> Term v -- Quotient type      [A/(R, Rr, Rs, Rt)]
 pattern Quotient a x y r rx rr sx sy sxy rs tx ty tz txy tyz rt =
   Fix (QuotientF a x y r rx rr sx sy sxy rs tx ty tz txy tyz rt)
 
 pattern QProj :: Term v -> Term v
 pattern QProj t = Fix (QProjF t)
 
-pattern QElim :: Name -> Type v                                      -- Type family        [B : A/R -> s]
-              -> Name -> Term v                                      -- Function           [tπ : (x : A) -> B π(x)]
-              -> Name -> Name -> Name -> Type v                      -- Preservation proof [t~ : (x, y : A) -> (e : R x y) -> (tπ x) ~[B π(x)] cast(B π(y), B π(x), B e, tπ y)]
-              -> Term v                                              -- Argument           [u : A/R]
-              -> Term v                                              -- Eliminated term    [Q-elim(B, tπ, t~, u) : B u]
+pattern QElim
+  :: Name
+  -> Type v -- Type family        [B : A/R -> s]
+  -> Name
+  -> Term v -- Function           [tπ : (x : A) -> B π(x)]
+  -> Name
+  -> Name
+  -> Name
+  -> Type v -- Preservation proof [t~ : (x, y : A) -> (e : R x y) -> (tπ x) ~[B π(x)] cast(B π(y), B π(x), B e, tπ y)]
+  -> Term v -- Argument           [u : A/R]
+  -> Term v -- Eliminated term    [Q-elim(B, tπ, t~, u) : B u]
 pattern QElim z b x tpi px py pe p u = Fix (QElimF z b x tpi px py pe p u)
 
 pattern IdRefl :: Term v -> Term v
@@ -290,41 +312,41 @@ pattern Annotation :: Term v -> Type v -> Term v
 pattern Annotation t a = Fix (AnnotationF t a)
 
 {-# COMPLETE
-  Var,
-  U,
-  Lambda,
-  App,
-  Pi,
-  Zero,
-  Succ,
-  NElim,
-  Nat,
-  PropPair,
-  PropFst,
-  PropSnd,
-  Exists,
-  Abort,
-  Empty,
-  One,
-  Unit,
-  Eq,
-  Refl,
-  Transp,
-  Cast,
-  CastRefl,
-  Pair,
-  Fst,
-  Snd,
-  Sigma,
-  Quotient,
-  QProj,
-  QElim,
-  IdRefl,
-  IdPath,
-  J,
-  Id,
-  Let,
-  Annotation
+  Var
+  , U
+  , Lambda
+  , App
+  , Pi
+  , Zero
+  , Succ
+  , NElim
+  , Nat
+  , PropPair
+  , PropFst
+  , PropSnd
+  , Exists
+  , Abort
+  , Empty
+  , One
+  , Unit
+  , Eq
+  , Refl
+  , Transp
+  , Cast
+  , CastRefl
+  , Pair
+  , Fst
+  , Snd
+  , Sigma
+  , Quotient
+  , QProj
+  , QElim
+  , IdRefl
+  , IdPath
+  , J
+  , Id
+  , Let
+  , Annotation
   #-}
 
 instance Functor (TermF p v) where
@@ -364,7 +386,7 @@ instance Functor (TermF p v) where
   fmap f (AnnotationF t a) = AnnotationF (f t) (f a)
 
 instance Functor RawF where
-  fmap f (RawF t) = RawF (L { location = location t, syntax = fmap f (syntax t)})
+  fmap f (RawF t) = RawF (L {location = location t, syntax = fmap f (syntax t)})
 
 varMap :: forall v v'. (v -> v') -> Term v -> Term v'
 varMap f = foldFix alg
@@ -523,25 +545,25 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
     go prec ns (Sigma "_" a b) =
       let domain = go precApp ns a
           codomain = go precApp (ns :> "_") b
-      in par prec precPi (domain . str " × " . codomain)
+       in par prec precPi (domain . str " × " . codomain)
     go prec ns (Sigma x a b) =
       let domain = chr 'Σ' . showParen True (str x . str " : " . go precLet ns a)
           codomain = go precPi (ns :> x) b
-      in tag "Σ" . par prec precPi (domain . dot . codomain)
+       in tag "Σ" . par prec precPi (domain . dot . codomain)
     go prec ns (Quotient a x y r rx rr sx sy sxy rs tx ty tz txy tyz rt) =
       let a' = go precAtom ns a
           r' = str x . space . str y . dot . go precLet (ns :> x :> y) r
           rr' = str rx . dot . go precLet (ns :> rx) rr
           rs' = sep space [str sx, str sy, str sxy] . dot . go precLet (ns :> sx :> sy :> sxy) rs
           rt' = sep space [str tx, str ty, str tz, str txy, str tyz] . dot . go precLet (ns :> tx :> ty :> tz :> txy :> tyz) rt
-      in par prec precPi (a' . str "/(" . sep comma [r', rr', rs', rt'] . chr ')')
+       in par prec precPi (a' . str "/(" . sep comma [r', rr', rs', rt'] . chr ')')
     go prec ns (QProj t) = par prec precApp (str "π " . go precAtom ns t)
     go prec ns (QElim z b x tpi px py pe p u) =
       let b' = str z . dot . go precLet (ns :> z) b
           tpi' = str x . dot . go precLet (ns :> x) tpi
           p' = sep space [str px, str py, str pe] . dot . go precLet (ns :> px :> py :> pe) p
           u' = go precLet ns u
-      in par prec precApp (str "Q-elim(" . sep comma [b', tpi', p', u'] . chr ')')
+       in par prec precApp (str "Q-elim(" . sep comma [b', tpi', p', u'] . chr ')')
     go prec ns (IdRefl t) = par prec precApp (str "Idrefl " . go precAtom ns t)
     go prec ns (IdPath t) = par prec precApp (str "Idpath " . go precAtom ns t)
     go prec ns (J a t x pf b u v e) =
@@ -551,7 +573,7 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
           u' = go precLet ns u
           v' = go precLet ns v
           e' = go precLet ns e
-      in par prec precApp (str "J" . showParen True (sep comma [a', t', b', u', v', e']))
+       in par prec precApp (str "J" . showParen True (sep comma [a', t', b', u', v', e']))
     go prec ns (Id a t u) =
       par prec precApp (str "Id" . showParen True (sep comma [go precLet ns a, go precLet ns t, go precLet ns u]))
     go prec ns (Let x a t u) =
@@ -561,7 +583,10 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
        in par
             prec
             precLet
-            ( str "let " . str x . str " : " . a'
+            ( str "let "
+                . str x
+                . str " : "
+                . a'
                 . str " =\n    "
                 . t'
                 . str "\nin\n"
@@ -578,21 +603,39 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
 
 type Env v = [Val v]
 
--- TODO: Defunctionalise closures
 type Closure1 v = Val v -> Val v
 type Closure2 v = Val v -> Val v -> Val v
 
 type VTy = Val
 
+-- Note that [~] is an eliminator for the universe, however it does not
+-- have a single point on which it might block. Therefore, it cannot be an
+-- eliminator in a spine
+data VElim v
+  = VApp (Val v)
+  | VNElim Name (Closure1 v) (Val v) Name Name (Closure2 v)
+  | VFst
+  | VSnd
+  | VQElim Name (Closure1 v) Name (Closure1 v)
+  | VJ (VTy v) (Val v) Name Name (Closure2 v) (Val v) (Val v)
+
+showElimHead :: VElim v -> String
+showElimHead (VApp {}) = "<application>"
+showElimHead (VNElim {}) = "<ℕ-elim>"
+showElimHead (VFst {}) = "<fst>"
+showElimHead (VSnd {}) = "<snd>"
+showElimHead (VQElim {}) = "<Q-elim>"
+showElimHead (VJ {}) = "<J>"
+
+type VSpine v = [VElim v]
+
 data Val v
-  = VVar Lvl
+  = VRigid Lvl (VSpine v)
   | VU Relevance
   | VLambda Name (Closure1 v)
-  | VApp (Val v) (Val v)
   | VPi Relevance Name (VTy v) (Closure1 v)
   | VZero
   | VSucc (Val v)
-  | VNElim Name (Closure1 v) (Val v) Name Name (Closure2 v) (Val v)
   | VNat
   | VExists Name (VTy v) (Closure1 v)
   | VAbort (VTy v)
@@ -602,16 +645,15 @@ data Val v
   | VEq (Val v) (VTy v) (Val v)
   | VCast (VTy v) (VTy v) (Val v)
   | VPair (Val v) (Val v)
-  | VFst (Val v)
-  | VSnd (Val v)
   | VSigma Name (VTy v) (Closure1 v)
   | VQuotient (VTy v) Name Name (Closure2 v)
   | VQProj (Val v)
-  | VQElim Name (Closure1 v) Name (Closure1 v) (Val v)
   | VIdRefl (Val v)
   | VIdPath
-  | VJ (VTy v) (Val v) Name Name (Closure2 v) (Val v) (Val v) (Val v)
   | VId (VTy v) (Val v) (Val v)
+
+pattern VVar :: Lvl -> Val v
+pattern VVar x = VRigid x []
 
 vFun :: Relevance -> VTy v -> VTy v -> VTy v
 vFun s a b = VPi s "_" a (const b)

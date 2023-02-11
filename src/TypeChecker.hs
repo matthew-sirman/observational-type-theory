@@ -1,7 +1,7 @@
-{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE MonoLocalBinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE TypeOperators #-}
 
 module TypeChecker where
 
@@ -18,12 +18,11 @@ type Checker e a = Except e a
 
 type Types = [(Name, (Relevance, VTy Ix))]
 
-data Context =
-  Context
-    { env :: Env Ix
-    , types :: Types
-    , lvl :: Lvl
-    }
+data Context = Context
+  { env :: Env Ix
+  , types :: Types
+  , lvl :: Lvl
+  }
 
 names :: Context -> [Name]
 names = map fst . types
@@ -33,12 +32,13 @@ emptyContext = Context {env = [], types = [], lvl = 0}
 
 eqReduce :: Val Ix -> VTy Ix -> Val Ix -> Val Ix
 eqReduce vt va vu = eqReduceType va
-    -- Initially driven just by the type
   where
+    -- Initially driven just by the type
+
     eqReduceType :: VTy Ix -> Val Ix
     -- Rule Eq-Fun
     eqReduceType (VPi s x a b) =
-      let fx_eq_gx vx = eqReduce (vt $$ vx) (b vx) (vu $$ vx)
+      let fx_eq_gx vx = eqReduce (vt $$ VApp vx) (b vx) (vu $$ VApp vx)
        in VPi s x a fx_eq_gx
     -- Rule Eq-Ω
     eqReduceType (VU Irrelevant) =
@@ -49,11 +49,12 @@ eqReduce vt va vu = eqReduceType va
     eqReduceType (VId {}) = VUnit
     -- Other cases require matching on [t] and [u]
     eqReduceType va = eqReduceAll vt va vu
+    --
     -- Then driven by terms and type
     eqReduceAll :: Val Ix -> VTy Ix -> Val Ix -> Val Ix
     -- Rules Eq-Univ and Eq-Univ-≠
     eqReduceAll vt (VU Relevant) vu
-      | not (headEq vt vu) = VEmpty
+      | headNeq vt vu = VEmpty
     eqReduceAll VNat (VU Relevant) VNat = VUnit
     eqReduceAll (VU s) (VU Relevant) (VU s')
       | s == s' = VUnit
@@ -61,14 +62,14 @@ eqReduce vt va vu = eqReduceType va
     -- Rule Eq-Π
     eqReduceAll (VPi s _ a b) (VU Relevant) (VPi s' x' a' b')
       | s == s' =
-        let a_eq_a' = eqReduce a (VU Relevant) a'
-            b_eq_b' _ =
-              VPi
-                s
-                x'
-                a'
-                (\v -> eqReduce (b (cast a' a v)) (VU Relevant) (b' v))
-         in VExists "e" a_eq_a' b_eq_b'
+          let a_eq_a' = eqReduce a (VU Relevant) a'
+              b_eq_b' _ =
+                VPi
+                  s
+                  x'
+                  a'
+                  (\v -> eqReduce (b (cast a' a v)) (VU Relevant) (b' v))
+           in VExists "e" a_eq_a' b_eq_b'
     -- Rule Eq-Σ
     eqReduceAll (VSigma _ a b) (VU Relevant) (VSigma x' a' b') =
       let a_eq_a' = eqReduce a (VU Relevant) a'
@@ -109,13 +110,24 @@ eqReduce vt va vu = eqReduceType va
        in VExists "e" a_eq_a' (\_ -> vAnd t_eq_t' u_eq_u')
     -- No reduction rule
     eqReduceAll t a u = VEq t a u
-    headEq :: VTy Ix -> VTy Ix -> Bool
-    headEq VNat VNat = True
-    headEq (VPi {}) (VPi {}) = True
-    headEq (VU {}) (VU {}) = True
-    headEq (VSigma {}) (VSigma {}) = True
-    headEq (VQuotient {}) (VQuotient {}) = True
-    headEq _ _ = False
+    -- Test if type has reduced to know its head constructor
+    hasTypeHead :: VTy Ix -> Bool
+    hasTypeHead VNat = True
+    hasTypeHead (VPi {}) = True
+    hasTypeHead (VU {}) = True
+    hasTypeHead (VSigma {}) = True
+    hasTypeHead (VQuotient {}) = True
+    hasTypeHead (VId {}) = True
+    hasTypeHead _ = False
+    -- Test if two known head constructors are different
+    headNeq :: VTy Ix -> VTy Ix -> Bool
+    headNeq VNat VNat = False
+    headNeq (VPi {}) (VPi {}) = False
+    headNeq (VU {}) (VU {}) = False
+    headNeq (VSigma {}) (VSigma {}) = False
+    headNeq (VQuotient {}) (VQuotient {}) = False
+    headNeq (VId {}) (VId {}) = False
+    headNeq t u = hasTypeHead t && hasTypeHead u
 
 cast :: VTy Ix -> VTy Ix -> Val Ix -> Val Ix
 -- Rule Cast-Zero
@@ -130,16 +142,17 @@ cast (VPi _ _ a b) (VPi _ x' a' b') f =
   let cast_a'_a = cast a' a
    in VLambda
         x'
-        (\va' ->
-           let a = cast_a'_a va'
-            in cast (b a) (b' va') (f $$ a))
+        ( \va' ->
+            let a = cast_a'_a va'
+             in cast (b a) (b' va') (f $$ VApp a)
+        )
 cast (VSigma _ a b) (VSigma _ a' b') (VPair t u) =
   let t' = cast a a' t
       u' = cast (b t) (b' t') u
    in VPair t' u'
 cast (VSigma _ a b) (VSigma _ a' b') t =
-  let t' = cast a a' (VFst t)
-      u' = cast (b t) (b' t') (VSnd t)
+  let t' = cast a a' (t $$ VFst)
+      u' = cast (b t) (b' t') (t $$ VSnd)
    in VPair t' u'
 cast (VQuotient a _ _ _) (VQuotient a' _ _ _) (VQProj t) = VQProj (cast a a' t)
 cast (VId {}) (VId {}) (VIdRefl _) = VIdPath
@@ -150,24 +163,20 @@ eval :: Env Ix -> Term Ix -> Val Ix
 eval env (Var (Ix x)) = env !! x
 eval _ (U s) = VU s
 eval env (Lambda x e) = VLambda x (\vx -> eval (env :> vx) e)
-eval env (App t u) = eval env t $$ eval env u
+eval env (App t u) = eval env t $$ VApp (eval env u)
 eval env (Pi s x a b) = VPi s x (eval env a) (\vx -> eval (env :> vx) b)
 eval _ Zero = VZero
 eval env (Succ n) = VSucc (eval env n)
-eval env (NElim z a t0 x ih ts n) = recurse (eval env n)
+eval env (NElim z a t0 x ih ts n) = eval env n $$ elim
   where
-    recurse :: Val Ix -> Val Ix
-    recurse VZero = eval env t0
-    recurse (VSucc n) = eval (env :> n :> recurse n) ts
-    recurse ne =
-      VNElim
-        z
-        (\vz -> eval (env :> vz) a)
-        (eval env t0)
-        x
-        ih
-        (\vx vih -> eval (env :> vx :> vih) ts)
-        ne
+    va :: Closure1 Ix
+    va vz = eval (env :> vz) a
+    vt0 :: Val Ix
+    vt0 = eval env t0
+    vts :: Closure2 Ix
+    vts vx vih = eval (env :> vx :> vih) ts
+    elim :: VElim Ix
+    elim = VNElim z va vt0 x ih vts
 eval _ Nat = VNat
 eval _ (PropPair {}) = VOne
 eval _ (PropFst _) = VOne
@@ -183,62 +192,94 @@ eval _ (Transp {}) = VOne
 eval env (Cast a b _ t) = cast (eval env a) (eval env b) (eval env t)
 eval _ (CastRefl {}) = VOne
 eval env (Pair t u) = VPair (eval env t) (eval env u)
-eval env (Fst p) =
-  case eval env p of
-    VPair t _ -> t
-    p -> VFst p
-eval env (Snd p) =
-  case eval env p of
-    VPair _ u -> u
-    p -> VSnd p
+eval env (Fst p) = eval env p $$ VFst
+eval env (Snd p) = eval env p $$ VSnd
 eval env (Sigma x a b) = VSigma x (eval env a) (\vx -> eval (env :> vx) b)
 eval env (Quotient a x y r _ _ _ _ _ _ _ _ _ _ _ _) =
   VQuotient (eval env a) x y (\vx vy -> eval (env :> vx :> vy) r)
 eval env (QProj t) = VQProj (eval env t)
-eval env (QElim z b x tpi _ _ _ _ u) =
-  case eval env u of
-    VQProj t -> eval (env :> t) tpi
-    u -> VQElim z (\vz -> eval (env :> vz) b) x (\vx -> eval (env :> vx) tpi) u
+eval env (QElim z b x tpi _ _ _ _ u) = eval env u $$ VQElim z vb x vtpi
+  where
+    vb :: Closure1 Ix
+    vb vz = eval (env :> vz) b
+
+    vtpi :: Closure1 Ix
+    vtpi vx = eval (env :> vx) tpi
 eval env (IdRefl t) = VIdRefl (eval env t)
 eval _ (IdPath _) = VIdPath
-eval env (J a t x pf b u t' e) =
-  case ve of
-    VIdRefl e -> eval (env :> e :> VIdRefl e) b
-    VIdPath ->
-      let vt = eval env t
-          vt' = eval env t'
-          b_t_idrefl_t = eval (env :> vt :> VIdRefl vt) b
-          b_t'_idpath_e = eval (env :> vt' :> VIdPath) b
-          vu = eval env u
-       in cast b_t_idrefl_t b_t'_idpath_e vu
-    _ -> VJ va vt x pf (\vx vpf -> eval (env :> vx :> vpf) b) vu vt' ve
+eval env (J a t x pf b u t' e) = eval env e $$ VJ va vt x pf vb vu vt'
   where
-    va, vt, vu, vt', ve :: Val Ix
+    va, vt, vu, vt' :: Val Ix
     va = eval env a
     vt = eval env t
     vu = eval env u
     vt' = eval env t'
-    ve = eval env e
+
+    vb :: Closure2 Ix
+    vb vx vpf = eval (env :> vx :> vpf) b
 eval env (Id a t u) = VId (eval env a) (eval env t) (eval env u)
 eval env (Let _ _ t u) =
   let vt = eval env t
    in eval (env :> vt) u
 eval env (Annotation t _) = eval env t
 
+infixl 8 $$
+
+($$) :: Val Ix -> VElim Ix -> Val Ix
+(VLambda _ c) $$ (VApp u) = c u
+VZero $$ (VNElim _ _ t0 _ _ _) = t0
+(VSucc n) $$ elim@(VNElim _ _ _ _ _ ts) = ts n (n $$ elim)
+(VPair t _) $$ VFst = t
+(VPair _ u) $$ VSnd = u
+(VQProj t) $$ (VQElim _ _ _ tpi) = tpi t
+(VIdRefl _) $$ (VJ _ _ _ _ _ u _) = u
+VIdPath $$ (VJ _ t _ _ b u t') =
+  let b_t_idrefl_t = b t (VIdRefl t)
+      b_t'_idpath_e = b t' VIdPath
+   in cast b_t_idrefl_t b_t'_idpath_e u
+VOne $$ _ = VOne
+(VRigid x sp) $$ u = VRigid x (sp :> u)
+_ $$ _ = error "BUG! The impossible happened!"
+
+quoteSp :: Lvl -> Term Ix -> VSpine Ix -> Term Ix
+quoteSp _ base [] = base
+quoteSp l base (sp :> VApp u) = App (quoteSp l base sp) (quote l u)
+quoteSp l base (sp :> VNElim z a t0 x ih ts) =
+  NElim z a' (quote l t0) x ih ts' (quoteSp l base sp)
+  where
+    a', ts' :: Term Ix
+    a' = quote (l + 1) (a (VVar l))
+    ts' = quote (l + 2) (ts (VVar l) (VVar (l + 1)))
+quoteSp l base (sp :> VFst) = Fst (quoteSp l base sp)
+quoteSp l base (sp :> VSnd) = Snd (quoteSp l base sp)
+quoteSp l base (sp :> VQElim z b x tpi) =
+  QElim
+    z
+    (quote (l + 1) (b (VVar l)))
+    x
+    (quote (l + 1) (tpi (VVar l)))
+    "_"
+    "_"
+    "_"
+    One
+    (quoteSp l base sp)
+quoteSp l base (sp :> VJ a t x pf b u v) = J a' t' x pf b' u' v' e'
+  where
+    a', t', b', u', v', e' :: Term Ix
+    a' = quote l a
+    t' = quote l t
+    b' = quote (l + 2) (b (VVar l) (VVar (l + 1)))
+    u' = quote l u
+    v' = quote l v
+    e' = quoteSp l base sp
+
 quote :: Lvl -> Val Ix -> Term Ix
-quote (Lvl lvl) (VVar (Lvl x)) = Var (Ix (lvl - x - 1))
+quote lvl@(Lvl l) (VRigid (Lvl x) sp) = quoteSp lvl (Var (Ix (l - x - 1))) sp
 quote _ (VU s) = U s
 quote lvl (VLambda x t) = Lambda x (quote (lvl + 1) (t (VVar lvl)))
-quote lvl (VApp t u) = App (quote lvl t) (quote lvl u)
 quote lvl (VPi s x a b) = Pi s x (quote lvl a) (quote (lvl + 1) (b (VVar lvl)))
 quote _ VZero = Zero
 quote lvl (VSucc t) = Succ (quote lvl t)
-quote lvl (VNElim z a t0 x ih ts n) =
-  NElim z a' (quote lvl t0) x ih ts' (quote lvl n)
-  where
-    a', ts' :: Term Ix
-    a' = quote (lvl + 1) (a (VVar lvl))
-    ts' = quote (lvl + 2) (ts (VVar lvl) (VVar (lvl + 1)))
 quote _ VNat = Nat
 quote lvl (VExists x a b) =
   Exists x (quote lvl a) (quote (lvl + 1) (b (VVar lvl)))
@@ -251,8 +292,6 @@ quote lvl (VCast a b t) = Cast (quote lvl a) (quote lvl b) One (quote lvl t)
 quote lvl (VPair t u) = Pair (quote lvl t) (quote lvl u)
 quote lvl (VSigma x a b) =
   Sigma x (quote lvl a) (quote (lvl + 1) (b (VVar lvl)))
-quote lvl (VFst t) = Fst (quote lvl t)
-quote lvl (VSnd t) = Snd (quote lvl t)
 quote lvl (VQuotient a x y r) =
   Quotient
     (quote lvl a)
@@ -272,36 +311,9 @@ quote lvl (VQuotient a x y r) =
     "_"
     One
 quote lvl (VQProj t) = QProj (quote lvl t)
-quote lvl (VQElim z b x tpi u) =
-  QElim
-    z
-    (quote (lvl + 1) (b (VVar lvl)))
-    x
-    (quote (lvl + 1) (tpi (VVar lvl)))
-    "_"
-    "_"
-    "_"
-    One
-    (quote lvl u)
 quote lvl (VIdRefl t) = IdRefl (quote lvl t)
 quote _ VIdPath = IdPath One
-quote lvl (VJ a t x pf b u v e) = J a' t' x pf b' u' v' e'
-  where
-    a', t', b', u', v', e' :: Term Ix
-    a' = quote lvl a
-    t' = quote lvl t
-    b' = quote (lvl + 2) (b (VVar lvl) (VVar (lvl + 1)))
-    u' = quote lvl u
-    v' = quote lvl v
-    e' = quote lvl e
 quote lvl (VId a t u) = Id (quote lvl a) (quote lvl t) (quote lvl u)
-
-infixl 8 $$
-
-($$) :: Val Ix -> Val Ix -> Val Ix
-(VLambda _ c) $$ u = c u
-VOne $$ _ = VOne
-t $$ u = VApp t u
 
 normalForm :: Env Ix -> Term Ix -> Term Ix
 normalForm env t = quote (Lvl (length env)) (eval env t)
@@ -316,20 +328,23 @@ bind x s tty ctx =
 
 bindR, bindP :: Name -> VTy Ix -> Context -> Context
 bindR x = bind x Relevant
-
 bindP x = bind x Irrelevant
 
 define :: Name -> Val Ix -> Relevance -> VTy Ix -> Context -> Context
 define x t s tty ctx =
   ctx
-    {types = types ctx :> (x, (s, tty)), lvl = lvl ctx + 1, env = env ctx :> t}
+    { types = types ctx :> (x, (s, tty))
+    , lvl = lvl ctx + 1
+    , env = env ctx :> t
+    }
 
 mapHead :: (a -> a) -> [a] -> [a]
 mapHead _ [] = []
-mapHead f (x:xs) = f x : xs
+mapHead f (x : xs) = f x : xs
 
-conv ::
-     forall e. CouldBe e ConversionError
+conv
+  :: forall e
+   . CouldBe e ConversionError
   => Position
   -> [Name]
   -> Lvl
@@ -338,29 +353,19 @@ conv ::
   -> Checker (Variant e) ()
 conv pos names = conv' names names
   where
-    conv' ::
-         [Name] -> [Name] -> Lvl -> Val Ix -> Val Ix -> Checker (Variant e) ()
-    conv' _ _ _ (VVar x) (VVar x')
-      | x == x' = pure ()
-    conv' _ _ _ (VU s) (VU s')
-      | s == s' = pure ()
-      | otherwise = throw (ConversionBetweenUniverses pos)
-    conv' ns ns' lvl (VLambda x t) (VLambda x' t') =
-      conv' (ns :> x) (ns' :> x') (lvl + 1) (t (VVar lvl)) (t' (VVar lvl))
-    conv' ns ns' lvl (VLambda x t) t' =
-      conv' (ns :> x) (ns' :> x) (lvl + 1) (t (VVar lvl)) (VApp t' (VVar lvl))
-    conv' ns ns' lvl t (VLambda x' t') =
-      conv' (ns :> x') (ns' :> x') (lvl + 1) (VApp t (VVar lvl)) (t' (VVar lvl))
-    conv' ns ns' lvl (VApp t u) (VApp t' u') = do
-      conv' ns ns' lvl t t'
+    convSp
+      :: [Name]
+      -> [Name]
+      -> Lvl
+      -> VSpine Ix
+      -> VSpine Ix
+      -> Checker (Variant e) ()
+    convSp _ _ _ [] [] = pure ()
+    convSp ns ns' lvl (sp :> VApp u) (sp' :> VApp u') = do
+      convSp ns ns' lvl sp sp'
       conv' ns ns' lvl u u'
-    conv' ns ns' lvl (VPi s x a b) (VPi s' x' a' b')
-      | s == s' = do
-        conv' ns ns' lvl a a'
-        conv' (ns :> x) (ns' :> x') (lvl + 1) (b (VVar lvl)) (b' (VVar lvl))
-    conv' _ _ _ VZero VZero = pure ()
-    conv' ns ns' lvl (VSucc n) (VSucc n') = conv' ns ns' lvl n n'
-    conv' ns ns' lvl (VNElim z a t0 x ih ts n) (VNElim z' a' t0' x' ih' ts' n') = do
+    convSp ns ns' lvl (sp :> VNElim z a t0 x ih ts) (sp' :> VNElim z' a' t0' x' ih' ts') = do
+      convSp ns ns' lvl sp sp'
       conv' (ns :> z) (ns' :> z') (lvl + 1) (a (VVar lvl)) (a' (VVar lvl))
       conv' ns ns' lvl t0 t0'
       conv'
@@ -369,7 +374,51 @@ conv pos names = conv' names names
         (lvl + 2)
         (ts (VVar lvl) (VVar (lvl + 1)))
         (ts' (VVar lvl) (VVar (lvl + 1)))
-      conv' ns ns' lvl n n'
+    convSp ns ns' lvl (sp :> VFst) (sp' :> VFst) = convSp ns ns' lvl sp sp'
+    convSp ns ns' lvl (sp :> VSnd) (sp' :> VSnd) = convSp ns ns' lvl sp sp'
+    convSp ns ns' lvl (sp :> VQElim z b x tpi) (sp' :> VQElim z' b' x' tpi') = do
+      convSp ns ns' lvl sp sp'
+      conv' (ns :> z) (ns' :> z') (lvl + 1) (b (VVar lvl)) (b' (VVar lvl))
+      conv' (ns :> x) (ns' :> x') (lvl + 1) (tpi (VVar lvl)) (tpi' (VVar lvl))
+    convSp ns ns' lvl (sp :> VJ a t x pf b u v) (sp' :> VJ a' t' x' pf' b' u' v') = do
+      convSp ns ns' lvl sp sp'
+      conv' ns ns' lvl a a'
+      conv' ns ns' lvl t t'
+      conv'
+        (ns :> x :> pf)
+        (ns' :> x' :> pf')
+        (lvl + 2)
+        (b (VVar lvl) (VVar (lvl + 1)))
+        (b' (VVar lvl) (VVar (lvl + 1)))
+      conv' ns ns' lvl u u'
+      conv' ns ns' lvl v v'
+    convSp _ _ _ sp sp' =
+      throw (RigidSpineMismatch (TS . showElimHead <$> safeHead sp) (TS . showElimHead <$> safeHead sp') pos)
+      where
+        safeHead :: [a] -> Maybe a
+        safeHead [] = Nothing
+        safeHead (hd : _) = Just hd
+
+    -- Conversion checking
+    conv'
+      :: [Name] -> [Name] -> Lvl -> Val Ix -> Val Ix -> Checker (Variant e) ()
+    conv' ns ns' lvl (VRigid x sp) (VRigid x' sp')
+      | x == x' = convSp ns ns' lvl sp sp'
+    conv' _ _ _ (VU s) (VU s')
+      | s == s' = pure ()
+      | otherwise = throw (ConversionBetweenUniverses pos)
+    conv' ns ns' lvl (VLambda x t) (VLambda x' t') =
+      conv' (ns :> x) (ns' :> x') (lvl + 1) (t (VVar lvl)) (t' (VVar lvl))
+    conv' ns ns' lvl (VLambda x t) t' =
+      conv' (ns :> x) (ns' :> x) (lvl + 1) (t (VVar lvl)) (t' $$ VApp (VVar lvl))
+    conv' ns ns' lvl t (VLambda x' t') =
+      conv' (ns :> x') (ns' :> x') (lvl + 1) (t $$ VApp (VVar lvl)) (t' (VVar lvl))
+    conv' ns ns' lvl (VPi s x a b) (VPi s' x' a' b')
+      | s == s' = do
+          conv' ns ns' lvl a a'
+          conv' (ns :> x) (ns' :> x') (lvl + 1) (b (VVar lvl)) (b' (VVar lvl))
+    conv' _ _ _ VZero VZero = pure ()
+    conv' ns ns' lvl (VSucc n) (VSucc n') = conv' ns ns' lvl n n'
     conv' _ _ _ VNat VNat = pure ()
     conv' ns ns' lvl (VExists x a b) (VExists x' a' b') = do
       conv' ns ns' lvl a a'
@@ -395,13 +444,11 @@ conv pos names = conv' names names
       conv' ns ns' lvl t t'
       conv' ns ns' lvl u u'
     conv' ns ns' lvl (VPair t u) t' = do
-      conv' ns ns' lvl t (VFst t')
-      conv' ns ns' lvl u (VSnd t')
+      conv' ns ns' lvl t (t' $$ VFst)
+      conv' ns ns' lvl u (t' $$ VSnd)
     conv' ns ns' lvl t (VPair t' u') = do
-      conv' ns ns' lvl (VFst t) t'
-      conv' ns ns' lvl (VSnd t) u'
-    conv' ns ns' lvl (VFst t) (VFst t') = conv' ns ns' lvl t t'
-    conv' ns ns' lvl (VSnd t) (VSnd t') = conv' ns ns' lvl t t'
+      conv' ns ns' lvl (t $$ VFst) t'
+      conv' ns ns' lvl (t $$ VSnd) u'
     conv' ns ns' lvl (VSigma x a b) (VSigma x' a' b') = do
       conv' ns ns' lvl a a'
       conv' (ns :> x) (ns' :> x') (lvl + 1) (b (VVar lvl)) (b' (VVar lvl))
@@ -414,24 +461,8 @@ conv pos names = conv' names names
         (r (VVar lvl) (VVar (lvl + 1)))
         (r' (VVar lvl) (VVar (lvl + 1)))
     conv' ns ns' lvl (VQProj t) (VQProj t') = conv' ns ns' lvl t t'
-    conv' ns ns' lvl (VQElim z b x tpi u) (VQElim z' b' x' tpi' u') = do
-      conv' (ns :> z) (ns' :> z') (lvl + 1) (b (VVar lvl)) (b' (VVar lvl))
-      conv' (ns :> x) (ns' :> x') (lvl + 1) (tpi (VVar lvl)) (tpi' (VVar lvl))
-      conv' ns ns' lvl u u'
     conv' ns ns' lvl (VIdRefl t) (VIdRefl t') = conv' ns ns' lvl t t'
     conv' _ _ _ VIdPath VIdPath = pure ()
-    conv' ns ns' lvl (VJ a t x pf b u v e) (VJ a' t' x' pf' b' u' v' e') = do
-      conv' ns ns' lvl a a'
-      conv' ns ns' lvl t t'
-      conv'
-        (ns :> x :> pf)
-        (ns' :> x' :> pf')
-        (lvl + 2)
-        (b (VVar lvl) (VVar (lvl + 1)))
-        (b' (VVar lvl) (VVar (lvl + 1)))
-      conv' ns ns' lvl u u'
-      conv' ns ns' lvl v v'
-      conv' ns ns' lvl e e'
     conv' ns ns' lvl (VId a t u) (VId a' t' u') = do
       conv' ns ns' lvl a a'
       conv' ns ns' lvl t t'
@@ -447,8 +478,9 @@ ppVal gamma v = TS (prettyPrintTerm (names gamma) (quote (lvl gamma) v))
 ppTerm :: Context -> Term Ix -> TermString
 ppTerm gamma = TS . prettyPrintTerm (names gamma)
 
-inferVar ::
-     forall e. CouldBe e InferenceError
+inferVar
+  :: forall e
+   . CouldBe e InferenceError
   => Position
   -> Types
   -> Name
@@ -462,11 +494,11 @@ inferVar pos types name = do
     find (types :> (x, (s, a))) x'
       | x == x' = pure (0, a, s)
       | otherwise = do
-        (i, s, a) <- find types x'
-        pure (i + 1, s, a)
+          (i, s, a) <- find types x'
+          pure (i + 1, s, a)
 
-infer ::
-     ( e `CouldBe` InferenceError
+infer
+  :: ( e `CouldBe` InferenceError
      , e `CouldBe` CheckError
      , e `CouldBe` ConversionError
      )
@@ -520,7 +552,7 @@ infer gamma (R _ (SndF () t@(R pos _))) = do
     VExists _ _ b -> pure (PropSnd t, b VOne, Irrelevant)
     VSigma _ _ b ->
       let vt = eval (env gamma) t
-       in pure (Snd t, b (VFst vt), Relevant)
+       in pure (Snd t, b (vt $$ VFst), Relevant)
     _ -> throw (SndProjectionHead (ppVal gamma tty) pos)
 infer gamma (R _ (ExistsF x a b)) = do
   a <- check gamma a (VU Irrelevant)
@@ -598,14 +630,20 @@ infer gamma (R _ (QuotientF a x y r rx rr sx sy sxy rs tx ty tz txy tyz rt)) = d
       vrxz = eval (env gamma :> vx :> vz) r
   rt <-
     check
-      (gamma & bindR tx va & bindR ty va & bindR tz va & bindP txy vrxy &
-       bindP tyz vryz)
+      ( gamma
+          & bindR tx va
+          & bindR ty va
+          & bindR tz va
+          & bindP txy vrxy
+          & bindP tyz vryz
+      )
       rt
       vrxz
   pure
     ( Quotient a x y r rx rr sx sy sxy rs tx ty tz txy tyz rt
     , VU Relevant
-    , Relevant)
+    , Relevant
+    )
 infer gamma (R pos (QElimF z b x tpi px py pe p u)) = do
   (u, uty, _) <- infer gamma u
   case uty of
@@ -669,8 +707,8 @@ infer gamma (R _ (AnnotationF t a)) = do
   pure (Annotation t a, va, s)
 infer _ (R pos _) = throw (InferenceFailure pos)
 
-checkType ::
-     ( e `CouldBe` CheckError
+checkType
+  :: ( e `CouldBe` CheckError
      , e `CouldBe` InferenceError
      , e `CouldBe` ConversionError
      )
@@ -683,8 +721,8 @@ checkType gamma t@(R pos _) = do
     VU s -> pure (t, s)
     _ -> throw (CheckType (ppVal gamma tty) pos)
 
-check ::
-     ( e `CouldBe` CheckError
+check
+  :: ( e `CouldBe` CheckError
      , e `CouldBe` InferenceError
      , e `CouldBe` ConversionError
      )
@@ -709,11 +747,11 @@ check gamma (R _ (PairF t u)) (VSigma _ a b) = do
   u <- check gamma u (b vt)
   pure (Pair t u)
 check gamma (R pos (PairF {})) tty = throw (CheckPair (ppVal gamma tty) pos)
-check gamma (R _ (QProjF t)) (VQuotient a _ _ _)
+check gamma (R _ (QProjF t)) (VQuotient a _ _ _) =
   -- Inductively, VQuotient contains an equivalent relation; no need to check that
- = do
-  t <- check gamma t a
-  pure (QProj t)
+  do
+    t <- check gamma t a
+    pure (QProj t)
 check gamma (R pos (QProjF {})) tty =
   throw (CheckQuotientProj (ppVal gamma tty) pos)
 check gamma (R _ (IdPathF e)) (VId a t u) = do
@@ -731,6 +769,7 @@ check gamma t@(R pos _) tty = do
   (t, tty', _) <- infer gamma t
   conv pos (names gamma) (lvl gamma) tty tty'
   pure t
+
 -- TODO: Points to discuss:
 -- 1. NbE evaluating irrelevant terms - consider relevance-driven evaluation?
 --    (Probably implies tagged apps)
