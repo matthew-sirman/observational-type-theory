@@ -1,6 +1,16 @@
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE FunctionalDependencies #-}
+{-# LANGUAGE GADTSyntax #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE ImportQualifiedPost #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 module Syntax (
   pattern (:>),
@@ -55,11 +65,12 @@ module Syntax (
   VSpine,
   Val (..),
   pattern VVar,
+  pattern VFun,
+  pattern VAnd,
   VTy,
-  vFun,
-  vAnd,
-  Closure1,
-  Closure2,
+  Closure (..),
+  ClosureApply (..),
+  A,
   Env,
   varMap,
   VarShowable (..),
@@ -72,6 +83,7 @@ where
 
 import Data.Fix
 import Error.Diagnose.Position (Position (..))
+import GHC.TypeNats qualified as T
 import Text.Printf (IsChar (toChar))
 
 -- Snoc lists
@@ -603,8 +615,28 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
 
 type Env v = [Val v]
 
-type Closure1 v = Val v -> Val v
-type Closure2 v = Val v -> Val v -> Val v
+data Arity = Z | S Arity
+
+type family A (n :: T.Nat) :: Arity where
+  A 0 = 'Z
+  A n = 'S (A (n T.- 1))
+
+data Closure (n :: Arity) v where
+  Closure :: forall n v. Env v -> Term v -> Closure n v
+  Lift :: forall n v. Val v -> Closure n v
+  Function :: (Val v -> Closure n v) -> Closure ('S n) v
+
+class ClosureApply (n :: Arity) cl v | cl -> v where
+  app :: (Env v -> Term v -> Val v) -> Closure n v -> cl
+
+instance ClosureApply 'Z (Val v) v where
+  app eval (Closure env t) = eval env t
+  app _ (Lift v) = v
+
+instance ClosureApply n res v => ClosureApply ('S n) (Val v -> res) v where
+  app eval (Closure env t) u = app eval (Closure @n @v (env :> u) t)
+  app eval (Lift v) _ = app eval (Lift @n @v v)
+  app eval (Function f) u = app eval (f u)
 
 type VTy = Val
 
@@ -613,11 +645,11 @@ type VTy = Val
 -- eliminator in a spine
 data VElim v
   = VApp (Val v)
-  | VNElim Name (Closure1 v) (Val v) Name Name (Closure2 v)
+  | VNElim Name (Closure (A 1) v) (Val v) Name Name (Closure (A 2) v)
   | VFst
   | VSnd
-  | VQElim Name (Closure1 v) Name (Closure1 v)
-  | VJ (VTy v) (Val v) Name Name (Closure2 v) (Val v) (Val v)
+  | VQElim Name (Closure (A 1) v) Name (Closure (A 1) v)
+  | VJ (VTy v) (Val v) Name Name (Closure (A 2) v) (Val v) (Val v)
 
 showElimHead :: VElim v -> String
 showElimHead (VApp {}) = "<application>"
@@ -632,12 +664,12 @@ type VSpine v = [VElim v]
 data Val v
   = VRigid Lvl (VSpine v)
   | VU Relevance
-  | VLambda Name (Closure1 v)
-  | VPi Relevance Name (VTy v) (Closure1 v)
+  | VLambda Name (Closure (A 1) v)
+  | VPi Relevance Name (VTy v) (Closure (A 1) v)
   | VZero
   | VSucc (Val v)
   | VNat
-  | VExists Name (VTy v) (Closure1 v)
+  | VExists Name (VTy v) (Closure (A 1) v)
   | VAbort (VTy v)
   | VEmpty
   | VOne
@@ -645,8 +677,8 @@ data Val v
   | VEq (Val v) (VTy v) (Val v)
   | VCast (VTy v) (VTy v) (Val v)
   | VPair (Val v) (Val v)
-  | VSigma Name (VTy v) (Closure1 v)
-  | VQuotient (VTy v) Name Name (Closure2 v)
+  | VSigma Name (VTy v) (Closure (A 1) v)
+  | VQuotient (VTy v) Name Name (Closure (A 2) v)
   | VQProj (Val v)
   | VIdRefl (Val v)
   | VIdPath
@@ -655,11 +687,11 @@ data Val v
 pattern VVar :: Lvl -> Val v
 pattern VVar x = VRigid x []
 
-vFun :: Relevance -> VTy v -> VTy v -> VTy v
-vFun s a b = VPi s "_" a (const b)
+pattern VFun :: Relevance -> VTy v -> VTy v -> VTy v
+pattern VFun s a b = VPi s "_" a (Lift b)
 
-vAnd :: VTy v -> VTy v -> VTy v
-vAnd a b = VExists "_" a (const b)
+pattern VAnd :: VTy v -> VTy v -> VTy v
+pattern VAnd a b = VExists "_" a (Lift b)
 
 -- pattern VFun :: Relevance -> VTy v -> VTy v -> VTy v
 -- pattern VFun s a b = VPi s "_" a (Const b)

@@ -1,10 +1,10 @@
+{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE MonoLocalBinds #-}
 {-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE TypeApplications #-}
 
 module Unit.TestEnvironment where
 
@@ -21,16 +21,18 @@ import Parser.Parser
 import Syntax
 import TypeChecker
 
-type TestChecker result
-   = forall e. ( CouldBe e ParseError
-               , CouldBe e ConversionError
-               , CouldBe e CheckError
-               , CouldBe e InferenceError
-               ) =>
-                 Raw -> Checker (Variant e) result
+type TestChecker result =
+  forall e
+   . ( e `CouldBe` ParseError
+     , e `CouldBe` ConversionError
+     , e `CouldBe` CheckError
+     , e `CouldBe` InferenceError
+     )
+  => Raw
+  -> Checker (Variant e) result
 
-runTest ::
-     TestChecker result
+runTest
+  :: TestChecker result
   -> (result -> Assertion)
   -> (ParseError -> Assertion)
   -> (ConversionError -> Assertion)
@@ -41,10 +43,12 @@ runTest ::
 runTest checker successHandler parseEHandler convEHandler checkEHandler inferEHandler input = do
   result <-
     runOopsInEither
-      (result & catch @ParseError (liftEHandler parseEHandler) &
-       catch @ConversionError (liftEHandler convEHandler) &
-       catch @CheckError (liftEHandler checkEHandler) &
-       catch @InferenceError (liftEHandler inferEHandler))
+      ( result
+          & catch @ParseError (liftEHandler parseEHandler)
+          & catch @ConversionError (liftEHandler convEHandler)
+          & catch @CheckError (liftEHandler checkEHandler)
+          & catch @InferenceError (liftEHandler inferEHandler)
+      )
   case result of
     Right result -> successHandler result
     Left () -> pure ()
@@ -52,12 +56,12 @@ runTest checker successHandler parseEHandler convEHandler checkEHandler inferEHa
     result = do
       let parsed = hoistEither (parse input)
       suspend (pure . runIdentity) (parsed >>= checker)
-    liftEHandler ::
-         CouldBe err () => (e -> Assertion) -> e -> ExceptT (Variant err) IO a
+    liftEHandler
+      :: err `CouldBe` () => (e -> Assertion) -> e -> ExceptT (Variant err) IO a
     liftEHandler h a = lift (h a) >> throw ()
 
-runTestIgnoreErrors ::
-     TestChecker result
+runTestIgnoreErrors
+  :: TestChecker result
   -> (result -> Assertion)
   -> Assertion
   -> String
@@ -71,47 +75,54 @@ runTestIgnoreErrors checker success failure =
     (const failure)
     (const failure)
 
-runTestIgnoreData ::
-     TestChecker result -> Assertion -> Assertion -> String -> Assertion
+runTestIgnoreData
+  :: TestChecker result -> Assertion -> Assertion -> String -> Assertion
 runTestIgnoreData checker success = runTestIgnoreErrors checker (const success)
 
-checkClosedType ::
-     (CouldBe e ConversionError, CouldBe e CheckError, CouldBe e InferenceError)
+checkClosedType
+  :: ( e `CouldBe` ConversionError
+     , e `CouldBe` CheckError
+     , e `CouldBe` InferenceError
+     )
   => Raw
   -> Checker (Variant e) (Term Ix, Relevance)
 checkClosedType = checkType emptyContext
 
-checkClosed ::
-     (CouldBe e ConversionError, CouldBe e CheckError, CouldBe e InferenceError)
+checkClosed
+  :: ( e `CouldBe` ConversionError
+     , e `CouldBe` CheckError
+     , e `CouldBe` InferenceError
+     )
   => VTy Ix
   -> Raw
   -> Checker (Variant e) (Term Ix)
 checkClosed t raw = check emptyContext raw t
 
-inferClosed ::
-     (CouldBe e ConversionError, CouldBe e CheckError, CouldBe e InferenceError)
+inferClosed
+  :: ( e `CouldBe` ConversionError
+     , e `CouldBe` CheckError
+     , e `CouldBe` InferenceError
   => Raw
   -> Checker (Variant e) (Term Ix, VTy Ix, Relevance)
 inferClosed = infer emptyContext
 
 passed, failed :: Assertion
 passed = assertBool "" True
-
 failed = assertBool "" False
 
 programTypeChecks :: String -> String -> Test
 programTypeChecks source =
   let checkTerm vty = runTestIgnoreData (checkClosed vty) passed failed
-   in TestCase .
-      runTestIgnoreErrors
-        checkClosedType
-        (\(ty, _) -> checkTerm (eval [] ty) source)
-        failed
+   in TestCase
+        . runTestIgnoreErrors
+          checkClosedType
+          (\(ty, _) -> checkTerm (eval [] ty) source)
+          failed
 
 class FailsWith t where
-  testFailsWith ::
-       forall result.
-       (t -> Assertion)
+  testFailsWith
+    :: forall result
+     . (t -> Assertion)
     -> TestChecker result
     -> String
     -> Assertion
@@ -156,15 +167,16 @@ instance FailsWith InferenceError where
       (const failed)
       infer
 
-programFailsWith ::
-     forall x. FailsWith x
+programFailsWith
+  :: forall x
+   . FailsWith x
   => String
   -> String
   -> Test
 programFailsWith source =
   let checkTerm vty = testFailsWith @x (const passed) (checkClosed vty)
-   in TestCase .
-      runTestIgnoreErrors
-        checkClosedType
-        (\(ty, _) -> checkTerm (eval [] ty) source)
-        (assertBool "" False)
+   in TestCase
+        . runTestIgnoreErrors
+          checkClosedType
+          (\(ty, _) -> checkTerm (eval [] ty) source)
+          (assertBool "" False)
