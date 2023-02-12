@@ -66,6 +66,7 @@ tokens :-
        "let"                    { keyword KWLet }
        "="                      { symbol TokEquals }
        "in"                     { keyword KWIn}
+       "_"                      { symbol TokHole }
 
        [a-z A-Z 0-9 \_ \']+   { identifier TokName }
 {
@@ -114,6 +115,7 @@ data Token
   | KWLet
   | TokEquals
   | KWIn
+  | TokHole
   | TokName Name
   | TokEOF
   deriving (Show)

@@ -66,6 +66,7 @@ import qualified Error.Diagnose as Err
   let                   { L _ KWLet }
   '='                   { L _ TokEquals }
   in                    { L _ KWIn }
+  '_'                   { L _ TokHole }
   var                   { L _ (TokName _) }
 
 %right in
@@ -79,55 +80,59 @@ rel :: { Loc Relevance }
   | O                                                               { loc Irrelevant $1 $> }
 
 exp :: { Raw }
-  : '\\' var '.' exp                                                { rloc (LambdaF (projName $2) $4) $1 $> }
-  | let var ':' exp '=' exp in exp                                  { rloc (LetF (projName $2) $4 $6 $8) $1 $> }
+  : '\\' binder '.' exp                                             { rloc (LambdaF $2 $4) $1 $> }
+  | let binder ':' exp '=' exp in exp                               { rloc (LetF $2 $4 $6 $8) $1 $> }
   | term                                                            { $1 }
 
 term :: { Raw }
-  : '(' var ':' rel exp ')' '->' term                               { rloc (PiF (syntax $4) (projName $2) $5 $8) $1 $> }
-  | Exists '(' var ':' exp ')' '.' term                             { rloc (ExistsF (projName $3) $5 $8) $1 $> }
-  | apps '/\\' apps                                                 { rloc (ExistsF "_" $1 $3) $1 $> }
+  : '(' binder ':' rel exp ')' '->' term                            { rloc (PiF (syntax $4) $2 $5 $8) $1 $> }
+  | Exists '(' binder ':' exp ')' '.' term                          { rloc (ExistsF $3 $5 $8) $1 $> }
+  | apps '/\\' apps                                                 { rloc (ExistsF Hole $1 $3) $1 $> }
   | apps '~' '[' exp ']' apps                                       { rloc (EqF $1 $4 $6) $1 $> }
-  | Sigma '(' var ':' exp ')' '.' term                              { rloc (SigmaF (projName $3) $5 $8) $1 $> }
-  | apps times apps                                                 { rloc (SigmaF "_" $1 $3) $1 $> }
-  | atom '/' '(' var var '.' exp ','
-                 var '.' exp ','
-                 var var var '.' exp ','
-                 var var var var var '.' exp
-             ')'                                                    { rloc (QuotientF $1 (projName $4) (projName $5) $7
-                                                                                         (projName $9) $11
-                                                                                         (projName $13) (projName $14) (projName $15) $17
-                                                                                         (projName $19) (projName $20) (projName $21) (projName $22) (projName $23) $25) $1 $> }
+  | Sigma '(' binder ':' exp ')' '.' term                           { rloc (SigmaF $3 $5 $8) $1 $> }
+  | apps times apps                                                 { rloc (SigmaF Hole $1 $3) $1 $> }
+  | atom '/' '(' binder binder '.' exp ','
+                 binder '.' exp ','
+                 binder binder binder '.' exp ','
+                 binder binder binder binder binder '.' exp
+             ')'                                                    { rloc (QuotientF $1 $4 $5 $7
+                                                                                         $9 $11
+                                                                                         $13 $14 $15 $17
+                                                                                         $19 $20 $21 $22 $23 $25) $1 $> }
   | apps                                                            { $1 }
 
 apps :: { Raw }
   : apps atom                                                       { rloc (AppF $1 $2) $1 $> }
   | S atom                                                          { rloc (SuccF $2) $1 $> }
-  | rec '(' var '.' exp ',' exp ',' var var '.' exp ',' exp ')'     { rloc (NElimF (projName $3) $5 $7 (projName $9) (projName $10) $12 $14) $1 $> }
+  | rec '(' binder '.' exp ',' exp ','
+            binder binder '.' exp ',' exp ')'                       { rloc (NElimF $3 $5 $7 $9 $10 $12 $14) $1 $> }
   | fst atom                                                        { rloc (FstF () $2) $1 $> }
   | snd atom                                                        { rloc (SndF () $2) $1 $> }
   | abort '(' exp ',' exp ')'                                       { rloc (AbortF $3 $5) $1 $> }
   | refl atom                                                       { rloc (ReflF $2) $1 $> }
-  | transp '(' exp ',' var var '.' exp ',' exp ',' exp ',' exp ')'  { rloc (TranspF $3 (projName $5) (projName $6) $8 $10 $12 $14) $1 $> }
+  | transp '(' exp ',' binder binder '.' exp ','
+               exp ',' exp ',' exp ')'                              { rloc (TranspF $3 $5 $6 $8 $10 $12 $14) $1 $> }
   | cast '(' exp ',' exp ',' exp ',' exp ')'                        { rloc (CastF $3 $5 $7 $9) $1 $> }
   | castrefl '(' exp ',' exp ')'                                    { rloc (CastReflF $3 $5) $1 $> }
   | proj atom                                                       { rloc (QProjF $2) $1 $> }
-  | Qelim '(' var '.' exp ','
-              var '.' exp ','
-              var var var '.' exp ','
+  | Qelim '(' binder '.' exp ','
+              binder '.' exp ','
+              binder binder binder '.' exp ','
               exp
-          ')'                                                       { rloc (QElimF (projName $3) $5
-                                                                                   (projName $7) $9
-                                                                                   (projName $11) (projName $12) (projName $13) $15
+          ')'                                                       { rloc (QElimF $3 $5
+                                                                                   $7 $9
+                                                                                   $11 $12 $13 $15
                                                                                    $17) $1 $> }
   | Idrefl atom                                                     { rloc (IdReflF $2) $1 $> }
   | Idpath atom                                                     { rloc (IdPathF $2) $1 $> }
-  | J '(' exp',' exp',' var var'.' exp',' exp',' exp',' exp ')'     { rloc (JF $3 $5 (projName $7) (projName $8) $10 $12 $14 $16) $1 $> }
+  | J '(' exp',' exp',' binder binder '.' exp','
+          exp',' exp',' exp ')'                                     { rloc (JF $3 $5 $7 $8 $10 $12 $14 $16) $1 $> }
   | Id '(' exp ',' exp ',' exp ')'                                  { rloc (IdF $3 $5 $7) $1 $> }
   | atom                                                            { $1 }
 
 atom :: { Raw }
   : var                                                             { rloc (VarF (projName $1)) $1 $> }
+  | '_'                                                             { rloc HoleF $1 $> }
   | rel                                                             { Fix (RawF (fmap UF $1)) }
   | '0'                                                             { rloc ZeroF $1 $> }
   | Nat                                                             { rloc NatF $1 $> }
@@ -138,6 +143,10 @@ atom :: { Raw }
   | '(' exp ';' exp ')'                                             { rloc (PairF $2 $4) $1 $> }
   | '(' exp ':' exp ')'                                             { rloc (AnnotationF $2 $4) $1 $>}
   | '(' exp ')'                                                     { $2 }
+
+binder :: { Binder }
+  : var                                                             { Name (projName $1) }
+  | '_'                                                             { Hole }
 
 {
 
@@ -176,7 +185,7 @@ loc element start end =
          location = Err.Position (Err.begin s) (Err.end e) (Err.file s)
        }
 
-rloc :: (Located start, Located end) => TermF () Name Raw -> start -> end -> Raw
+rloc :: (Located start, Located end) => TermF () () Name Raw -> start -> end -> Raw
 rloc e start end = Fix (RawF (loc e start end))
 
 parseError :: Loc Token -> Parser a

@@ -17,7 +17,7 @@ import Syntax
 
 type Checker e a = Except e a
 
-type Types = [(Name, (Relevance, VTy Ix))]
+type Types = [(Binder, (Relevance, VTy Ix))]
 
 data Context = Context
   { env :: Env Ix
@@ -25,7 +25,7 @@ data Context = Context
   , lvl :: Lvl
   }
 
-names :: Context -> [Name]
+names :: Context -> [Binder]
 names = map fst . types
 
 emptyContext :: Context
@@ -250,7 +250,7 @@ quoteSp l base (sp :> VNElim z a t0 x ih ts) =
     ts' = quote (l + 2) (app' ts (VVar l) (VVar (l + 1)))
 quoteSp l base (sp :> VFst) = Fst (quoteSp l base sp)
 quoteSp l base (sp :> VSnd) = Snd (quoteSp l base sp)
-quoteSp l base (sp :> VQElim z b x tpi) = QElim z b' x tpi' "_" "_" "_" One (quoteSp l base sp)
+quoteSp l base (sp :> VQElim z b x tpi) = QElim z b' x tpi' Hole Hole Hole One (quoteSp l base sp)
   where
     b', tpi' :: Term Ix
     b' = quote (l + 1) (app' b (VVar l))
@@ -290,17 +290,17 @@ quote lvl (VQuotient a x y r) =
     x
     y
     (quote (lvl + 2) (app' r (VVar lvl) (VVar (lvl + 1))))
-    "_"
+    Hole
     One
-    "_"
-    "_"
-    "_"
+    Hole
+    Hole
+    Hole
     One
-    "_"
-    "_"
-    "_"
-    "_"
-    "_"
+    Hole
+    Hole
+    Hole
+    Hole
+    Hole
     One
 quote lvl (VQProj t) = QProj (quote lvl t)
 quote lvl (VIdRefl t) = IdRefl (quote lvl t)
@@ -310,7 +310,7 @@ quote lvl (VId a t u) = Id (quote lvl a) (quote lvl t) (quote lvl u)
 normalForm :: Env Ix -> Term Ix -> Term Ix
 normalForm env t = quote (Lvl (length env)) (eval env t)
 
-bind :: Name -> Relevance -> VTy Ix -> Context -> Context
+bind :: Binder -> Relevance -> VTy Ix -> Context -> Context
 bind x s tty ctx =
   ctx
     { types = types ctx :> (x, (s, tty))
@@ -318,11 +318,11 @@ bind x s tty ctx =
     , env = env ctx :> VVar (lvl ctx)
     }
 
-bindR, bindP :: Name -> VTy Ix -> Context -> Context
+bindR, bindP :: Binder -> VTy Ix -> Context -> Context
 bindR x = bind x Relevant
 bindP x = bind x Irrelevant
 
-define :: Name -> Val Ix -> Relevance -> VTy Ix -> Context -> Context
+define :: Binder -> Val Ix -> Relevance -> VTy Ix -> Context -> Context
 define x t s tty ctx =
   ctx
     { types = types ctx :> (x, (s, tty))
@@ -338,7 +338,7 @@ conv
   :: forall e
    . CouldBe e ConversionError
   => Position
-  -> [Name]
+  -> [Binder]
   -> Lvl
   -> Val Ix
   -> Val Ix
@@ -346,8 +346,8 @@ conv
 conv pos names = conv' names names
   where
     convSp
-      :: [Name]
-      -> [Name]
+      :: [Binder]
+      -> [Binder]
       -> Lvl
       -> VSpine Ix
       -> VSpine Ix
@@ -393,7 +393,7 @@ conv pos names = conv' names names
 
     -- Conversion checking
     conv'
-      :: [Name] -> [Name] -> Lvl -> Val Ix -> Val Ix -> Checker (Variant e) ()
+      :: [Binder] -> [Binder] -> Lvl -> Val Ix -> Val Ix -> Checker (Variant e) ()
     conv' ns ns' lvl (VRigid x sp) (VRigid x' sp')
       | x == x' = convSp ns ns' lvl sp sp'
     conv' _ _ _ (VU s) (VU s')
@@ -483,11 +483,14 @@ inferVar pos types name = do
   where
     find :: Types -> Name -> Checker (Variant e) (Ix, VTy Ix, Relevance)
     find [] name = throw (VariableOutOfScope name pos)
-    find (types :> (x, (s, a))) x'
+    find (types :> (Name x, (s, a))) x'
       | x == x' = pure (0, a, s)
       | otherwise = do
-          (i, s, a) <- find types x'
-          pure (i + 1, s, a)
+          (i, a, s) <- find types x'
+          pure (i + 1, a, s)
+    find (types :> (Hole, _)) x' = do
+      (i, a, s) <- find types x'
+      pure (i + 1, a, s)
 
 infer
   :: ( e `CouldBe` InferenceError
