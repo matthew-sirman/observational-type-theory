@@ -53,6 +53,35 @@ instance Reportable ConversionError where
             (Just a, Just b) -> "Could not match different eliminators [" ++ unTS a ++ " ≡ " ++ unTS b ++ "]"
      in createError msg [(pos, ctx)]
 
+data UnificationError
+  = NonLinearSpineDuplicate Name Position
+  | NonLinearSpineNonVariable TermString Position
+  | EscapingVariable Name Position
+  | RenameFunctionalClosure Position
+  | OccursCheck MetaVar Position
+
+instance Reportable UnificationError where
+  report (NonLinearSpineDuplicate name pos) =
+    let msg = "Failed to invert non-linear spine during pattern unification."
+        ctx = "Duplicate variable '" ++ name ++ "' present in spine."
+     in createError msg [(pos, ctx)]
+  report (NonLinearSpineNonVariable t pos) =
+    let msg = "Failed to invert non-linear spine during pattern unification."
+        ctx = "Non-variable term [" ++ unTS t ++ "] present in spine."
+     in createError msg [(pos, ctx)]
+  report (EscapingVariable name pos) =
+    let msg = "Failed to rename value with substitution map."
+        ctx = "Variable '" ++ name ++ "' escapes the metavariable scope."
+     in createError msg [(pos, ctx)]
+  report (RenameFunctionalClosure pos) =
+    let msg = "Attempted to rename functional closure. This is currently unsupported."
+        ctx = "Solving metavariable depended on renaming a functional closure."
+     in createError msg [(pos, ctx)]
+  report (OccursCheck (MetaVar v) pos) =
+    let msg = "Occurs check failed."
+        ctx = "Occurs check failed solving metavariable [?" ++ show v ++ "] (it appears in its own solution)."
+     in createError msg [(pos, ctx)]
+
 data InferenceError
   = VariableOutOfScope Name Position
   | ApplicationHead TermString Position

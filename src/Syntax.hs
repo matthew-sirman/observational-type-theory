@@ -19,6 +19,7 @@ module Syntax (
   Loc (..),
   Ix (..),
   Lvl (..),
+  MetaVar (..),
   Relevance (..),
   ULevel,
   TermF (..),
@@ -27,6 +28,7 @@ module Syntax (
   RawF (..),
   Raw,
   pattern R,
+  pattern HoleF,
   pattern Var,
   pattern U,
   pattern Lambda,
@@ -46,6 +48,9 @@ module Syntax (
   pattern Unit,
   pattern Eq,
   pattern Refl,
+  pattern Sym,
+  pattern Trans,
+  pattern Ap,
   pattern Transp,
   pattern Cast,
   pattern CastRefl,
@@ -63,17 +68,20 @@ module Syntax (
   pattern Let,
   pattern Annotation,
   pattern Meta,
-  pattern HoleF,
   VElim (..),
   VSpine,
+  VProp (..),
+  ($$$),
   Val (..),
   pattern VVar,
+  pattern VMeta,
   pattern VFun,
   pattern VAnd,
   VTy,
   Closure (..),
   ClosureApply (..),
   A,
+  BD (..),
   Env,
   varMap,
   VarShowable (..),
@@ -167,6 +175,12 @@ data TermF proj meta v t
   | -- Observational equality type t ~A u
     EqF t t t
   | ReflF t
+  | -- Extra axioms for symmetry, transitivity and congruence of observational equality
+    -- One of the benefits of TTobs is we can add true axioms to Prop without changing
+    -- normalisation behaviour
+    SymF t
+  | TransF t t
+  | ApF t t
   | -- Transport a value along a proof of equality
     TranspF t Binder Binder t t t t
   | -- Type casting
@@ -263,6 +277,15 @@ pattern Eq t a u = Fix (EqF t a u)
 
 pattern Refl :: Term v -> Term v
 pattern Refl t = Fix (ReflF t)
+
+pattern Sym :: Term v -> Term v
+pattern Sym e = Fix (SymF e)
+
+pattern Trans :: Term v -> Term v -> Term v
+pattern Trans e e' = Fix (TransF e e')
+
+pattern Ap :: Term v -> Term v -> Term v
+pattern Ap f u = Fix (ApF f u)
 
 pattern Transp :: Term v -> Binder -> Binder -> Term v -> Term v -> Term v -> Term v -> Term v
 pattern Transp t x pf b u t' e = Fix (TranspF t x pf b u t' e)
@@ -363,6 +386,9 @@ pattern Meta v = Fix (MetaF v)
   , Unit
   , Eq
   , Refl
+  , Sym
+  , Trans
+  , Ap
   , Transp
   , Cast
   , CastRefl
@@ -402,6 +428,9 @@ instance Functor (TermF p m v) where
   fmap _ UnitF = UnitF
   fmap f (EqF t a u) = EqF (f t) (f a) (f u)
   fmap f (ReflF t) = ReflF (f t)
+  fmap f (SymF e) = SymF (f e)
+  fmap f (TransF e e') = TransF (f e) (f e')
+  fmap f (ApF f' u) = ApF (f f') (f u)
   fmap f (TranspF t x pf b u t' e) = TranspF (f t) x pf (f b) (f u) (f t') (f e)
   fmap f (CastF a b e t) = CastF (f a) (f b) (f e) (f t)
   fmap f (CastReflF a t) = CastReflF (f a) (f t)
@@ -445,6 +474,9 @@ varMap f = foldFix alg
     alg UnitF = Unit
     alg (EqF t a u) = Eq t a u
     alg (ReflF t) = Refl t
+    alg (SymF e) = Sym e
+    alg (TransF e e') = Trans e e'
+    alg (ApF f u) = Ap f u
     alg (TranspF t x pf b u t' e) = Transp t x pf b u t' e
     alg (CastF a b e t) = Cast a b e t
     alg (CastReflF a t) = CastRefl a t
@@ -562,6 +594,9 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
     go prec ns (Eq t a u) =
       par prec precPi (go precApp ns t . str " ~[" . go precAtom ns a . str "] " . go precApp ns u)
     go prec ns (Refl t) = par prec precApp (str "refl " . go precAtom ns t)
+    go _ ns (Sym e) = go precAtom ns e . str "⁻¹"
+    go prec ns (Trans e e') = par prec precPi (go precApp ns e . str " · " . go precApp ns e')
+    go prec ns (Ap f u) = par prec precApp (str "ap " . go precAtom ns f . str " " . go precAtom ns u)
     go prec ns (Transp t x pf b u v e) =
       let t' = go precLet ns t
           b' = binder x . space . binder pf . dot . go precLet (ns :> x :> pf) b
@@ -640,7 +675,9 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
 --     alg :: RawF (Term Name) -> Term Name
 --     alg (RawF l) = Fix (syntax l)
 
-type Env v = [Val v]
+data BD = Bound | Defined
+
+type Env v = [(BD, Val v)]
 
 data Arity = Z | S Arity
 
@@ -651,7 +688,7 @@ type family A (n :: T.Nat) :: Arity where
 data Closure (n :: Arity) v where
   Closure :: forall n v. Env v -> Term v -> Closure n v
   Lift :: forall n v. Val v -> Closure n v
-  Function :: (Val v -> Closure n v) -> Closure ('S n) v
+  Function :: forall n v. (Val v -> Closure n v) -> Closure ('S n) v
 
 class ClosureApply (n :: Arity) cl v | cl -> v where
   app :: (Env v -> Term v -> Val v) -> Closure n v -> cl
@@ -661,7 +698,7 @@ instance ClosureApply 'Z (Val v) v where
   app _ (Lift v) = v
 
 instance ClosureApply n res v => ClosureApply ('S n) (Val v -> res) v where
-  app eval (Closure env t) u = app eval (Closure @n @v (env :> u) t)
+  app eval (Closure env t) u = app eval (Closure @n @v (env :> (Bound, u)) t)
   app eval (Lift v) _ = app eval (Lift @n @v v)
   app eval (Function f) u = app eval (f u)
 
@@ -675,7 +712,7 @@ data VElim v
   | VNElim Binder (Closure (A 1) v) (Val v) Binder Binder (Closure (A 2) v)
   | VFst
   | VSnd
-  | VQElim Binder (Closure (A 1) v) Binder (Closure (A 1) v)
+  | VQElim Binder (Closure (A 1) v) Binder (Closure (A 1) v) Binder Binder Binder (VProp v)
   | VJ (VTy v) (Val v) Binder Binder (Closure (A 2) v) (Val v) (Val v)
 
 showElimHead :: VElim v -> String
@@ -688,8 +725,15 @@ showElimHead (VJ {}) = "<J>"
 
 type VSpine v = [VElim v]
 
+data VProp v = VProp (Env v) (Term v)
+
+infixl 8 $$$
+($$$) :: (Term v -> Term v) -> VProp v -> VProp v
+f $$$ VProp env t = VProp env (f t)
+
 data Val v
   = VRigid Lvl (VSpine v)
+  | VFlex MetaVar (Env v) (VSpine v)
   | VU Relevance
   | VLambda Binder (Closure (A 1) v)
   | VPi Relevance Binder (VTy v) (Closure (A 1) v)
@@ -697,31 +741,44 @@ data Val v
   | VSucc (Val v)
   | VNat
   | VExists Binder (VTy v) (Closure (A 1) v)
-  | VAbort (VTy v)
+  | VAbort (VTy v) (VProp v)
   | VEmpty
-  | VOne
+  | VOne (VProp v)
   | VUnit
   | VEq (Val v) (VTy v) (Val v)
-  | VCast (VTy v) (VTy v) (Val v)
+  | VCast (VTy v) (VTy v) (VProp v) (Val v)
   | VPair (Val v) (Val v)
   | VSigma Binder (VTy v) (Closure (A 1) v)
-  | VQuotient (VTy v) Binder Binder (Closure (A 2) v)
+  | VQuotient
+      (VTy v)
+      Binder
+      Binder
+      (Closure (A 2) v)
+      Binder
+      (VProp v)
+      Binder
+      Binder
+      Binder
+      (VProp v)
+      Binder
+      Binder
+      Binder
+      Binder
+      Binder
+      (VProp v)
   | VQProj (Val v)
   | VIdRefl (Val v)
-  | VIdPath
+  | VIdPath (VProp v)
   | VId (VTy v) (Val v) (Val v)
 
 pattern VVar :: Lvl -> Val v
 pattern VVar x = VRigid x []
+
+pattern VMeta :: MetaVar -> Env v -> Val v
+pattern VMeta mv e = VFlex mv e []
 
 pattern VFun :: Relevance -> VTy v -> VTy v -> VTy v
 pattern VFun s a b = VPi s Hole a (Lift b)
 
 pattern VAnd :: VTy v -> VTy v -> VTy v
 pattern VAnd a b = VExists Hole a (Lift b)
-
--- pattern VFun :: Relevance -> VTy v -> VTy v -> VTy v
--- pattern VFun s a b = VPi s "_" a (Const b)
-
--- pattern VAnd :: VTy v -> VTy v -> VTy v
--- pattern VAnd a b = VExists "_" a (Const b)

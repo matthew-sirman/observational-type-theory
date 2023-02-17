@@ -50,6 +50,9 @@ import qualified Error.Diagnose as Err
   '['                   { L _ TokOpenBracket }
   ']'                   { L _ TokCloseBracket }
   refl                  { L _ KWRefl }
+  sym                   { L _ SymSym }
+  trans                 { L _ SymTrans }
+  ap                    { L _ KWAp }
   transp                { L _ KWTransp }
   cast                  { L _ KWCast }
   castrefl              { L _ KWCastRefl }
@@ -89,6 +92,7 @@ term :: { Raw }
   | Exists '(' binder ':' exp ')' '.' term                          { rloc (ExistsF $3 $5 $8) $1 $> }
   | apps '/\\' apps                                                 { rloc (ExistsF Hole $1 $3) $1 $> }
   | apps '~' '[' exp ']' apps                                       { rloc (EqF $1 $4 $6) $1 $> }
+  | apps trans apps                                                 { rloc (TransF $1 $3) $1 $> }
   | Sigma '(' binder ':' exp ')' '.' term                           { rloc (SigmaF $3 $5 $8) $1 $> }
   | apps times apps                                                 { rloc (SigmaF Hole $1 $3) $1 $> }
   | atom '/' '(' binder binder '.' exp ','
@@ -110,6 +114,8 @@ apps :: { Raw }
   | snd atom                                                        { rloc (SndF () $2) $1 $> }
   | abort '(' exp ',' exp ')'                                       { rloc (AbortF $3 $5) $1 $> }
   | refl atom                                                       { rloc (ReflF $2) $1 $> }
+  | atom sym                                                        { rloc (SymF $1) $1 $> }
+  | ap atom atom                                                    { rloc (ApF $2 $3) $1 $> }
   | transp '(' exp ',' binder binder '.' exp ','
                exp ',' exp ',' exp ')'                              { rloc (TranspF $3 $5 $6 $8 $10 $12 $14) $1 $> }
   | cast '(' exp ',' exp ',' exp ',' exp ')'                        { rloc (CastF $3 $5 $7 $9) $1 $> }

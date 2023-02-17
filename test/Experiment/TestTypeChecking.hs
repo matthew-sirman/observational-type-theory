@@ -1,7 +1,7 @@
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE MonoLocalBinds #-}
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TypeApplications #-}
-{-# LANGUAGE FlexibleContexts #-}
 
 module Experiment.TestTypeChecking where
 
@@ -11,6 +11,7 @@ import Syntax
 import TypeChecker
 
 import Control.Monad.Except
+import Control.Monad.State
 import Data.Function ((&))
 import Data.Functor.Identity
 import Text.RawString.QQ
@@ -488,13 +489,41 @@ tm18 =
     *
   |]
 
+tm19 :: String
+tm19 =
+  [r|
+    let id : (A :U U) -> (x :U A) -> A =
+      λA. λx. x
+    in
+    let id2 : (A :U U) -> (x :U A) -> A =
+      λA. λx. id _ x
+    in
+    id2 ℕ 0
+  |]
+
+tm20 :: String
+tm20 =
+  [r|
+    let sym : (A :U U) -> (x :U A) -> (y :U A) -> (_ :Ω x ~[_] y) -> y ~[_] x =
+      λA. λx. λy. λpf. transp(x, z _. z ~[A] x, refl x, y, pf)
+    in
+    (λn. sym ℕ n n (refl n) : (n :U ℕ) -> n ~[ℕ] n)
+  |]
+
 test :: String -> IO ()
 test input = do
-  result <-
-    runOopsInEither
-      (result & catch @ParseError showReport & catch @ConversionError showReport &
-       catch @CheckError showReport &
-       catch @InferenceError showReport)
+  (result, mctx) <-
+    runStateT
+      ( runOopsInEither
+          ( result
+              & catch @ParseError showReport
+              & catch @ConversionError showReport
+              & catch @UnificationError showReport
+              & catch @CheckError showReport
+              & catch @InferenceError showReport
+          )
+      )
+      emptyMetaContext
   case result of
     Right (t, tty, _) -> do
       putStrLn "Program:"
@@ -503,17 +532,21 @@ test input = do
       putStrLn (prettyPrintTerm [] (quote 0 tty))
       putStrLn "\nReduces to:"
       putStrLn (prettyPrintTerm [] (normalForm [] t))
+      putStrLn "\nMeta context:"
+      print mctx
     Left () -> pure ()
   where
     result = do
       let parsed = hoistEither (parse input)
-      suspend (pure . runIdentity) (parsed >>= infer emptyContext)
-    showReport ::
-         CouldBe e ()
-      => Reportable r =>
-           r -> ExceptT (Variant e) IO a
+      suspend (mapStateT (pure . runIdentity)) (parsed >>= infer emptyContext)
+    showReport
+      :: CouldBe e ()
+      => Reportable r
+      => r
+      -> ExceptT (Variant e) (StateT MetaContext IO) a
     showReport r =
       let diagnostic = addFile def "<test-file>" input
           diagnostic' = addReport diagnostic (report r)
-       in do lift (printDiagnostic stdout True True 4 defaultStyle diagnostic')
-             throw ()
+       in do
+            lift (printDiagnostic stdout True True 4 defaultStyle diagnostic')
+            throw ()
