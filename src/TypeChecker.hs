@@ -1109,6 +1109,7 @@ infer gamma (R _ (AppF t@(R fnPos _) u)) = do
     VFlex {} -> do
       -- If the type is a metavariable, then construct a fresh Pi type with metas
       -- for each position, and solve the constraint ?α ≡ Π(x : ?β). ?γ
+      -- TODO: add more rules like this
       s <- SortMeta <$> freshSortMeta
       a <- Meta <$> freshMeta (names gamma)
       b <- Meta <$> freshMeta (names gamma)

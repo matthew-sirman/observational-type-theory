@@ -90,6 +90,7 @@ exp :: { Raw }
 
 term :: { Raw }
   : '(' binder ':' rel exp ')' '->' term                            { rloc (PiF (syntax $4) $2 $5 $8) $1 $> }
+  | apps '->' term                                                  { rloc (PiF SortHole Hole $1 $3) $1 $> }
   | Exists '(' binder ':' exp ')' '.' term                          { rloc (ExistsF $3 $5 $8) $1 $> }
   | apps '/\\' apps                                                 { rloc (ExistsF Hole $1 $3) $1 $> }
   | apps '~' '[' exp ']' apps                                       { rloc (EqF $1 $4 $6) $1 $> }
@@ -116,6 +117,7 @@ apps :: { Raw }
   | abort '(' exp ',' exp ')'                                       { rloc (AbortF $3 $5) $1 $> }
   | refl atom                                                       { rloc (ReflF $2) $1 $> }
   | sym '(' exp ',' exp ',' exp ')'                                 { rloc (SymF $3 $5 $7) $1 $> }
+  | sym atom                                                        { rloc (SymF (rloc HoleF $1 $1) (rloc HoleF $1 $1) $2) $1 $> }
   | trans '(' exp ',' exp ',' exp ',' exp ',' exp ')'               { rloc (TransF $3 $5 $7 $9 $11) $1 $> }
   | ap '(' exp ',' binder '.' exp ',' exp ',' exp ',' exp ')'       { rloc (ApF $3 $5 $7 $9 $11 $13) $1 $> }
   | transp '(' exp ',' binder binder '.' exp ','

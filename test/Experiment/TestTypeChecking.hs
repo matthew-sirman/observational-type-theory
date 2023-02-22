@@ -515,8 +515,8 @@ tm23 =
 tm24 :: String
 tm24 =
   [r|
-    let y : ℕ = 0
-    in (λx. _ y : (x :U U) -> U)
+    let f : (A :U U) -> A -> A = _
+    in f ℕ 0
   |]
 
 tm25 :: String
