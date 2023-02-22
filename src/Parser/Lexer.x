@@ -49,8 +49,8 @@ tokens :-
        "["                      { symbol TokOpenBracket }
        "]"                      { symbol TokCloseBracket }
        "refl"                   { keyword KWRefl }
-       "⁻¹"                     { symbol SymSym }
-       "·"                      { symbol SymTrans }
+       "sym"                    { symbol KWSym }
+       "trans"                  { symbol KWTrans }
        "ap"                     { keyword KWAp }
        "transp"                 { keyword KWTransp }
        "cast"                   { keyword KWCast }
@@ -102,8 +102,8 @@ data Token
   | TokOpenBracket
   | TokCloseBracket
   | KWRefl
-  | SymSym
-  | SymTrans
+  | KWSym
+  | KWTrans
   | KWAp
   | KWTransp
   | KWCast
