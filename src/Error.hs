@@ -7,6 +7,9 @@ import Syntax hiding (Type)
 
 newtype TermString = TS {unTS :: String}
 
+instance Show TermString where
+  show = unTS
+
 class Reportable e where
   report :: e -> Report String
 
@@ -53,12 +56,54 @@ instance Reportable ConversionError where
             (Just a, Just b) -> "Could not match different eliminators [" ++ unTS a ++ " ≡ " ++ unTS b ++ "]"
      in createError msg [(pos, ctx)]
 
+data UnificationError
+  = NonLinearSpineDuplicate Name Position
+  | NonLinearSpineNonVariable TermString Position
+  | EscapingVariable Name Position
+  | OccursCheck MetaVar Position
+  | NElimInSpine MetaVar Position
+  | JInSpine MetaVar Position
+  | QElimInSpine MetaVar Position
+
+instance Reportable UnificationError where
+  report (NonLinearSpineDuplicate name pos) =
+    let msg = "Failed to invert non-linear spine during pattern unification."
+        ctx = "Duplicate variable '" ++ name ++ "' present in spine."
+     in createError msg [(pos, ctx)]
+  report (NonLinearSpineNonVariable t pos) =
+    let msg = "Failed to invert non-linear spine during pattern unification."
+        ctx = "Non-variable term [" ++ unTS t ++ "] present in spine."
+     in createError msg [(pos, ctx)]
+  report (EscapingVariable name pos) =
+    let msg = "Failed to rename value with substitution map."
+        ctx = "Variable '" ++ name ++ "' escapes the metavariable scope."
+     in createError msg [(pos, ctx)]
+  report (OccursCheck (MetaVar v) pos) =
+    let msg = "Occurs check failed."
+        ctx = "Occurs check failed solving metavariable [?" ++ show v ++ "] (it appears in its own solution)."
+     in createError msg [(pos, ctx)]
+  report (NElimInSpine (MetaVar v) pos) =
+    let msg = "Unsolvable metavariable."
+        ctx = "Cannot solve metavariable [?" ++ show v ++ "] as it is eliminated by a ℕ recursor."
+     in createError msg [(pos, ctx)]
+  report (JInSpine (MetaVar v) pos) =
+    let msg = "Unsolvable metavariable."
+        ctx = "Cannot solve metavariable [?" ++ show v ++ "] as it is eliminated by J term."
+     in createError msg [(pos, ctx)]
+  report (QElimInSpine (MetaVar v) pos) =
+    let msg = "Unsolvable metavariable."
+        ctx = "Cannot solve metavariable [?" ++ show v ++ "] as it is eliminated by quotient eliminator term."
+     in createError msg [(pos, ctx)]
+
 data InferenceError
   = VariableOutOfScope Name Position
   | ApplicationHead TermString Position
   | FstProjectionHead TermString Position
   | SndProjectionHead TermString Position
   | ReflIrrelevant TermString Position
+  | SymmetryIrrelevant TermString Position
+  | TransitivityIrrelevant TermString Position
+  | CongruenceDomainIrrelevant TermString Position
   | TranspIrrelevant TermString Position
   | CastBetweenUniverses Relevance Position Relevance Position
   | QuotientHead TermString Position
@@ -84,8 +129,26 @@ instance Reportable InferenceError where
      in createError msg [(pos, ctx)]
   report (ReflIrrelevant t pos) =
     let msg =
-          "Refl must only witness equalities of relevant types \
+          "Reflexivity must only witness equalities of relevant types \
           \ (irrelevant types are trivially convertible)."
+        ctx = "Term has type [" ++ unTS t ++ "] which is irrelevant."
+     in createError msg [(pos, ctx)]
+  report (SymmetryIrrelevant t pos) =
+    let msg =
+          "Symmetry must only witness equalities of relevant types \
+          \ (irrelevant types are trivially convertible)."
+        ctx = "Term has type [" ++ unTS t ++ "] which is irrelevant."
+     in createError msg [(pos, ctx)]
+  report (TransitivityIrrelevant t pos) =
+    let msg =
+          "Transitivity must only witness equalities of relevant types \
+          \ (irrelevant types are trivially convertible)."
+        ctx = "Term has type [" ++ unTS t ++ "] which is irrelevant."
+     in createError msg [(pos, ctx)]
+  report (CongruenceDomainIrrelevant t pos) =
+    let msg =
+          "Congruence [ap] function domain must only witness equalities of \
+          \ relevant types (irrelevant types are trivially convertible)."
         ctx = "Term has type [" ++ unTS t ++ "] which is irrelevant."
      in createError msg [(pos, ctx)]
   report (TranspIrrelevant t pos) =

@@ -1,7 +1,7 @@
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE MonoLocalBinds #-}
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TypeApplications #-}
-{-# LANGUAGE FlexibleContexts #-}
 
 module Experiment.TestTypeChecking where
 
@@ -11,6 +11,7 @@ import Syntax
 import TypeChecker
 
 import Control.Monad.Except
+import Control.Monad.State
 import Data.Function ((&))
 import Data.Functor.Identity
 import Text.RawString.QQ
@@ -58,28 +59,28 @@ tm3 =
 tm4 :: String
 tm4 =
   [r|
-    let ap : (A :U U) -> (B :U U) -> (x :U A) -> (y :U A) -> (f :U (z :U A) -> B) -> (_ :Ω x ~[A] y) -> f x ~[B] f y =
-      λA. λB. λx. λy. λf. λp.
-        transp(x, t _. f x ~[B] f t, refl (f x), y, p)
-    in
-    ap
+    -- let ap : (A :U U) -> (B :U U) -> (x :U A) -> (y :U A) -> (f :U (z :U A) -> B) -> (_ :Ω x ~[A] y) -> f x ~[B] f y =
+    --   λA. λB. λx. λy. λf. λp.
+    --     transp(x, t _. f x ~[B] f t, refl (f x), y, p)
+    -- in
+    ap(_, x. 0, 0, 0, refl 0)
   |]
 
 tm5 :: String
 tm5 =
   [r|
-    let ap : (A :U U) -> (B :U U) -> (x :U A) -> (y :U A) -> (f :U (z :U A) -> B) -> (_ :Ω x ~[A] y) -> f x ~[B] f y =
-      λA. λB. λx. λy. λf. λp.
-        transp(x, t _. f x ~[B] f t, refl (f x), y, p)
-    in
+    -- let ap : (A :U U) -> (B :U U) -> (x :U A) -> (y :U A) -> (f :U (z :U A) -> B) -> (_ :Ω x ~[A] y) -> f x ~[B] f y =
+    --   λA. λB. λx. λy. λf. λp.
+    --     transp(x, t _. f x ~[B] f t, refl (f x), y, p)
+    -- in
 
     let peano2 : (x :U ℕ) -> (y :U ℕ) -> (_ :Ω S x ~[ℕ] S y) -> x ~[ℕ] y =
-      let pred : (_ :U ℕ) -> ℕ =
-        λn. rec(_. ℕ, 0, k _. k, n)
-      in
+      -- let pred : (_ :U ℕ) -> ℕ =
+      --   λn. rec(_. ℕ, 0, k _. k, n)
+      -- in
       λx. λy. λp.
         -- transp(S x, n e. ap ℕ ℕ (S x) n pred e, refl x, S y, p)
-        ap ℕ ℕ (S x) (S y) pred p
+        ap(ℕ, n. rec(_. ℕ, 0, k _. k, n), S x, S y, p)
         -- p
     in
     peano2
@@ -112,25 +113,25 @@ tm9 =
     let add : (_ :U ℕ) -> (_ :U ℕ) -> ℕ =
       λn. λm. rec(_. ℕ, m, _ k. S k, n)
     in
-    let sym : (A :U U) -> (t :U A) -> (u :U A) -> (_ :Ω t ~[A] u) -> u ~[A] t =
-      λA. λt. λu. λp. transp(t, x _. x ~[A] t, refl t, u, p)
-    in
-    let trans : (A :U U) -> (x :U A) -> (y :U A) -> (z :U A) -> (_ :Ω x ~[A] y) -> (_ :Ω y ~[A] z) -> x ~[A] z =
-      λA. λx. λy. λz. λxy. λyz. transp(x, y' _. (_ :Ω y' ~[A] z) -> x ~[A] z, λw. w, y, xy) yz
-    in
-    let cong : (A :U U) -> (B :U U) -> (x :U A) -> (y :U A) -> (f :U (_ :U A) -> B) -> (_ :Ω x ~[A] y) -> f x ~[B] f y =
-      λA. λB. λx. λy. λf. λp. transp(x, n _. f x ~[B] f n, refl (f x), y, p)
-    in
+    -- let sym : (A :U U) -> (t :U A) -> (u :U A) -> (_ :Ω t ~[A] u) -> u ~[A] t =
+    --   λA. λt. λu. λp. transp(t, x _. x ~[A] t, refl t, u, p)
+    -- in
+    -- let trans : (A :U U) -> (x :U A) -> (y :U A) -> (z :U A) -> (_ :Ω x ~[A] y) -> (_ :Ω y ~[A] z) -> x ~[A] z =
+    --   λA. λx. λy. λz. λxy. λyz. transp(x, y' _. (_ :Ω y' ~[A] z) -> x ~[A] z, λw. w, y, xy) yz
+    -- in
+    -- let cong : (A :U U) -> (B :U U) -> (x :U A) -> (y :U A) -> (f :U (_ :U A) -> B) -> (_ :Ω x ~[A] y) -> f x ~[B] f y =
+    --   λA. λB. λx. λy. λf. λp. transp(x, n _. f x ~[B] f n, refl (f x), y, p)
+    -- in
     let left_unit : (n :U ℕ) -> add 0 n ~[ℕ] n =
       λn. refl n
     in
     let right_unit : (n :U ℕ) -> add n 0 ~[ℕ] n =
-      λn. rec(z. add z 0 ~[ℕ] z, refl 0, k pf. cong ℕ ℕ (add k 0) k (λm. S m) pf, n)
+      λn. rec(z. add z 0 ~[ℕ] z, refl 0, k pf. ap(ℕ, m. S m, add k 0, k, pf), n)
     in
     let succ_comm_right : (n :U ℕ) -> (m :U ℕ) -> add n (S m) ~[ℕ] S (add n m) =
       λn. λm. rec(k. add k (S m) ~[ℕ] S (add k m),
                   refl (S m),
-                  k ih. cong ℕ ℕ (add k (S m)) (S (add k m)) (λx. S x) ih,
+                  k ih. ap(ℕ, x. S x, add k (S m), S (add k m), ih),
                   n)
     in
     let add_comm : (n :U ℕ) -> (m :U ℕ) -> add n m ~[ℕ] add m n =
@@ -138,8 +139,8 @@ tm9 =
         rec(k. add n k ~[ℕ] add k n,
             right_unit n,
             k ih.
-              let ap_succ : S (add n k) ~[ℕ] S (add k n) = cong ℕ ℕ (add n k) (add k n) (λx. S x) ih in
-              trans ℕ (add n (S k)) (S (add n k)) (add (S k) n) (succ_comm_right n k) ap_succ,
+              let ap_succ : S (add n k) ~[ℕ] S (add k n) = ap(ℕ, x. S x, add n k, add k n, ih) in
+              trans(add n (S k), S (add n k), add (S k) n, succ_comm_right n k, ap_succ),
             m)
     in
     add_comm (S (S 0)) (S 0)
@@ -247,25 +248,25 @@ tm15 =
 tm16 :: String
 tm16 =
   [r|
-    let ap : (A :U U) -> (B :U U)
-          -> (x :U A) -> (y :U A)
-          -> (f :U (z :U A) -> B)
-          -> (_ :Ω x ~[A] y) -> f x ~[B] f y =
-      λA. λB. λx. λy. λf. λp.
-        transp(x, t _. f x ~[B] f t, refl (f x), y, p)
-    in
-    let eq_trans : (A :U U)
-                -> (x :U A) -> (y :U A) -> (z :U A)
-                -> (xy :Ω x ~[A] y) -> (yz :Ω y ~[A] z)
-                -> x ~[A] z =
-      λA. λx. λy. λz. λxy. transp(x, y' _. (_ :Ω y' ~[A] z) -> x ~[A] z, λw. w, y, xy)
-    in
+    -- let ap : (A :U U) -> (B :U U)
+    --       -> (x :U A) -> (y :U A)
+    --       -> (f :U (z :U A) -> B)
+    --       -> (_ :Ω x ~[A] y) -> f x ~[B] f y =
+    --   λA. λB. λx. λy. λf. λp.
+    --     transp(x, t _. f x ~[B] f t, refl (f x), y, p)
+    -- in
+    -- let eq_trans : (A :U U)
+    --             -> (x :U A) -> (y :U A) -> (z :U A)
+    --             -> (xy :Ω x ~[A] y) -> (yz :Ω y ~[A] z)
+    --             -> x ~[A] z =
+    --   λA. λx. λy. λz. λxy. transp(x, y' _. (_ :Ω y' ~[A] z) -> x ~[A] z, λw. w, y, xy)
+    -- in
     let cast_compose : (A :U U) -> (B :U U) -> (C :U U)
                     -> (AB :Ω A ~[U] B) -> (BC :Ω B ~[U] C) -> (AC :Ω A ~[U] C)
                     -> (x :U A)
                     -> cast(A, C, AC, x) ~[C] cast(B, C, BC, cast(A, B, AB, x)) =
       λA. λB. λC. λAB. λBC. λAC. λx.
-        transp(B, B' BB'. cast(A, B', eq_trans U A B B' AB BB', x) ~[B'] cast(B, B', BB', cast(A, B, AB, x)),
+        transp(B, B' BB'. cast(A, B', trans(A, B, B', AB, BB'), x) ~[B'] cast(B, B', BB', cast(A, B, AB, x)),
                castrefl(B, cast(A, B, AB, x)), C, BC)
     in
 
@@ -310,7 +311,7 @@ tm16 =
     let if : (B :U (_ :U Bool) -> U) -> (c :U Bool) -> (_ :U B true) -> (_ :U B false) -> B c =
       λB. λc. λt. λf.
         let congB : (x :U ℕ) -> (y :U ℕ) -> (_ :Ω R x y) -> B (π x) ~[U] B (π y) =
-          λx. λy. λxRy. ap Bool U (π x) (π y) B xRy
+          λx. λy. λxRy. ap(U, x. B x, (π x : Bool), π y, xRy)
         in
         let choose : (x :U ℕ) -> B (π x) =
           λx. rec(x'. B (π x'), t, k _. cast(B false, B (π (S k)),
@@ -352,25 +353,12 @@ tm16 =
 tm17 :: String
 tm17 =
   [r|
-    let ap : (A :U U) -> (B :U U)
-          -> (x :U A) -> (y :U A)
-          -> (f :U (z :U A) -> B)
-          -> (_ :Ω x ~[A] y) -> f x ~[B] f y =
-      λA. λB. λx. λy. λf. λp.
-        transp(x, t _. f x ~[B] f t, refl (f x), y, p)
-    in
-    let eq_trans : (A :U U)
-                -> (x :U A) -> (y :U A) -> (z :U A)
-                -> (xy :Ω x ~[A] y) -> (yz :Ω y ~[A] z)
-                -> x ~[A] z =
-      λA. λx. λy. λz. λxy. transp(x, y' _. (_ :Ω y' ~[A] z) -> x ~[A] z, λw. w, y, xy)
-    in
     let cast_compose : (A :U U) -> (B :U U) -> (C :U U)
                     -> (AB :Ω A ~[U] B) -> (BC :Ω B ~[U] C) -> (AC :Ω A ~[U] C)
                     -> (x :U A)
                     -> cast(A, C, AC, x) ~[C] cast(B, C, BC, cast(A, B, AB, x)) =
       λA. λB. λC. λAB. λBC. λAC. λx.
-        transp(B, B' BB'. cast(A, B', eq_trans U A B B' AB BB', x) ~[B'] cast(B, B', BB', cast(A, B, AB, x)),
+        transp(B, B' BB'. cast(A, B', trans(A, B, B', AB, BB'), x) ~[B'] cast(B, B', BB', cast(A, B, AB, x)),
                castrefl(B, cast(A, B, AB, x)), C, BC)
     in
 
@@ -415,7 +403,7 @@ tm17 =
     let if : (B :U (_ :U Bool) -> U) -> (c :U Bool) -> (_ :U B true) -> (_ :U B false) -> B c =
       λB. λc. λt. λf.
         let congB : (x :U ℕ) -> (y :U ℕ) -> (_ :Ω R x y) -> B (π x) ~[U] B (π y) =
-          λx. λy. λxRy. ap Bool U (π x) (π y) B xRy
+          λx. λy. λxRy. ap(U, x. B x, (π x : Bool), π y, xRy)
         in
         let choose : (x :U ℕ) -> B (π x) =
           λx. rec(x'. B (π x'), t, k _. cast(B false, B (π (S k)),
@@ -488,32 +476,94 @@ tm18 =
     *
   |]
 
+tm19 :: String
+tm19 =
+  [r|
+    let id : (A :U U) -> (x :U A) -> A =
+      λA. λx. x
+    in
+    let id2 : (A :U U) -> (x :U A) -> A =
+      λA. λx. id _ x
+    in
+    id2 _ 0
+  |]
+
+tm20 :: String
+tm20 =
+  [r|
+    (λn. sym(_, _, refl n) : (n :U ℕ) -> n ~[ℕ] n)
+  |]
+
+tm21 :: String
+tm21 =
+  [r|
+    (λn. λm. λpf. pf : (n :U ℕ) -> (m :U ℕ) -> (_ :Ω n ~[ℕ] m) -> m ~[ℕ] n)
+  |]
+
+tm22 :: String
+tm22 =
+  [r|
+    (0 : fst (_ : U × _))
+  |]
+
+tm23 :: String
+tm23 =
+  [r|
+    (0 : snd (_ : _ × U))
+  |]
+
+tm24 :: String
+tm24 =
+  [r|
+    let f : (A :U U) -> A -> A = _
+    in f ℕ 0
+  |]
+
+tm25 :: String
+tm25 =
+  [r|
+    ()
+  |]
+
 test :: String -> IO ()
 test input = do
-  result <-
-    runOopsInEither
-      (result & catch @ParseError showReport & catch @ConversionError showReport &
-       catch @CheckError showReport &
-       catch @InferenceError showReport)
+  (result, mctx) <-
+    runStateT
+      ( runOopsInEither
+          ( result
+              & catch @ParseError showReport
+              & catch @ConversionError showReport
+              & catch @UnificationError showReport
+              & catch @CheckError showReport
+              & catch @InferenceError showReport
+          )
+      )
+      emptyMetaContext
   case result of
     Right (t, tty, _) -> do
       putStrLn "Program:"
       putStrLn (prettyPrintTerm [] t)
       putStrLn "\nHas type:"
-      putStrLn (prettyPrintTerm [] (quote 0 tty))
+      putStrLn (prettyPrintTerm [] (runEvaluator (quote 0 tty) mctx))
       putStrLn "\nReduces to:"
-      putStrLn (prettyPrintTerm [] (normalForm [] t))
-    Left () -> pure ()
+      putStrLn (prettyPrintTerm [] (runEvaluator (normalForm [] t) mctx))
+      putStrLn "\nMeta context:"
+      print mctx
+    Left () -> do
+      putStrLn "\nMeta context:"
+      print mctx
   where
     result = do
       let parsed = hoistEither (parse input)
-      suspend (pure . runIdentity) (parsed >>= infer emptyContext)
-    showReport ::
-         CouldBe e ()
-      => Reportable r =>
-           r -> ExceptT (Variant e) IO a
+      suspend (mapStateT (pure . runIdentity)) (runChecker (parsed >>= infer emptyContext))
+    showReport
+      :: CouldBe e ()
+      => Reportable r
+      => r
+      -> ExceptT (Variant e) (StateT MetaContext IO) a
     showReport r =
       let diagnostic = addFile def "<test-file>" input
           diagnostic' = addReport diagnostic (report r)
-       in do lift (printDiagnostic stdout True True 4 defaultStyle diagnostic')
-             throw ()
+       in do
+            lift (printDiagnostic stdout True True 4 defaultStyle diagnostic')
+            throw ()

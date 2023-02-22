@@ -46,6 +46,7 @@ library:
     - diagnose
     - lens
     - oops
+    - containers
 
     - raw-strings-qq
     - HUnit

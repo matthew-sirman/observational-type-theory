@@ -15,10 +15,15 @@
 module Syntax (
   pattern (:>),
   Name,
+  Binder (..),
   Loc (..),
   Ix (..),
   Lvl (..),
-  Relevance (..),
+  lvl2ix,
+  MetaVar (..),
+  RelevanceF (..),
+  Relevance,
+  pattern SortHole,
   ULevel,
   TermF (..),
   Term,
@@ -26,6 +31,7 @@ module Syntax (
   RawF (..),
   Raw,
   pattern R,
+  pattern HoleF,
   pattern Var,
   pattern U,
   pattern Lambda,
@@ -45,6 +51,9 @@ module Syntax (
   pattern Unit,
   pattern Eq,
   pattern Refl,
+  pattern Sym,
+  pattern Trans,
+  pattern Ap,
   pattern Transp,
   pattern Cast,
   pattern CastRefl,
@@ -61,17 +70,24 @@ module Syntax (
   pattern Id,
   pattern Let,
   pattern Annotation,
+  pattern Meta,
   VElim (..),
   VSpine,
+  VProp (..),
+  ($$$),
   Val (..),
   pattern VVar,
+  pattern VMeta,
   pattern VFun,
   pattern VAnd,
   VTy,
+  PushArgument (..),
   Closure (..),
   ClosureApply (..),
   A,
+  BD (..),
   Env,
+  level,
   varMap,
   VarShowable (..),
   prettyPrintTerm,
@@ -82,6 +98,7 @@ module Syntax (
 where
 
 import Data.Fix
+import Data.Void
 import Error.Diagnose.Position (Position (..))
 import GHC.TypeNats qualified as T
 import Text.Printf (IsChar (toChar))
@@ -95,6 +112,13 @@ pattern xs :> x = x : xs
 
 -- Language source identifiers
 type Name = String
+data Binder
+  = Name Name
+  | Hole
+
+instance Show Binder where
+  show (Name n) = n
+  show Hole = "_"
 
 -- Syntactic element tagged with a source code location
 data Loc a = L
@@ -116,37 +140,60 @@ newtype Ix = Ix Int
 newtype Lvl = Lvl Int
   deriving (Eq, Ord, Show, Num)
 
+lvl2ix :: Lvl -> Lvl -> Ix
+lvl2ix (Lvl l) (Lvl x) = Ix (l - x - 1)
+
+newtype MetaVar = MetaVar Int
+  deriving (Eq, Ord, Num)
+
+instance Show MetaVar where
+  show (MetaVar v) = "?" ++ show v
+
 -- Universe levels
 type ULevel = Int
 
 -- Relevance of a universe.
 -- OTT universes may either be proof-relevant, or proof-irrelevant.
-data Relevance
+data RelevanceF meta
   = Relevant
   | Irrelevant
+  | SortMeta meta
   deriving (Eq)
 
-instance Show Relevance where
+instance {-# OVERLAPS #-} Show (RelevanceF ()) where
   show Relevant = "U"
   show Irrelevant = "Ω"
+  show (SortMeta ()) = "_"
 
-data TermF proj v t
+instance Show meta => Show (RelevanceF meta) where
+  show Relevant = "U"
+  show Irrelevant = "Ω"
+  show (SortMeta m) = show m
+
+pattern SortHole :: RelevanceF ()
+pattern SortHole = SortMeta ()
+
+{-# COMPLETE Relevant, Irrelevant, SortHole #-}
+
+type Relevance = RelevanceF MetaVar
+
+data TermF proj meta v t
   = VarF v
   | -- Universe terms have a relevance and a level
-    UF Relevance
-  | LambdaF Name t
+    UF (RelevanceF meta)
+  | LambdaF Binder t
   | AppF t t
   | -- Pi types are annotated with their domain type's relevance and level, and the co-domain level
-    PiF Relevance Name t t
+    PiF (RelevanceF meta) Binder t t
   | ZeroF
   | SuccF t
-  | NElimF Name t t Name Name t t
+  | NElimF Binder t t Binder Binder t t
   | NatF
   | PropPairF t t
   | FstF proj t
   | SndF proj t
   | -- Existential types are annotated with their domain and co-domain levels
-    ExistsF Name t t
+    ExistsF Binder t t
   | AbortF t t
   | EmptyF
   | OneF
@@ -154,41 +201,51 @@ data TermF proj v t
   | -- Observational equality type t ~A u
     EqF t t t
   | ReflF t
+  | -- Extra axioms for symmetry, transitivity and congruence of observational equality
+    -- One of the benefits of TTobs is we can add true axioms to Prop without changing
+    -- normalisation behaviour
+    SymF t t t
+  | TransF t t t t t
+  | ApF t Binder t t t t
   | -- Transport a value along a proof of equality
-    TranspF t Name Name t t t t
+    TranspF t Binder Binder t t t t
   | -- Type casting
     CastF t t t t
   | CastReflF t t
   | -- Sigma Types
     PairF t t
-  | SigmaF Name t t
+  | SigmaF Binder t t
   | -- Quotient Types
     -- A / (x x'. R, x. Refl, x y xy. Sym, x y z xy yz. Trans) : U
-    QuotientF t Name Name t Name t Name Name Name t Name Name Name Name Name t
+    QuotientF t Binder Binder t Binder t Binder Binder Binder t Binder Binder Binder Binder Binder t
   | QProjF t
   | -- Q-elim(z. B, x. tπ, x y e. t~, u) : B[z/u]
-    QElimF Name t Name t Name Name Name t t
+    QElimF Binder t Binder t Binder Binder Binder t t
   | -- Inductive equality
     IdReflF t
   | IdPathF t
-  | JF t t Name Name t t t t
+  | JF t t Binder Binder t t t t
   | IdF t t t
   | -- Annotations
-    LetF Name t t t
+    LetF Binder t t t
   | AnnotationF t t
+  | MetaF meta
 
-newtype RawF t = RawF (Loc (TermF () Name t))
+newtype RawF t = RawF (Loc (TermF () () Name t))
 
 type Raw = Fix RawF
 
-pattern R :: Position -> TermF () Name Raw -> Raw
+pattern R :: Position -> TermF () () Name Raw -> Raw
 pattern R sl term = Fix (RawF (L sl term))
+
+pattern HoleF :: TermF () () Name t
+pattern HoleF = MetaF ()
 
 {-# COMPLETE R #-}
 
-type Term v = Fix (TermF Relevance v)
+type Term v = Fix (TermF (RelevanceF Void) MetaVar v)
 
-type Type v = Fix (TermF Relevance v)
+type Type v = Term v
 
 pattern Var :: v -> Term v
 pattern Var x = Fix (VarF x)
@@ -196,13 +253,13 @@ pattern Var x = Fix (VarF x)
 pattern U :: Relevance -> Term v
 pattern U s = Fix (UF s)
 
-pattern Lambda :: Name -> Term v -> Term v
+pattern Lambda :: Binder -> Term v -> Term v
 pattern Lambda x e = Fix (LambdaF x e)
 
 pattern App :: Term v -> Term v -> Term v
 pattern App t u = Fix (AppF t u)
 
-pattern Pi :: Relevance -> Name -> Type v -> Type v -> Type v
+pattern Pi :: Relevance -> Binder -> Type v -> Type v -> Type v
 pattern Pi s x a b = Fix (PiF s x a b)
 
 pattern Zero :: Term v
@@ -211,7 +268,7 @@ pattern Zero = Fix ZeroF
 pattern Succ :: Term v -> Term v
 pattern Succ n = Fix (SuccF n)
 
-pattern NElim :: Name -> Term v -> Term v -> Name -> Name -> Term v -> Term v -> Term v
+pattern NElim :: Binder -> Term v -> Term v -> Binder -> Binder -> Term v -> Term v -> Term v
 pattern NElim z a t0 x ih ts n = Fix (NElimF z a t0 x ih ts n)
 
 pattern Nat :: Term v
@@ -226,7 +283,7 @@ pattern PropFst p = Fix (FstF Irrelevant p)
 pattern PropSnd :: Term v -> Term v
 pattern PropSnd p = Fix (SndF Irrelevant p)
 
-pattern Exists :: Name -> Term v -> Term v -> Term v
+pattern Exists :: Binder -> Term v -> Term v -> Term v
 pattern Exists x a b = Fix (ExistsF x a b)
 
 pattern Abort :: Type v -> Term v -> Term v
@@ -247,7 +304,16 @@ pattern Eq t a u = Fix (EqF t a u)
 pattern Refl :: Term v -> Term v
 pattern Refl t = Fix (ReflF t)
 
-pattern Transp :: Term v -> Name -> Name -> Term v -> Term v -> Term v -> Term v -> Term v
+pattern Sym :: Term v -> Term v -> Term v -> Term v
+pattern Sym t u e = Fix (SymF t u e)
+
+pattern Trans :: Term v -> Term v -> Term v -> Term v -> Term v -> Term v
+pattern Trans t u v e e' = Fix (TransF t u v e e')
+
+pattern Ap :: Type v -> Binder -> Term v -> Term v -> Term v -> Term v -> Term v
+pattern Ap b x t u v e = Fix (ApF b x t u v e)
+
+pattern Transp :: Term v -> Binder -> Binder -> Term v -> Term v -> Term v -> Term v -> Term v
 pattern Transp t x pf b u t' e = Fix (TranspF t x pf b u t' e)
 
 pattern Cast :: Type v -> Type v -> Term v -> Term v -> Term v
@@ -265,25 +331,25 @@ pattern Fst p = Fix (FstF Relevant p)
 pattern Snd :: Term v -> Term v
 pattern Snd p = Fix (SndF Relevant p)
 
-pattern Sigma :: Name -> Type v -> Type v -> Type v
+pattern Sigma :: Binder -> Type v -> Type v -> Type v
 pattern Sigma x a b = Fix (SigmaF x a b)
 
 pattern Quotient
   :: Type v -- Base type          [A]
-  -> Name
-  -> Name
+  -> Binder
+  -> Binder
   -> Type v -- Quotient relation  [R : A -> A -> Ω]
-  -> Name
+  -> Binder
   -> Term v -- Reflexivity proof  [Rr : (x : A) -> R x x]
-  -> Name
-  -> Name
-  -> Name
+  -> Binder
+  -> Binder
+  -> Binder
   -> Term v -- Symmetry proof     [Rs : (x, y : A) -> R x y -> R y x]
-  -> Name
-  -> Name
-  -> Name
-  -> Name
-  -> Name
+  -> Binder
+  -> Binder
+  -> Binder
+  -> Binder
+  -> Binder
   -> Term v -- Transitivity proof [Rt : (x, y, z : A) -> R x y -> R y z -> R x z]
   -> Term v -- Quotient type      [A/(R, Rr, Rs, Rt)]
 pattern Quotient a x y r rx rr sx sy sxy rs tx ty tz txy tyz rt =
@@ -293,13 +359,13 @@ pattern QProj :: Term v -> Term v
 pattern QProj t = Fix (QProjF t)
 
 pattern QElim
-  :: Name
+  :: Binder
   -> Type v -- Type family        [B : A/R -> s]
-  -> Name
+  -> Binder
   -> Term v -- Function           [tπ : (x : A) -> B π(x)]
-  -> Name
-  -> Name
-  -> Name
+  -> Binder
+  -> Binder
+  -> Binder
   -> Type v -- Preservation proof [t~ : (x, y : A) -> (e : R x y) -> (tπ x) ~[B π(x)] cast(B π(y), B π(x), B e, tπ y)]
   -> Term v -- Argument           [u : A/R]
   -> Term v -- Eliminated term    [Q-elim(B, tπ, t~, u) : B u]
@@ -311,17 +377,20 @@ pattern IdRefl t = Fix (IdReflF t)
 pattern IdPath :: Term v -> Term v
 pattern IdPath t = Fix (IdPathF t)
 
-pattern J :: Type v -> Term v -> Name -> Name -> Type v -> Term v -> Term v -> Term v -> Term v
+pattern J :: Type v -> Term v -> Binder -> Binder -> Type v -> Term v -> Term v -> Term v -> Term v
 pattern J a t x pf b u t' e = Fix (JF a t x pf b u t' e)
 
 pattern Id :: Type v -> Term v -> Term v -> Type v
 pattern Id a t u = Fix (IdF a t u)
 
-pattern Let :: Name -> Type v -> Term v -> Term v -> Term v
+pattern Let :: Binder -> Type v -> Term v -> Term v -> Term v
 pattern Let x a t u = Fix (LetF x a t u)
 
 pattern Annotation :: Term v -> Type v -> Term v
 pattern Annotation t a = Fix (AnnotationF t a)
+
+pattern Meta :: MetaVar -> Term v
+pattern Meta v = Fix (MetaF v)
 
 {-# COMPLETE
   Var
@@ -343,6 +412,9 @@ pattern Annotation t a = Fix (AnnotationF t a)
   , Unit
   , Eq
   , Refl
+  , Sym
+  , Trans
+  , Ap
   , Transp
   , Cast
   , CastRefl
@@ -359,9 +431,10 @@ pattern Annotation t a = Fix (AnnotationF t a)
   , Id
   , Let
   , Annotation
+  , Meta
   #-}
 
-instance Functor (TermF p v) where
+instance Functor (TermF p m v) where
   fmap _ (VarF x) = VarF x
   fmap _ (UF s) = UF s
   fmap f (LambdaF x e) = LambdaF x (f e)
@@ -381,6 +454,9 @@ instance Functor (TermF p v) where
   fmap _ UnitF = UnitF
   fmap f (EqF t a u) = EqF (f t) (f a) (f u)
   fmap f (ReflF t) = ReflF (f t)
+  fmap f (SymF t u e) = SymF (f t) (f u) (f e)
+  fmap f (TransF t u v e e') = TransF (f t) (f u) (f v) (f e) (f e')
+  fmap f (ApF b x t u v e) = ApF (f b) x (f t) (f u) (f v) (f e)
   fmap f (TranspF t x pf b u t' e) = TranspF (f t) x pf (f b) (f u) (f t') (f e)
   fmap f (CastF a b e t) = CastF (f a) (f b) (f e) (f t)
   fmap f (CastReflF a t) = CastReflF (f a) (f t)
@@ -396,6 +472,89 @@ instance Functor (TermF p v) where
   fmap f (IdF a t u) = IdF (f a) (f t) (f u)
   fmap f (LetF x a t u) = LetF x (f a) (f t) (f u)
   fmap f (AnnotationF t a) = AnnotationF (f t) (f a)
+  fmap _ (MetaF m) = MetaF m
+
+instance Foldable (TermF p m v) where
+  foldr _ e (VarF _) = e
+  foldr _ e (UF _) = e
+  foldr f e (LambdaF _ t) = f t e
+  foldr f e (AppF t u) = (f t . f u) e
+  foldr f e (PiF _ _ a b) = (f a . f b) e
+  foldr _ e ZeroF = e
+  foldr f e (SuccF n) = f n e
+  foldr f e (NElimF _ a t0 _ _ ts n) = (f a . f t0 . f ts . f n) e
+  foldr _ e NatF = e
+  foldr f e (PropPairF t u) = (f t . f u) e
+  foldr f e (FstF _ p) = f p e
+  foldr f e (SndF _ p) = f p e
+  foldr f e (ExistsF _ a b) = (f a . f b) e
+  foldr f e (AbortF a t) = (f a . f t) e
+  foldr _ e EmptyF = e
+  foldr _ e OneF = e
+  foldr _ e UnitF = e
+  foldr f e (EqF t a u) = (f t . f a . f u) e
+  foldr f e (ReflF t) = f t e
+  foldr f e (SymF t u e') = (f t . f u . f e') e
+  foldr f e (TransF t u v e' e'') = (f t . f u . f v . f e' . f e'') e
+  foldr f e (ApF b _ t u v e') = (f b . f t . f u . f v . f e') e
+  foldr f e (TranspF t _ _ b u t' v) = (f t . f b . f u . f t' . f v) e
+  foldr f e (CastF a b u t) = (f a . f b . f u . f t) e
+  foldr f e (CastReflF a t) = (f a . f t) e
+  foldr f e (PairF t u) = (f t . f u) e
+  foldr f e (SigmaF _ a b) = (f a . f b) e
+  foldr f e (QuotientF a _ _ r _ rr _ _ _ rs _ _ _ _ _ rt) = (f a . f r . f rr . f rs . f rt) e
+  foldr f e (QProjF t) = f t e
+  foldr f e (QElimF _ b _ tpi _ _ _ p u) = (f b . f tpi . f p . f u) e
+  foldr f e (IdReflF t) = f t e
+  foldr f e (IdPathF t) = f t e
+  foldr f e (JF a t _ _ b u t' v) = (f a . f t . f b . f u . f t' . f v) e
+  foldr f e (IdF a t u) = (f a . f t . f u) e
+  foldr f e (LetF _ a t u) = (f a . f t . f u) e
+  foldr f e (AnnotationF t a) = (f t . f a) e
+  foldr _ e (MetaF _) = e
+
+instance Traversable (TermF p m v) where
+  traverse _ (VarF x) = pure (VarF x)
+  traverse _ (UF s) = pure (UF s)
+  traverse f (LambdaF x e) = LambdaF x <$> f e
+  traverse f (AppF t u) = AppF <$> f t <*> f u
+  traverse f (PiF s x a b) = PiF s x <$> f a <*> f b
+  traverse _ ZeroF = pure ZeroF
+  traverse f (SuccF n) = SuccF <$> f n
+  traverse f (NElimF z a t0 x ih ts n) = NElimF z <$> f a <*> f t0 <*> pure x <*> pure ih <*> f ts <*> f n
+  traverse _ NatF = pure NatF
+  traverse f (PropPairF t u) = PropPairF <$> f t <*> f u
+  traverse f (FstF s p) = FstF s <$> f p
+  traverse f (SndF s p) = SndF s <$> f p
+  traverse f (ExistsF x a b) = ExistsF x <$> f a <*> f b
+  traverse f (AbortF a t) = AbortF <$> f a <*> f t
+  traverse _ EmptyF = pure EmptyF
+  traverse _ OneF = pure OneF
+  traverse _ UnitF = pure UnitF
+  traverse f (EqF t a u) = EqF <$> f t <*> f a <*> f u
+  traverse f (ReflF t) = ReflF <$> f t
+  traverse f (SymF t u e) = SymF <$> f t <*> f u <*> f e
+  traverse f (TransF t u v e e') = TransF <$> f t <*> f u <*> f v <*> f e <*> f e'
+  traverse f (ApF b x t u v e) = ApF <$> f b <*> pure x <*> f t <*> f u <*> f v <*> f e
+  traverse f (TranspF t x pf b u t' e) =
+    TranspF <$> f t <*> pure x <*> pure pf <*> f b <*> f u <*> f t' <*> f e
+  traverse f (CastF a b e t) = CastF <$> f a <*> f b <*> f e <*> f t
+  traverse f (CastReflF a t) = CastReflF <$> f a <*> f t
+  traverse f (PairF t u) = PairF <$> f t <*> f u
+  traverse f (SigmaF x a b) = SigmaF x <$> f a <*> f b
+  traverse f (QuotientF a x y r rx rr sx sy sxy rs tx ty tz txy tyz rt) =
+    QuotientF <$> f a <*> pure x <*> pure y <*> f r <*> pure rx <*> f rr <*> pure sx <*> pure sy <*> pure sxy <*> f rs <*> pure tx <*> pure ty <*> pure tz <*> pure txy <*> pure tyz <*> f rt
+  traverse f (QProjF t) = QProjF <$> f t
+  traverse f (QElimF z b x tpi px py pe p u) =
+    QElimF z <$> f b <*> pure x <*> f tpi <*> pure px <*> pure py <*> pure pe <*> f p <*> f u
+  traverse f (IdReflF t) = IdReflF <$> f t
+  traverse f (IdPathF t) = IdPathF <$> f t
+  traverse f (JF a t x pf b u t' e) =
+    JF <$> f a <*> f t <*> pure x <*> pure pf <*> f b <*> f u <*> f t' <*> f e
+  traverse f (IdF a t u) = IdF <$> f a <*> f t <*> f u
+  traverse f (LetF x a t u) = LetF x <$> f a <*> f t <*> f u
+  traverse f (AnnotationF t a) = AnnotationF <$> f t <*> f a
+  traverse _ (MetaF m) = pure (MetaF m)
 
 instance Functor RawF where
   fmap f (RawF t) = RawF (L {location = location t, syntax = fmap f (syntax t)})
@@ -403,7 +562,7 @@ instance Functor RawF where
 varMap :: forall v v'. (v -> v') -> Term v -> Term v'
 varMap f = foldFix alg
   where
-    alg :: TermF Relevance v (Term v') -> Term v'
+    alg :: TermF (RelevanceF Void) MetaVar v (Term v') -> Term v'
     alg (VarF x) = Var (f x)
     alg (UF s) = U s
     alg (LambdaF x e) = Lambda x e
@@ -423,6 +582,9 @@ varMap f = foldFix alg
     alg UnitF = Unit
     alg (EqF t a u) = Eq t a u
     alg (ReflF t) = Refl t
+    alg (SymF t u e) = Sym t u e
+    alg (TransF t u v e e') = Trans t u v e e'
+    alg (ApF b x t u v e) = Ap b x t u v e
     alg (TranspF t x pf b u t' e) = Transp t x pf b u t' e
     alg (CastF a b e t) = Cast a b e t
     alg (CastReflF a t) = CastRefl a t
@@ -440,6 +602,10 @@ varMap f = foldFix alg
     alg (IdF a t u) = Id a t u
     alg (LetF x a t u) = Let x a t u
     alg (AnnotationF t a) = Annotation t a
+    alg (MetaF m) = Meta m
+    -- To make GHC happy
+    alg (FstF (SortMeta v) _) = absurd v
+    alg (SndF (SortMeta v) _) = absurd v
 
 precAtom, precApp, precPi, precLet :: Int
 precAtom = 3
@@ -448,18 +614,18 @@ precPi = 1
 precLet = 0
 
 class VarShowable v where
-  showsVar :: v -> [Name] -> ShowS
+  showsVar :: v -> [Binder] -> ShowS
 
 instance VarShowable Ix where
-  showsVar (Ix x) ns = showString (ns !! x)
+  showsVar (Ix x) ns = shows (ns !! x)
 
 instance IsChar s => VarShowable [s] where
   showsVar x _ = showString (map toChar x)
 
-prettyPrintTerm :: VarShowable v => [Name] -> Term v -> String
+prettyPrintTerm :: VarShowable v => [Binder] -> Term v -> String
 prettyPrintTerm = prettyPrintTermDebug False
 
-prettyPrintTermDebug :: forall v. VarShowable v => Bool -> [Name] -> Term v -> String
+prettyPrintTermDebug :: forall v. VarShowable v => Bool -> [Binder] -> Term v -> String
 prettyPrintTermDebug debug names tm = go 0 names tm []
   where
     par :: Int -> Int -> ShowS -> ShowS
@@ -471,9 +637,12 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
     chr :: Char -> ShowS
     chr = showChar
 
-    showRelevance :: Relevance -> ShowS
-    showRelevance Relevant = chr 'U'
-    showRelevance Irrelevant = chr 'Ω'
+    binder :: Binder -> ShowS
+    binder = shows
+
+    -- showRelevance :: Relevance -> ShowS
+    -- showRelevance Relevant = chr 'U'
+    -- showRelevance Irrelevant = chr 'Ω'
 
     comma, dot, space :: ShowS
     comma = str ", "
@@ -490,40 +659,40 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
       | debug = chr '{' . str t . chr '}'
       | otherwise = id
 
-    go :: Int -> [Name] -> Term v -> ShowS
+    go :: Int -> [Binder] -> Term v -> ShowS
     go _ ns (Var x) = tag "V" . showsVar x ns
-    go _ _ (U s) = showRelevance s
+    go _ _ (U s) = shows s
     go prec ns (Lambda x e) =
-      let domain = chr 'λ' . str x
+      let domain = chr 'λ' . binder x
        in par prec precLet (domain . dot . go precLet (ns :> x) e)
     go prec ns (App t u) =
       tag "A" . par prec precApp (go precApp ns t . space . go precAtom ns u)
-    go prec ns (Pi _ "_" a b) =
+    go prec ns (Pi _ Hole a b) =
       let domain = go precApp ns a
-          codomain = go precPi (ns :> "_") b
+          codomain = go precPi (ns :> Hole) b
        in tag "Π" . par prec precPi (domain . str " → " . codomain)
     go prec ns (Pi s x a b) =
-      let domain = showParen True (str x . str " :" . showRelevance s . space . go precLet ns a)
+      let domain = showParen True (binder x . str " :" . shows s . space . go precLet ns a)
           codomain = go precPi (ns :> x) b
        in tag "Π" . par prec precPi (domain . str " → " . codomain)
     go _ _ Zero = chr '0'
     go prec ns (Succ n) = par prec precApp (str "S " . go precAtom ns n)
     go prec ns (NElim z a t0 x ih ts n) =
-      let a' = str z . dot . go precLet (ns :> z) a
+      let a' = binder z . dot . go precLet (ns :> z) a
           t0' = go precLet ns t0
-          ts' = str x . space . str ih . dot . go precLet (ns :> x :> ih) ts
+          ts' = binder x . space . binder ih . dot . go precLet (ns :> x :> ih) ts
           n' = go precLet ns n
        in par prec precApp (str "ℕ-elim" . showParen True (sep comma [a', t0', ts', n']))
     go _ _ Nat = chr 'ℕ'
     go _ ns (PropPair t u) = chr '⟨' . go precLet ns t . comma . go precLet ns u . chr '⟩'
     go prec ns (PropFst p) = par prec precApp (str "fst " . go precAtom ns p)
     go prec ns (PropSnd p) = par prec precApp (str "snd " . go precAtom ns p)
-    go prec ns (Exists "_" a b) =
+    go prec ns (Exists Hole a b) =
       let domain = go precApp ns a
-          codomain = go precApp (ns :> "_") b
+          codomain = go precApp (ns :> Hole) b
        in tag "∃" . par prec precPi (domain . str " ∧ " . codomain)
     go prec ns (Exists x a b) =
-      let domain = showParen True (str x . str " : " . go precLet ns a)
+      let domain = showParen True (binder x . str " : " . go precLet ns a)
           codomain = go precPi (ns :> x) b
        in par prec precPi (chr '∃' . domain . dot . codomain)
     go prec ns (Abort a t) =
@@ -536,9 +705,19 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
     go prec ns (Eq t a u) =
       par prec precPi (go precApp ns t . str " ~[" . go precAtom ns a . str "] " . go precApp ns u)
     go prec ns (Refl t) = par prec precApp (str "refl " . go precAtom ns t)
+    go prec ns (Sym t u e) =
+      let go' = go precLet ns
+       in par prec precApp (str "sym" . showParen True (sep comma [go' t, go' u, go' e]))
+    go prec ns (Trans t u v e e') =
+      let go' = go precLet ns
+       in par prec precApp (str "trans" . showParen True (sep comma [go' t, go' u, go' v, go' e, go' e']))
+    go prec ns (Ap b x t u v e) =
+      let t' = binder x . dot . go precLet (ns :> x) t
+          go' = go precLet ns
+       in par prec precApp (str "ap" . showParen True (sep comma [go' b, t', go' u, go' v, go' e]))
     go prec ns (Transp t x pf b u v e) =
       let t' = go precLet ns t
-          b' = str x . space . str pf . dot . go precLet (ns :> x :> pf) b
+          b' = binder x . space . binder pf . dot . go precLet (ns :> x :> pf) b
           u' = go precLet ns u
           v' = go precLet ns v
           e' = go precLet ns e
@@ -554,26 +733,26 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
     go _ ns (Pair t u) = chr '(' . go precLet ns t . str "; " . go precLet ns u . chr ')'
     go prec ns (Fst p) = par prec precApp (str "fst " . go precAtom ns p)
     go prec ns (Snd p) = par prec precApp (str "snd " . go precAtom ns p)
-    go prec ns (Sigma "_" a b) =
+    go prec ns (Sigma Hole a b) =
       let domain = go precApp ns a
-          codomain = go precApp (ns :> "_") b
+          codomain = go precApp (ns :> Hole) b
        in par prec precPi (domain . str " × " . codomain)
     go prec ns (Sigma x a b) =
-      let domain = chr 'Σ' . showParen True (str x . str " : " . go precLet ns a)
+      let domain = chr 'Σ' . showParen True (binder x . str " : " . go precLet ns a)
           codomain = go precPi (ns :> x) b
        in tag "Σ" . par prec precPi (domain . dot . codomain)
     go prec ns (Quotient a x y r rx rr sx sy sxy rs tx ty tz txy tyz rt) =
       let a' = go precAtom ns a
-          r' = str x . space . str y . dot . go precLet (ns :> x :> y) r
-          rr' = str rx . dot . go precLet (ns :> rx) rr
-          rs' = sep space [str sx, str sy, str sxy] . dot . go precLet (ns :> sx :> sy :> sxy) rs
-          rt' = sep space [str tx, str ty, str tz, str txy, str tyz] . dot . go precLet (ns :> tx :> ty :> tz :> txy :> tyz) rt
+          r' = binder x . space . binder y . dot . go precLet (ns :> x :> y) r
+          rr' = binder rx . dot . go precLet (ns :> rx) rr
+          rs' = sep space [binder sx, binder sy, binder sxy] . dot . go precLet (ns :> sx :> sy :> sxy) rs
+          rt' = sep space [binder tx, binder ty, binder tz, binder txy, binder tyz] . dot . go precLet (ns :> tx :> ty :> tz :> txy :> tyz) rt
        in par prec precPi (a' . str "/(" . sep comma [r', rr', rs', rt'] . chr ')')
     go prec ns (QProj t) = par prec precApp (str "π " . go precAtom ns t)
     go prec ns (QElim z b x tpi px py pe p u) =
-      let b' = str z . dot . go precLet (ns :> z) b
-          tpi' = str x . dot . go precLet (ns :> x) tpi
-          p' = sep space [str px, str py, str pe] . dot . go precLet (ns :> px :> py :> pe) p
+      let b' = binder z . dot . go precLet (ns :> z) b
+          tpi' = binder x . dot . go precLet (ns :> x) tpi
+          p' = sep space [binder px, binder py, binder pe] . dot . go precLet (ns :> px :> py :> pe) p
           u' = go precLet ns u
        in par prec precApp (str "Q-elim(" . sep comma [b', tpi', p', u'] . chr ')')
     go prec ns (IdRefl t) = par prec precApp (str "Idrefl " . go precAtom ns t)
@@ -581,7 +760,7 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
     go prec ns (J a t x pf b u v e) =
       let a' = go precLet ns a
           t' = go precLet ns t
-          b' = str x . space . str pf . dot . go precLet (ns :> x :> pf) b
+          b' = binder x . space . binder pf . dot . go precLet (ns :> x :> pf) b
           u' = go precLet ns u
           v' = go precLet ns v
           e' = go precLet ns e
@@ -596,7 +775,7 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
             prec
             precLet
             ( str "let "
-                . str x
+                . binder x
                 . str " : "
                 . a'
                 . str " =\n    "
@@ -606,6 +785,7 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
             )
     go _ ns (Annotation t a) =
       showParen True (go precLet ns t . str " : " . go precLet ns a)
+    go _ _ (Meta (MetaVar m)) = str "?" . shows m
 
 -- eraseSourceLocations :: Raw -> Term Name
 -- eraseSourceLocations = foldFix alg
@@ -613,7 +793,16 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
 --     alg :: RawF (Term Name) -> Term Name
 --     alg (RawF l) = Fix (syntax l)
 
-type Env v = [Val v]
+data BD = Bound | Defined
+  deriving (Show)
+
+type Env v = [(BD, Val v)]
+
+level :: Env v -> Lvl
+level env = Lvl (length env)
+
+class Applicative f => PushArgument f where
+  push :: (a -> f b) -> f (a -> b)
 
 data Arity = Z | S Arity
 
@@ -624,19 +813,24 @@ type family A (n :: T.Nat) :: Arity where
 data Closure (n :: Arity) v where
   Closure :: forall n v. Env v -> Term v -> Closure n v
   Lift :: forall n v. Val v -> Closure n v
-  Function :: (Val v -> Closure n v) -> Closure ('S n) v
+  Function :: forall n v. (Val v -> Closure n v) -> Closure ('S n) v
 
-class ClosureApply (n :: Arity) cl v | cl -> v where
-  app :: (Env v -> Term v -> Val v) -> Closure n v -> cl
+class Applicative f => ClosureApply f (n :: Arity) cl v | cl -> v, cl -> f where
+  app :: (Env v -> Term v -> f (Val v)) -> Closure n v -> cl
+  makeFnClosure :: PushArgument f => cl -> f (Closure n v)
 
-instance ClosureApply 'Z (Val v) v where
+instance Applicative f => ClosureApply f 'Z (f (Val v)) v where
   app eval (Closure env t) = eval env t
-  app _ (Lift v) = v
+  app _ (Lift v) = pure v
 
-instance ClosureApply n res v => ClosureApply ('S n) (Val v -> res) v where
-  app eval (Closure env t) u = app eval (Closure @n @v (env :> u) t)
+  makeFnClosure v = Lift <$> v
+
+instance ClosureApply f n res v => ClosureApply f ('S n) (Val v -> res) v where
+  app eval (Closure env t) u = app eval (Closure @n @v (env :> (Bound, u)) t)
   app eval (Lift v) _ = app eval (Lift @n @v v)
   app eval (Function f) u = app eval (f u)
+
+  makeFnClosure f = Function <$> push (makeFnClosure . f)
 
 type VTy = Val
 
@@ -645,11 +839,11 @@ type VTy = Val
 -- eliminator in a spine
 data VElim v
   = VApp (Val v)
-  | VNElim Name (Closure (A 1) v) (Val v) Name Name (Closure (A 2) v)
+  | VNElim Binder (Closure (A 1) v) (Val v) Binder Binder (Closure (A 2) v)
   | VFst
   | VSnd
-  | VQElim Name (Closure (A 1) v) Name (Closure (A 1) v)
-  | VJ (VTy v) (Val v) Name Name (Closure (A 2) v) (Val v) (Val v)
+  | VQElim Binder (Closure (A 1) v) Binder (Closure (A 1) v) Binder Binder Binder (VProp v)
+  | VJ (VTy v) (Val v) Binder Binder (Closure (A 2) v) (Val v) (Val v)
 
 showElimHead :: VElim v -> String
 showElimHead (VApp {}) = "<application>"
@@ -661,40 +855,60 @@ showElimHead (VJ {}) = "<J>"
 
 type VSpine v = [VElim v]
 
+data VProp v = VProp (Env v) (Term v)
+
+infixl 8 $$$
+($$$) :: (Term v -> Term v) -> VProp v -> VProp v
+f $$$ VProp env t = VProp env (f t)
+
 data Val v
   = VRigid Lvl (VSpine v)
+  | VFlex MetaVar (Env v) (VSpine v)
   | VU Relevance
-  | VLambda Name (Closure (A 1) v)
-  | VPi Relevance Name (VTy v) (Closure (A 1) v)
+  | VLambda Binder (Closure (A 1) v)
+  | VPi Relevance Binder (VTy v) (Closure (A 1) v)
   | VZero
   | VSucc (Val v)
   | VNat
-  | VExists Name (VTy v) (Closure (A 1) v)
-  | VAbort (VTy v)
+  | VExists Binder (VTy v) (Closure (A 1) v)
+  | VAbort (VTy v) (VProp v)
   | VEmpty
-  | VOne
+  | VOne (VProp v)
   | VUnit
   | VEq (Val v) (VTy v) (Val v)
-  | VCast (VTy v) (VTy v) (Val v)
+  | VCast (VTy v) (VTy v) (VProp v) (Val v)
   | VPair (Val v) (Val v)
-  | VSigma Name (VTy v) (Closure (A 1) v)
-  | VQuotient (VTy v) Name Name (Closure (A 2) v)
+  | VSigma Binder (VTy v) (Closure (A 1) v)
+  | VQuotient
+      (VTy v)
+      Binder
+      Binder
+      (Closure (A 2) v)
+      Binder
+      (VProp v)
+      Binder
+      Binder
+      Binder
+      (VProp v)
+      Binder
+      Binder
+      Binder
+      Binder
+      Binder
+      (VProp v)
   | VQProj (Val v)
   | VIdRefl (Val v)
-  | VIdPath
+  | VIdPath (VProp v)
   | VId (VTy v) (Val v) (Val v)
 
 pattern VVar :: Lvl -> Val v
 pattern VVar x = VRigid x []
 
+pattern VMeta :: MetaVar -> Env v -> Val v
+pattern VMeta mv e = VFlex mv e []
+
 pattern VFun :: Relevance -> VTy v -> VTy v -> VTy v
-pattern VFun s a b = VPi s "_" a (Lift b)
+pattern VFun s a b = VPi s Hole a (Lift b)
 
 pattern VAnd :: VTy v -> VTy v -> VTy v
-pattern VAnd a b = VExists "_" a (Lift b)
-
--- pattern VFun :: Relevance -> VTy v -> VTy v -> VTy v
--- pattern VFun s a b = VPi s "_" a (Const b)
-
--- pattern VAnd :: VTy v -> VTy v -> VTy v
--- pattern VAnd a b = VExists "_" a (Const b)
+pattern VAnd a b = VExists Hole a (Lift b)

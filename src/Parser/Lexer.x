@@ -49,6 +49,9 @@ tokens :-
        "["                      { symbol TokOpenBracket }
        "]"                      { symbol TokCloseBracket }
        "refl"                   { keyword KWRefl }
+       "sym"                    { symbol KWSym }
+       "trans"                  { symbol KWTrans }
+       "ap"                     { keyword KWAp }
        "transp"                 { keyword KWTransp }
        "cast"                   { keyword KWCast }
        "castrefl"               { keyword KWCastRefl }
@@ -66,6 +69,7 @@ tokens :-
        "let"                    { keyword KWLet }
        "="                      { symbol TokEquals }
        "in"                     { keyword KWIn}
+       "_"                      { symbol TokHole }
 
        [a-z A-Z 0-9 \_ \']+   { identifier TokName }
 {
@@ -98,6 +102,9 @@ data Token
   | TokOpenBracket
   | TokCloseBracket
   | KWRefl
+  | KWSym
+  | KWTrans
+  | KWAp
   | KWTransp
   | KWCast
   | KWCastRefl
@@ -114,6 +121,7 @@ data Token
   | KWLet
   | TokEquals
   | KWIn
+  | TokHole
   | TokName Name
   | TokEOF
   deriving (Show)
