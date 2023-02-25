@@ -64,6 +64,7 @@ data UnificationError
   | NElimInSpine MetaVar Position
   | JInSpine MetaVar Position
   | QElimInSpine MetaVar Position
+  | MatchInSpine MetaVar Position
 
 instance Reportable UnificationError where
   report (NonLinearSpineDuplicate name pos) =
@@ -93,6 +94,10 @@ instance Reportable UnificationError where
   report (QElimInSpine (MetaVar v) pos) =
     let msg = "Unsolvable metavariable."
         ctx = "Cannot solve metavariable [?" ++ show v ++ "] as it is eliminated by quotient eliminator term."
+     in createError msg [(pos, ctx)]
+  report (MatchInSpine (MetaVar v) pos) =
+    let msg = "Unsolvable metavariable."
+        ctx = "Cannot solve metavariable [?" ++ show v ++ "] as it is eliminated by match term."
      in createError msg [(pos, ctx)]
 
 data InferenceError

@@ -47,6 +47,8 @@ library:
     - lens
     - oops
     - containers
+    - sized
+    - vector
 
     - raw-strings-qq
     - HUnit

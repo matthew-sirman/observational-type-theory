@@ -345,6 +345,10 @@ prop env t = pure (VProp env t)
 closure :: MonadEvaluator m => Env Ix -> Term Ix -> m (Closure n Ix)
 closure env t = pure (Closure env t)
 
+branch :: MonadEvaluator m => Env Ix -> Branch Ix -> m (VBranch Ix)
+branch env (Branch ZeroP t) = VZeroBranch <$> eval env t
+branch env (Branch (SuccP x) t) = VSuccBranch x <$> closure env t
+
 evalSort :: MonadEvaluator m => Relevance -> m Relevance
 evalSort Relevant = pure Relevant
 evalSort Irrelevant = pure Irrelevant
@@ -415,6 +419,11 @@ eval env (J a t x pf b u t' e) = do
   e <- eval env e
   e $$ VJ a t x pf b u t'
 eval env (Id a t u) = VId <$> eval env a <*> eval env t <*> eval env u
+eval env (Match t x p bs) = do
+  t <- eval env t
+  p <- closure env p
+  bs <- mapM (branch env) bs
+  t $$ VMatch x p bs
 eval env (Let _ _ t u) = do
   t <- eval env t
   eval (env :> (Defined, t)) u
@@ -424,6 +433,14 @@ eval env (Meta mv) = do
   case val of
     Nothing -> pure (VMeta mv env)
     Just solved -> eval env solved
+
+match :: MonadEvaluator m => Val Ix -> Binder -> Closure (A 1) Ix -> [VBranch Ix] -> m (Val Ix)
+match VZero _ _ (VZeroBranch t : _) = pure t
+match (VSucc n) _ _ (VSuccBranch _ t : _) = app' t n
+match (VRigid x sp) x' p bs = pure (VRigid x (sp :> VMatch x' p bs))
+match (VFlex m env sp) x p bs = pure (VFlex m env (sp :> VMatch x p bs))
+match t x p (_ : bs) = match t x p bs
+match _ _ _ [] = error "BUG: IMPOSSIBLE (non-total or ill-typed match)!"
 
 infixl 8 $$
 
@@ -447,20 +464,24 @@ VZero $$ (VNElim _ _ t0 _ _ _) = pure t0
 --       tm_t' = quote lvl t'
 --       eqJ = Transp tm_t (Name "x") Hole (quote (lvl + 2) (app'))
 --   cast b_t_idrefl_t b_t'_idpath_e (VProp env eqJ) u
--- VOne $$ _ = VOne
+t $$ (VMatch x p bs) = match t x p bs
 (VOne prop@(VProp env _)) $$ t = do
   -- TODO: level here almost certainly wrong
   let prop' = ($$$ prop) <$> evaluate (push (\p -> quoteSp (level env) p [t]))
   VOne <$> prop'
 (VRigid x sp) $$ u = pure (VRigid x (sp :> u))
 (VFlex m env sp) $$ u = pure (VFlex m env (sp :> u))
-_ $$ _ = error "BUG: IMPOSSIBLE!"
+_ $$ _ = error "BUG: IMPOSSIBLE (ill-typed evaluation)!"
 
 elimM :: MonadEvaluator m => m (Val Ix) -> m (VElim Ix) -> m (Val Ix)
 elimM = bindM2 ($$)
 
 app' :: MonadEvaluator m => ClosureApply m n cl Ix => Closure n Ix -> cl
 app' = app eval
+
+quoteBranch :: MonadEvaluator m => Lvl -> VBranch Ix -> m (Branch Ix)
+quoteBranch l (VZeroBranch t) = Branch ZeroP <$> quote l t
+quoteBranch l (VSuccBranch x t) = Branch (SuccP x) <$> (quote (l + 1) =<< app' t (VVar l))
 
 quoteSp :: forall m. MonadEvaluator m => Lvl -> Term Ix -> VSpine Ix -> m (Term Ix)
 quoteSp _ base [] = pure base
@@ -485,6 +506,11 @@ quoteSp l base (sp :> VJ a t x pf b u v) = do
   u <- quote l u
   v <- quote l v
   J a t x pf b u v <$> quoteSp l base sp
+quoteSp l base (sp :> VMatch x p bs) = do
+  p <- quote (l + 1) =<< app' p (VVar l)
+  bs <- mapM (quoteBranch l) bs
+  sp <- quoteSp l base sp
+  pure (Match sp x p bs)
 
 quoteProp' :: MonadEvaluator m => Lvl -> Lvl -> VProp Ix -> m (Term Ix)
 quoteProp' lvl by (VProp env t) = quoteProp (lvl + by) (VProp (liftEnv by env) t)
@@ -540,9 +566,18 @@ quoteProp lvl (VProp env t) = q env t
       v <- q env v
       e <- q env e
       pure (J a t x pf b u v e)
+    q env (Match t x p bs) = do
+      t <- q env t
+      p <- q' 1 env p
+      bs <- mapM (qBranch env) bs
+      pure (Match t x p bs)
     q env (Let x a t u) =
       Let x <$> q env a <*> q env t <*> q' 1 env u
     q env (Fix t) = Fix <$> traverse (q env) t
+
+    qBranch :: Env Ix -> Branch Ix -> m (Branch Ix)
+    qBranch env (Branch ZeroP t) = Branch ZeroP <$> q env t
+    qBranch env (Branch (SuccP x) t) = Branch (SuccP x) <$> q' 1 env t
 
     q' :: Lvl -> Env Ix -> Term Ix -> m (Term Ix)
     q' by env t = quoteProp' lvl by (VProp env t)
@@ -707,9 +742,19 @@ renameProp pos ns m sub (VProp env t) = r (level env) ns sub env t
       v <- r l ns sub env v
       e <- r l ns sub env e
       pure (J a t x pf b u v e)
+    r l ns sub env (Match t x p bs) = do
+      t <- r l ns sub env t
+      p <- r (l + 1) (ns :> x) (lift 1 sub) (extend l 1 env) p
+      bs <- mapM (rBranch l ns sub env) bs
+      pure (Match t x p bs)
     r l ns sub env (Let x a t u) =
       Let x <$> r l ns sub env a <*> r l ns sub env t <*> r (l + 1) (ns :> x) (lift 1 sub) (extend l 1 env) u
     r l ns sub env (Fix t) = Fix <$> traverse (r l ns sub env) t
+
+    rBranch :: Lvl -> [Binder] -> PartialRenaming -> Env Ix -> Branch Ix -> Checker (Variant e) (Branch Ix)
+    rBranch l ns sub env (Branch ZeroP t) = Branch ZeroP <$> r l ns sub env t
+    rBranch l ns sub env (Branch (SuccP x) t) =
+      Branch (SuccP x) <$> r (l + 1) (ns :> x) (lift 1 sub) (extend l 1 env) t
 
     lift :: Lvl -> PartialRenaming -> PartialRenaming
     lift = liftRenaming
@@ -717,6 +762,19 @@ renameProp pos ns m sub (VProp env t) = r (level env) ns sub env t
     extend :: Lvl -> Lvl -> Env Ix -> Env Ix
     extend _ 0 env = env
     extend lvl by env = extend lvl (by - 1) env :> (Bound, VVar (lvl + by - 1))
+
+renameBranch
+  :: forall e
+   . e `CouldBe` UnificationError
+  => Position
+  -> [Binder]
+  -> MetaVar
+  -> PartialRenaming
+  -> VBranch Ix
+  -> Checker (Variant e) (Branch Ix)
+renameBranch pos ns m sub (VZeroBranch t) = Branch ZeroP <$> rename pos ns m sub t
+renameBranch pos ns m sub (VSuccBranch x t) =
+  Branch (SuccP x) <$> (rename pos ns m (liftRenaming 1 sub) =<< app' t (VVar (cod sub)))
 
 renameSp
   :: forall e
@@ -759,6 +817,11 @@ renameSp pos ns m sub base (sp :> VJ a t x pf b u v) = do
   u <- rename pos ns m sub u
   v <- rename pos ns m sub v
   pure (J a t x pf b u v sp)
+renameSp pos ns m sub base (sp :> VMatch x p bs) = do
+  sp <- renameSp pos ns m sub base sp
+  p <- rename pos ns m (liftRenaming 1 sub) =<< app' p (VVar (cod sub))
+  bs <- mapM (renameBranch pos ns m sub) bs
+  pure (Match sp x p bs)
 
 rename
   :: forall e
@@ -881,6 +944,8 @@ solve pos _ _ mv _ (_ :> VQElim {}) _ = do
   throw (QElimInSpine mv pos)
 solve pos _ _ mv _ (_ :> VJ {}) _ =
   throw (JInSpine mv pos)
+solve pos _ _ mv _ (_ :> VMatch {}) _ =
+  throw (MatchInSpine mv pos)
 
 convSort
   :: e `CouldBe` ConversionError
@@ -955,6 +1020,10 @@ conv pos names = conv' names names
       conv' (ns :> x :> pf) (ns' :> x' :> pf') (lvl + 2) b_x_pf b'_x_pf
       conv' ns ns' lvl u u'
       conv' ns ns' lvl v v'
+    -- TODO: conversion checking for pattern matches in spines - might be tricky e.g. when comparing
+    -- match on ℕ to ℕ-elim. Maybe for now just make recursors and matches incompatible (though could
+    -- be very annoying) In general conversion checking could be very tricky though (especially concering
+    -- fixed points)
     convSp _ _ _ sp sp' =
       throw (RigidSpineMismatch (TS . showElimHead <$> safeHead sp) (TS . showElimHead <$> safeHead sp') pos)
       where
@@ -1090,7 +1159,8 @@ inferVar pos types name = do
       pure (i + 1, a, s)
 
 infer
-  :: ( e `CouldBe` InferenceError
+  :: forall e
+   . ( e `CouldBe` InferenceError
      , e `CouldBe` CheckError
      , e `CouldBe` ConversionError
      , e `CouldBe` UnificationError
@@ -1375,6 +1445,16 @@ infer gamma (R _ (IdF a t u)) = do
   t <- check gamma t va
   u <- check gamma u va
   pure (Id a t u, VU Relevant, Relevant)
+infer gamma (R _ (MatchF t x p bs)) = do
+  (t, a, s) <- infer gamma t
+  (p, s') <- checkType (gamma & bind x s a) p
+  bs <- mapM (checkBranch gamma a p) bs
+  -- TODO: check for coverage - this will actually be easier with
+  -- more general patterns (for now, we just throw a runtime error for partial
+  -- matches)
+  vt <- eval (env gamma) t
+  vp_t <- eval (env gamma :> (Bound, vt)) p
+  pure (Match t x p bs, vp_t, s')
 infer gamma (R _ (LetF x a t u)) = do
   (a, s) <- checkType gamma a
   va <- eval (env gamma) a
@@ -1411,6 +1491,29 @@ checkType gamma t@(R pos _) = do
     _ -> do
       tTS <- ppVal gamma tty
       throw (CheckType tTS pos)
+
+checkBranch
+  :: ( e `CouldBe` CheckError
+     , e `CouldBe` InferenceError
+     , e `CouldBe` ConversionError
+     , e `CouldBe` UnificationError
+     )
+  => Context
+  -> VTy Ix
+  -> Term Ix
+  -> RawBranch
+  -> Checker (Variant e) (Branch Ix)
+checkBranch gamma ty p (BranchF ZeroP t@(R pos _)) = do
+  conv pos (names gamma) (lvl gamma) ty VNat
+  p0 <- eval (env gamma :> (Bound, VZero)) p
+  t <- check gamma t p0
+  pure (Branch ZeroP t)
+checkBranch gamma ty p (BranchF (SuccP x) t@(R pos _)) = do
+  conv pos (names gamma) (lvl gamma) ty VNat
+  let vx = VVar (lvl gamma)
+  pSx <- eval (env gamma :> (Bound, VSucc vx)) p
+  t <- check (gamma & bindR x VNat) t pSx
+  pure (Branch (SuccP x) t)
 
 check
   :: ( e `CouldBe` CheckError

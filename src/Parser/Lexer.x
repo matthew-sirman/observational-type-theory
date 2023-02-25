@@ -66,6 +66,11 @@ tokens :-
        "Idpath"                 { keyword KWIdPath }
        "J"                      { keyword KWJ }
        "Id"                     { keyword KWId }
+       "match"                  { keyword KWMatch }
+       "as"                     { keyword KWAs }
+       "return"                 { keyword KWReturn }
+       "with"                   { keyword KWWith }
+       "|"                      { symbol TokPipe }
        "let"                    { keyword KWLet }
        "="                      { symbol TokEquals }
        "in"                     { keyword KWIn}
@@ -118,6 +123,11 @@ data Token
   | KWIdPath
   | KWJ
   | KWId
+  | KWMatch
+  | KWAs
+  | KWReturn
+  | KWWith
+  | TokPipe
   | KWLet
   | TokEquals
   | KWIn

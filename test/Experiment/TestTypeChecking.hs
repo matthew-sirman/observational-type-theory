@@ -522,7 +522,13 @@ tm24 =
 tm25 :: String
 tm25 =
   [r|
-    ()
+    let pred : ℕ -> ℕ =
+      λn.
+      match n as _ return ℕ with
+        | 0 -> 0
+        | S n -> n
+    in
+    pred (S (S (S (S 0))))
   |]
 
 test :: String -> IO ()

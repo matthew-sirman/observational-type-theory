@@ -27,9 +27,13 @@ module Syntax (
   ULevel,
   TermF (..),
   Term,
+  BranchF (..),
+  Branch,
+  Pattern (..),
   Type,
   RawF (..),
   Raw,
+  RawBranch,
   pattern R,
   pattern HoleF,
   pattern Var,
@@ -68,10 +72,13 @@ module Syntax (
   pattern IdPath,
   pattern J,
   pattern Id,
+  pattern Match,
+  pattern Branch,
   pattern Let,
   pattern Annotation,
   pattern Meta,
   VElim (..),
+  VBranch (..),
   VSpine,
   VProp (..),
   ($$$),
@@ -88,7 +95,7 @@ module Syntax (
   BD (..),
   Env,
   level,
-  varMap,
+  -- varMap,
   VarShowable (..),
   prettyPrintTerm,
   prettyPrintTermDebug,
@@ -226,14 +233,26 @@ data TermF proj meta v t
   | IdPathF t
   | JF t t Binder Binder t t t t
   | IdF t t t
+  | MatchF t Binder t [BranchF t]
   | -- Annotations
     LetF Binder t t t
   | AnnotationF t t
   | MetaF meta
 
+data Pattern
+  = -- TODO: variable patterns?
+    -- = VarP Binder
+    ZeroP
+  | -- TODO: nested pattern matching
+    SuccP Binder
+
+data BranchF t = BranchF Pattern t
+
 newtype RawF t = RawF (Loc (TermF () () Name t))
 
 type Raw = Fix RawF
+
+type RawBranch = BranchF Raw
 
 pattern R :: Position -> TermF () () Name Raw -> Raw
 pattern R sl term = Fix (RawF (L sl term))
@@ -244,6 +263,8 @@ pattern HoleF = MetaF ()
 {-# COMPLETE R #-}
 
 type Term v = Fix (TermF (RelevanceF Void) MetaVar v)
+
+type Branch v = BranchF (Term v)
 
 type Type v = Term v
 
@@ -383,6 +404,12 @@ pattern J a t x pf b u t' e = Fix (JF a t x pf b u t' e)
 pattern Id :: Type v -> Term v -> Term v -> Type v
 pattern Id a t u = Fix (IdF a t u)
 
+pattern Match :: Term v -> Binder -> Type v -> [Branch v] -> Term v
+pattern Match t x p bs = Fix (MatchF t x p bs)
+
+pattern Branch :: Pattern -> Term v -> Branch v
+pattern Branch p t = BranchF p t
+
 pattern Let :: Binder -> Type v -> Term v -> Term v -> Term v
 pattern Let x a t u = Fix (LetF x a t u)
 
@@ -429,10 +456,16 @@ pattern Meta v = Fix (MetaF v)
   , IdPath
   , J
   , Id
+  , Match
   , Let
   , Annotation
   , Meta
   #-}
+
+{-# COMPLETE Branch #-}
+
+instance Functor BranchF where
+  fmap f (BranchF p t) = BranchF p (f t)
 
 instance Functor (TermF p m v) where
   fmap _ (VarF x) = VarF x
@@ -470,9 +503,13 @@ instance Functor (TermF p m v) where
   fmap f (IdPathF t) = IdPathF (f t)
   fmap f (JF a t x pf b u t' e) = JF (f a) (f t) x pf (f b) (f u) (f t') (f e)
   fmap f (IdF a t u) = IdF (f a) (f t) (f u)
+  fmap f (MatchF t x p bs) = MatchF (f t) x (f p) (fmap (fmap f) bs)
   fmap f (LetF x a t u) = LetF x (f a) (f t) (f u)
   fmap f (AnnotationF t a) = AnnotationF (f t) (f a)
   fmap _ (MetaF m) = MetaF m
+
+instance Foldable BranchF where
+  foldr f e (BranchF _ t) = f t e
 
 instance Foldable (TermF p m v) where
   foldr _ e (VarF _) = e
@@ -509,9 +546,13 @@ instance Foldable (TermF p m v) where
   foldr f e (IdPathF t) = f t e
   foldr f e (JF a t _ _ b u t' v) = (f a . f t . f b . f u . f t' . f v) e
   foldr f e (IdF a t u) = (f a . f t . f u) e
+  foldr f e (MatchF t _ p bs) = (f t . f p) (foldr (flip (foldr f)) e bs)
   foldr f e (LetF _ a t u) = (f a . f t . f u) e
   foldr f e (AnnotationF t a) = (f t . f a) e
   foldr _ e (MetaF _) = e
+
+instance Traversable BranchF where
+  traverse f (BranchF p t) = BranchF p <$> f t
 
 instance Traversable (TermF p m v) where
   traverse _ (VarF x) = pure (VarF x)
@@ -552,6 +593,7 @@ instance Traversable (TermF p m v) where
   traverse f (JF a t x pf b u t' e) =
     JF <$> f a <*> f t <*> pure x <*> pure pf <*> f b <*> f u <*> f t' <*> f e
   traverse f (IdF a t u) = IdF <$> f a <*> f t <*> f u
+  traverse f (MatchF t x p bs) = MatchF <$> f t <*> pure x <*> f p <*> traverse (traverse f) bs
   traverse f (LetF x a t u) = LetF x <$> f a <*> f t <*> f u
   traverse f (AnnotationF t a) = AnnotationF <$> f t <*> f a
   traverse _ (MetaF m) = pure (MetaF m)
@@ -559,53 +601,53 @@ instance Traversable (TermF p m v) where
 instance Functor RawF where
   fmap f (RawF t) = RawF (L {location = location t, syntax = fmap f (syntax t)})
 
-varMap :: forall v v'. (v -> v') -> Term v -> Term v'
-varMap f = foldFix alg
-  where
-    alg :: TermF (RelevanceF Void) MetaVar v (Term v') -> Term v'
-    alg (VarF x) = Var (f x)
-    alg (UF s) = U s
-    alg (LambdaF x e) = Lambda x e
-    alg (AppF t u) = App t u
-    alg (PiF s x a b) = Pi s x a b
-    alg ZeroF = Zero
-    alg (SuccF n) = Succ n
-    alg (NElimF z a t0 x ih ts n) = NElim z a t0 x ih ts n
-    alg NatF = Nat
-    alg (PropPairF t u) = PropPair t u
-    alg (FstF Irrelevant p) = PropFst p
-    alg (SndF Irrelevant p) = PropSnd p
-    alg (ExistsF x a b) = Exists x a b
-    alg (AbortF a t) = Abort a t
-    alg EmptyF = Empty
-    alg OneF = One
-    alg UnitF = Unit
-    alg (EqF t a u) = Eq t a u
-    alg (ReflF t) = Refl t
-    alg (SymF t u e) = Sym t u e
-    alg (TransF t u v e e') = Trans t u v e e'
-    alg (ApF b x t u v e) = Ap b x t u v e
-    alg (TranspF t x pf b u t' e) = Transp t x pf b u t' e
-    alg (CastF a b e t) = Cast a b e t
-    alg (CastReflF a t) = CastRefl a t
-    alg (PairF t u) = Pair t u
-    alg (FstF Relevant p) = Fst p
-    alg (SndF Relevant p) = Snd p
-    alg (SigmaF x a b) = Sigma x a b
-    alg (QuotientF a x y r rx rr sx sy sxy rs tx ty tz txy tyz rt) =
-      Quotient a x y r rx rr sx sy sxy rs tx ty tz txy tyz rt
-    alg (QProjF t) = QProj t
-    alg (QElimF z b x tpi px py pe p u) = QElim z b x tpi px py pe p u
-    alg (IdReflF t) = IdRefl t
-    alg (IdPathF t) = IdPath t
-    alg (JF a t x pf b u t' e) = J a t x pf b u t' e
-    alg (IdF a t u) = Id a t u
-    alg (LetF x a t u) = Let x a t u
-    alg (AnnotationF t a) = Annotation t a
-    alg (MetaF m) = Meta m
-    -- To make GHC happy
-    alg (FstF (SortMeta v) _) = absurd v
-    alg (SndF (SortMeta v) _) = absurd v
+-- varMap :: forall v v'. (v -> v') -> Term v -> Term v'
+-- varMap f = foldFix alg
+--   where
+--     alg :: TermF (RelevanceF Void) MetaVar v (Term v') -> Term v'
+--     alg (VarF x) = Var (f x)
+--     alg (UF s) = U s
+--     alg (LambdaF x e) = Lambda x e
+--     alg (AppF t u) = App t u
+--     alg (PiF s x a b) = Pi s x a b
+--     alg ZeroF = Zero
+--     alg (SuccF n) = Succ n
+--     alg (NElimF z a t0 x ih ts n) = NElim z a t0 x ih ts n
+--     alg NatF = Nat
+--     alg (PropPairF t u) = PropPair t u
+--     alg (FstF Irrelevant p) = PropFst p
+--     alg (SndF Irrelevant p) = PropSnd p
+--     alg (ExistsF x a b) = Exists x a b
+--     alg (AbortF a t) = Abort a t
+--     alg EmptyF = Empty
+--     alg OneF = One
+--     alg UnitF = Unit
+--     alg (EqF t a u) = Eq t a u
+--     alg (ReflF t) = Refl t
+--     alg (SymF t u e) = Sym t u e
+--     alg (TransF t u v e e') = Trans t u v e e'
+--     alg (ApF b x t u v e) = Ap b x t u v e
+--     alg (TranspF t x pf b u t' e) = Transp t x pf b u t' e
+--     alg (CastF a b e t) = Cast a b e t
+--     alg (CastReflF a t) = CastRefl a t
+--     alg (PairF t u) = Pair t u
+--     alg (FstF Relevant p) = Fst p
+--     alg (SndF Relevant p) = Snd p
+--     alg (SigmaF x a b) = Sigma x a b
+--     alg (QuotientF a x y r rx rr sx sy sxy rs tx ty tz txy tyz rt) =
+--       Quotient a x y r rx rr sx sy sxy rs tx ty tz txy tyz rt
+--     alg (QProjF t) = QProj t
+--     alg (QElimF z b x tpi px py pe p u) = QElim z b x tpi px py pe p u
+--     alg (IdReflF t) = IdRefl t
+--     alg (IdPathF t) = IdPath t
+--     alg (JF a t x pf b u t' e) = J a t x pf b u t' e
+--     alg (IdF a t u) = Id a t u
+--     alg (LetF x a t u) = Let x a t u
+--     alg (AnnotationF t a) = Annotation t a
+--     alg (MetaF m) = Meta m
+--     -- To make GHC happy
+--     alg (FstF (SortMeta v) _) = absurd v
+--     alg (SndF (SortMeta v) _) = absurd v
 
 precAtom, precApp, precPi, precLet :: Int
 precAtom = 3
@@ -767,6 +809,16 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
        in par prec precApp (str "J" . showParen True (sep comma [a', t', b', u', v', e']))
     go prec ns (Id a t u) =
       par prec precApp (str "Id" . showParen True (sep comma [go precLet ns a, go precLet ns t, go precLet ns u]))
+    go prec ns (Match t x p bs) =
+      let t' = go precLet ns t
+          p' = go precLet (ns :> x) p
+          -- bs' = foldr ((.) . (str "\n" .) . branch) id bs
+          bs' = foldr ((.) . (str "\n" .) . branch) id bs
+       in par prec precLet (str "match " . t' . str " as " . binder x . str " return " . p' . str " with" . bs')
+      where
+        branch :: Branch v -> ShowS
+        branch (Branch ZeroP t) = str "| 0 -> " . go precLet ns t
+        branch (Branch (SuccP x) t) = str "| S " . binder x . str " -> " . go precLet (ns :> x) t
     go prec ns (Let x a t u) =
       let a' = go precLet ns a
           t' = go precLet ns t
@@ -834,6 +886,10 @@ instance ClosureApply f n res v => ClosureApply f ('S n) (Val v -> res) v where
 
 type VTy = Val
 
+data VBranch v
+  = VZeroBranch (Val v)
+  | VSuccBranch Binder (Closure (A 1) v)
+
 -- Note that [~] is an eliminator for the universe, however it does not
 -- have a single point on which it might block. Therefore, it cannot be an
 -- eliminator in a spine
@@ -844,6 +900,7 @@ data VElim v
   | VSnd
   | VQElim Binder (Closure (A 1) v) Binder (Closure (A 1) v) Binder Binder Binder (VProp v)
   | VJ (VTy v) (Val v) Binder Binder (Closure (A 2) v) (Val v) (Val v)
+  | VMatch Binder (Closure (A 1) v) [VBranch v]
 
 showElimHead :: VElim v -> String
 showElimHead (VApp {}) = "<application>"
@@ -852,6 +909,7 @@ showElimHead (VFst {}) = "<fst>"
 showElimHead (VSnd {}) = "<snd>"
 showElimHead (VQElim {}) = "<Q-elim>"
 showElimHead (VJ {}) = "<J>"
+showElimHead (VMatch {}) = "<match>"
 
 type VSpine v = [VElim v]
 

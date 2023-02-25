@@ -66,6 +66,11 @@ import qualified Error.Diagnose as Err
   Idpath                { L _ KWIdPath }
   J                     { L _ KWJ }
   Id                    { L _ KWId }
+  match                 { L _ KWMatch }
+  as                    { L _ KWAs }
+  return                { L _ KWReturn }
+  with                  { L _ KWWith }
+  '|'                   { L _ TokPipe }
   let                   { L _ KWLet }
   '='                   { L _ TokEquals }
   in                    { L _ KWIn }
@@ -86,6 +91,7 @@ rel :: { Loc (RelevanceF ()) }
 exp :: { Raw }
   : '\\' binder '.' exp                                             { rloc (LambdaF $2 $4) $1 $> }
   | let binder ':' exp '=' exp in exp                               { rloc (LetF $2 $4 $6 $8) $1 $> }
+  | match exp as binder return exp with branches                    { rloc (MatchF $2 $4 $6 $8) $1 $7 }
   | term                                                            { $1 }
 
 term :: { Raw }
@@ -153,6 +159,14 @@ atom :: { Raw }
   | '(' exp ';' exp ')'                                             { rloc (PairF $2 $4) $1 $> }
   | '(' exp ':' exp ')'                                             { rloc (AnnotationF $2 $4) $1 $>}
   | '(' exp ')'                                                     { $2 }
+
+branches :: { [RawBranch] }
+  : {-# empty #-}                                                   { [] }
+  | '|' pattern '->' exp branches                                   { BranchF $2 $4 : $5 }
+
+pattern :: { Pattern }
+  : '0'                                                             { ZeroP }
+  | S binder                                                        { SuccP $2 }
 
 binder :: { Binder }
   : var                                                             { Name (projName $1) }
