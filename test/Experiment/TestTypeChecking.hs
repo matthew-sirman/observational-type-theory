@@ -531,6 +531,24 @@ tm25 =
     pred (S (S (S (S 0))))
   |]
 
+tm26 :: String
+tm26 =
+  [r|
+    let pred1 : ℕ → ℕ =
+      λn. rec(_. ℕ, 0, k _. k, n)
+    in
+    let pred2 : ℕ → ℕ =
+      λn.
+      match n as _ return ℕ with
+        | 0 -> 0
+        | S n -> n
+    in
+    let pred_eq : pred1 ~ pred2 =
+      λn. rec(z. pred1 z ~ pred2 z, refl 0, k _. refl k, n)
+    in
+    *
+  |]
+
 test :: String -> IO ()
 test input = do
   (result, mctx) <-

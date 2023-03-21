@@ -1020,10 +1020,22 @@ conv pos names = conv' names names
       conv' (ns :> x :> pf) (ns' :> x' :> pf') (lvl + 2) b_x_pf b'_x_pf
       conv' ns ns' lvl u u'
       conv' ns ns' lvl v v'
-    -- TODO: conversion checking for pattern matches in spines - might be tricky e.g. when comparing
-    -- match on ℕ to ℕ-elim. Maybe for now just make recursors and matches incompatible (though could
-    -- be very annoying) In general conversion checking could be very tricky though (especially concering
-    -- fixed points)
+    convSp ns ns' lvl (sp :> VMatch x p bs) (sp' :> VMatch x' p' bs') = do
+      convSp ns ns' lvl sp sp'
+      let vx = VVar lvl
+      p_x <- app' p vx
+      p'_x <- app' p' vx
+      conv' (ns :> x) (ns' :> x') (lvl + 1) p_x p'_x
+      zipWithM_ convBranch bs bs'
+      where
+        convBranch :: VBranch Ix -> VBranch Ix -> Checker (Variant e) ()
+        convBranch (VZeroBranch t) (VZeroBranch t') = conv' ns ns' lvl t t'
+        convBranch (VSuccBranch x t) (VSuccBranch x' t') = do
+          let vx = VVar lvl
+          t <- app' t vx
+          t' <- app' t' vx
+          conv' (ns :> x) (ns' :> x') (lvl + 1) t t'
+        convBranch _ _ = undefined
     convSp _ _ _ sp sp' =
       throw (RigidSpineMismatch (TS . showElimHead <$> safeHead sp) (TS . showElimHead <$> safeHead sp') pos)
       where
