@@ -549,6 +549,12 @@ tm26 =
     *
   |]
 
+tm27 :: String
+tm27 =
+  [r|
+    (refl (◇ * : ▢ ⊤) : ◇ (refl 0) ~[▢ ⊤] ◇ *)
+  |]
+
 test :: String -> IO ()
 test input = do
   (result, mctx) <-

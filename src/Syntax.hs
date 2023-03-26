@@ -72,6 +72,9 @@ module Syntax (
   pattern IdPath,
   pattern J,
   pattern Id,
+  pattern BoxProof,
+  pattern BoxElim,
+  pattern Box,
   pattern Match,
   pattern Branch,
   pattern Let,
@@ -233,6 +236,9 @@ data TermF proj meta v t
   | IdPathF t
   | JF t t Binder Binder t t t t
   | IdF t t t
+  | BoxProofF t
+  | BoxElimF t
+  | BoxF t
   | MatchF t Binder t [BranchF t]
   | -- Annotations
     LetF Binder t t t
@@ -404,6 +410,15 @@ pattern J a t x pf b u t' e = Fix (JF a t x pf b u t' e)
 pattern Id :: Type v -> Term v -> Term v -> Type v
 pattern Id a t u = Fix (IdF a t u)
 
+pattern BoxProof :: Term v -> Term v
+pattern BoxProof e = Fix (BoxProofF e)
+
+pattern BoxElim :: Term v -> Term v
+pattern BoxElim t = Fix (BoxElimF t)
+
+pattern Box :: Type v -> Type v
+pattern Box a = Fix (BoxF a)
+
 pattern Match :: Term v -> Binder -> Type v -> [Branch v] -> Term v
 pattern Match t x p bs = Fix (MatchF t x p bs)
 
@@ -456,6 +471,9 @@ pattern Meta v = Fix (MetaF v)
   , IdPath
   , J
   , Id
+  , BoxProof
+  , BoxElim
+  , Box
   , Match
   , Let
   , Annotation
@@ -503,6 +521,9 @@ instance Functor (TermF p m v) where
   fmap f (IdPathF t) = IdPathF (f t)
   fmap f (JF a t x pf b u t' e) = JF (f a) (f t) x pf (f b) (f u) (f t') (f e)
   fmap f (IdF a t u) = IdF (f a) (f t) (f u)
+  fmap f (BoxProofF e) = BoxProofF (f e)
+  fmap f (BoxElimF t) = BoxElimF (f t)
+  fmap f (BoxF a) = BoxF (f a)
   fmap f (MatchF t x p bs) = MatchF (f t) x (f p) (fmap (fmap f) bs)
   fmap f (LetF x a t u) = LetF x (f a) (f t) (f u)
   fmap f (AnnotationF t a) = AnnotationF (f t) (f a)
@@ -546,6 +567,9 @@ instance Foldable (TermF p m v) where
   foldr f e (IdPathF t) = f t e
   foldr f e (JF a t _ _ b u t' v) = (f a . f t . f b . f u . f t' . f v) e
   foldr f e (IdF a t u) = (f a . f t . f u) e
+  foldr f e (BoxProofF t) = f t e
+  foldr f e (BoxElimF t) = f t e
+  foldr f e (BoxF a) = f a e
   foldr f e (MatchF t _ p bs) = (f t . f p) (foldr (flip (foldr f)) e bs)
   foldr f e (LetF _ a t u) = (f a . f t . f u) e
   foldr f e (AnnotationF t a) = (f t . f a) e
@@ -593,6 +617,9 @@ instance Traversable (TermF p m v) where
   traverse f (JF a t x pf b u t' e) =
     JF <$> f a <*> f t <*> pure x <*> pure pf <*> f b <*> f u <*> f t' <*> f e
   traverse f (IdF a t u) = IdF <$> f a <*> f t <*> f u
+  traverse f (BoxProofF e) = BoxProofF <$> f e
+  traverse f (BoxElimF t) = BoxElimF <$> f t
+  traverse f (BoxF a) = BoxF <$> f a
   traverse f (MatchF t x p bs) = MatchF <$> f t <*> pure x <*> f p <*> traverse (traverse f) bs
   traverse f (LetF x a t u) = LetF x <$> f a <*> f t <*> f u
   traverse f (AnnotationF t a) = AnnotationF <$> f t <*> f a
@@ -809,6 +836,12 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
        in par prec precApp (str "J" . showParen True (sep comma [a', t', b', u', v', e']))
     go prec ns (Id a t u) =
       par prec precApp (str "Id" . showParen True (sep comma [go precLet ns a, go precLet ns t, go precLet ns u]))
+    go prec ns (BoxProof e) =
+      par prec precApp (str "◇" . go precAtom ns e)
+    go prec ns (BoxElim t) =
+      par prec precApp (str "▢-elim(" . go precLet ns t . chr ')')
+    go prec ns (Box a) =
+      par prec precApp (str "▢" . go precAtom ns a)
     go prec ns (Match t x p bs) =
       let t' = go precLet ns t
           p' = go precLet (ns :> x) p
@@ -900,15 +933,17 @@ data VElim v
   | VSnd
   | VQElim Binder (Closure (A 1) v) Binder (Closure (A 1) v) Binder Binder Binder (VProp v)
   | VJ (VTy v) (Val v) Binder Binder (Closure (A 2) v) (Val v) (Val v)
+  | VBoxElim
   | VMatch Binder (Closure (A 1) v) [VBranch v]
 
 showElimHead :: VElim v -> String
 showElimHead (VApp {}) = "<application>"
 showElimHead (VNElim {}) = "<ℕ-elim>"
-showElimHead (VFst {}) = "<fst>"
-showElimHead (VSnd {}) = "<snd>"
+showElimHead VFst = "<fst>"
+showElimHead VSnd = "<snd>"
 showElimHead (VQElim {}) = "<Q-elim>"
 showElimHead (VJ {}) = "<J>"
+showElimHead VBoxElim = "<▢-elim>"
 showElimHead (VMatch {}) = "<match>"
 
 type VSpine v = [VElim v]
@@ -958,6 +993,8 @@ data Val v
   | VIdRefl (Val v)
   | VIdPath (VProp v)
   | VId (VTy v) (Val v) (Val v)
+  | VBoxProof (VProp v)
+  | VBox (Val v)
 
 pattern VVar :: Lvl -> Val v
 pattern VVar x = VRigid x []

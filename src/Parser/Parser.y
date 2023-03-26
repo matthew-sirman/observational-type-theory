@@ -66,6 +66,9 @@ import qualified Error.Diagnose as Err
   Idpath                { L _ KWIdPath }
   J                     { L _ KWJ }
   Id                    { L _ KWId }
+  Box                   { L _ SymBox }
+  Diamond               { L _ SymDiamond }
+  Boxelim               { L _ KWBoxElim }
   match                 { L _ KWMatch }
   as                    { L _ KWAs }
   return                { L _ KWReturn }
@@ -144,6 +147,9 @@ apps :: { Raw }
   | J '(' exp',' exp',' binder binder '.' exp','
           exp',' exp',' exp ')'                                     { rloc (JF $3 $5 $7 $8 $10 $12 $14 $16) $1 $> }
   | Id '(' exp ',' exp ',' exp ')'                                  { rloc (IdF $3 $5 $7) $1 $> }
+  | Box atom                                                        { rloc (BoxF $2) $1 $> }
+  | Diamond atom                                                    { rloc (BoxProofF $2) $1 $> }
+  | Boxelim '(' exp ')'                                             { rloc (BoxElimF $3) $1 $> }
   | atom                                                            { $1 }
 
 atom :: { Raw }
@@ -158,6 +164,8 @@ atom :: { Raw }
   | Unit                                                            { rloc UnitF $1 $> }
   | '(' exp ';' exp ')'                                             { rloc (PairF $2 $4) $1 $> }
   | '(' exp ':' exp ')'                                             { rloc (AnnotationF $2 $4) $1 $>}
+  | '[' exp ']'                                                     { rloc (BoxF $2) $1 $> }
+  | '<' exp '>'                                                     { rloc (BoxProofF $2) $1 $> }
   | '(' exp ')'                                                     { $2 }
 
 branches :: { [RawBranch] }

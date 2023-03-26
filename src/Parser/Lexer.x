@@ -66,6 +66,10 @@ tokens :-
        "Idpath"                 { keyword KWIdPath }
        "J"                      { keyword KWJ }
        "Id"                     { keyword KWId }
+       "▢"                      { symbol SymBox }
+       "◇"                      { symbol SymDiamond }
+       "▢-elim"                 { keyword KWBoxElim }
+       "Box-elim"               { keyword KWBoxElim }
        "match"                  { keyword KWMatch }
        "as"                     { keyword KWAs }
        "return"                 { keyword KWReturn }
@@ -128,6 +132,9 @@ data Token
   | KWReturn
   | KWWith
   | TokPipe
+  | SymBox
+  | SymDiamond
+  | KWBoxElim
   | KWLet
   | TokEquals
   | KWIn

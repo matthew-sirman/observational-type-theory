@@ -113,6 +113,7 @@ data InferenceError
   | CastBetweenUniverses Relevance Position Relevance Position
   | QuotientHead TermString Position
   | IdReflIrrelevant TermString Position
+  | BoxElimHead TermString Position
   | InferenceFailure Position
 
 instance Reportable InferenceError where
@@ -173,6 +174,10 @@ instance Reportable InferenceError where
     let msg = "Can only form inductive equality type over relevant types."
         ctx = "Term has type [" ++ unTS t ++ "] which is irrelevant."
      in createError msg [(pos, ctx)]
+  report (BoxElimHead t pos) =
+    let msg = "Expected Box (▢A) type in quotient eliminator."
+        ctx = "Expected Box type, but found ̈[" ++ unTS t ++ "]."
+     in createError msg [(pos, ctx)]
   report (InferenceFailure pos) =
     let msg = "Type inference failed (try adding a type annotation)."
         ctx = "Could not infer type for term."
@@ -185,6 +190,7 @@ data CheckError
   | CheckPair TermString Position
   | CheckQuotientProj TermString Position
   | CheckIdPath TermString Position
+  | CheckBoxProof TermString Position
 
 instance Reportable CheckError where
   report (CheckType t pos) =
@@ -210,4 +216,8 @@ instance Reportable CheckError where
   report (CheckIdPath t pos) =
     let msg = "Idpath type checking failed."
         ctx = "Checking Idpath argument against type [" ++ unTS t ++ "] failed (expected inductive identity type Id(A, t, u))."
+     in createError msg [(pos, ctx)]
+  report (CheckBoxProof t pos) =
+    let msg = "Box proof type checking failed."
+        ctx = "Checking Box proof argument against type [" ++ unTS t ++ "] failed (expected Box (▢A) type)."
      in createError msg [(pos, ctx)]

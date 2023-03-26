@@ -188,6 +188,8 @@ eqReduce env vt va vu = eqReduceType va
        in pure (VAnd t_to_u u_to_t)
     -- Rule Id-Proof-Eq
     eqReduceType (VId {}) = pure VUnit
+    -- Rule Box-Proof-Eq
+    eqReduceType (VBox _) = pure VUnit
     -- Other cases require matching on [t] and [u]
     eqReduceType va = eqReduceAll vt va vu
 
@@ -273,6 +275,9 @@ eqReduce env vt va vu = eqReduceType va
             bindM3 (eqReduce env'') (cast a a' e u) (pure a') (pure u')
           t_eq_t'_and_u_eq_u' ve = VAnd <$> t_eq_t' ve <*> u_eq_u' ve
       VExists (Name "$e") a_eq_a' <$> makeFnClosure' t_eq_t'_and_u_eq_u'
+    -- Rule Box-Eq
+    eqReduceAll (VBox a) (VU Relevant) (VBox b) =
+      eqReduce env a (VU Irrelevant) b
     -- No reduction rule
     eqReduceAll t a u = pure (VEq t a u)
 
@@ -334,6 +339,9 @@ cast (VId {}) (VId {}) _ (VIdPath (VProp _ _)) = undefined
 --     u_eq_u' = Snd (Snd e')
 --     t'_eq_u' = Trans t'_eq_t (Trans t_eq_u u_eq_u')
 -- pure (VIdPath (VProp env t'_eq_u'))
+cast (VBox a) (VBox b) e (VBoxProof t@(VProp env _)) = do
+  t' <- cast a b e (VOne t)
+  VBoxProof <$> quoteToProp env t'
 cast a b e t = pure (VCast a b e t)
 
 quoteToProp :: MonadEvaluator m => Env Ix -> Val Ix -> m (VProp Ix)
@@ -419,6 +427,11 @@ eval env (J a t x pf b u t' e) = do
   e <- eval env e
   e $$ VJ a t x pf b u t'
 eval env (Id a t u) = VId <$> eval env a <*> eval env t <*> eval env u
+eval env (BoxProof e) = VBoxProof <$> prop env e
+eval env (BoxElim t) = do
+  t <- eval env t
+  t $$ VBoxElim
+eval env (Box a) = VBox <$> eval env a
 eval env (Match t x p bs) = do
   t <- eval env t
   p <- closure env p
@@ -464,6 +477,7 @@ VZero $$ (VNElim _ _ t0 _ _ _) = pure t0
 --       tm_t' = quote lvl t'
 --       eqJ = Transp tm_t (Name "x") Hole (quote (lvl + 2) (app'))
 --   cast b_t_idrefl_t b_t'_idpath_e (VProp env eqJ) u
+(VBoxProof e) $$ VBoxElim = pure (VOne e)
 t $$ (VMatch x p bs) = match t x p bs
 (VOne prop@(VProp env _)) $$ t = do
   -- TODO: level here almost certainly wrong
@@ -506,6 +520,7 @@ quoteSp l base (sp :> VJ a t x pf b u v) = do
   u <- quote l u
   v <- quote l v
   J a t x pf b u v <$> quoteSp l base sp
+quoteSp l base (sp :> VBoxElim) = BoxElim <$> quoteSp l base sp
 quoteSp l base (sp :> VMatch x p bs) = do
   p <- quote (l + 1) =<< app' p (VVar l)
   bs <- mapM (quoteBranch l) bs
@@ -624,6 +639,8 @@ quote lvl (VQProj t) = QProj <$> quote lvl t
 quote lvl (VIdRefl t) = IdRefl <$> quote lvl t
 quote lvl (VIdPath e) = IdPath <$> quoteProp lvl e
 quote lvl (VId a t u) = Id <$> quote lvl a <*> quote lvl t <*> quote lvl u
+quote lvl (VBoxProof e) = BoxProof <$> quoteProp lvl e
+quote lvl (VBox a) = Box <$> quote lvl a
 
 normalForm :: MonadEvaluator m => Env Ix -> Term Ix -> m (Term Ix)
 normalForm env t = eval env t >>= quote (level env)
@@ -817,6 +834,9 @@ renameSp pos ns m sub base (sp :> VJ a t x pf b u v) = do
   u <- rename pos ns m sub u
   v <- rename pos ns m sub v
   pure (J a t x pf b u v sp)
+renameSp pos ns m sub base (sp :> VBoxElim) = do
+  sp <- renameSp pos ns m sub base sp
+  pure (BoxElim sp)
 renameSp pos ns m sub base (sp :> VMatch x p bs) = do
   sp <- renameSp pos ns m sub base sp
   p <- rename pos ns m (liftRenaming 1 sub) =<< app' p (VVar (cod sub))
@@ -905,6 +925,8 @@ rename pos ns m sub (VId a t u) = do
   t <- rename pos ns m sub t
   u <- rename pos ns m sub u
   pure (Id a t u)
+rename pos ns m sub (VBoxProof e) = BoxProof <$> renameProp pos ns m sub e
+rename pos ns m sub (VBox a) = Box <$> rename pos ns m sub a
 
 -- Solve a metavariable, possibly applied to a spine of eliminators
 solve
@@ -922,8 +944,17 @@ solve pos names lvl mv sub [] t = do
   t' <- rename pos names mv inv t
   addSolution mv t'
 solve pos names lvl mv sub (sp :> VApp u@(VVar (Lvl x))) t = do
+  -- We start with a judgement of the form
+  --  Γ ⊢ α[σ] x ≡ t
+  -- So, we create a fresh meta, β, and assign
+  --  α := λx. β
+  -- Then, we have
+  --  Γ ⊢ (λx. β)[σ] x => β[σ, x]
+  -- So, we must now solve
+  --  Γ ⊢ β[σ, x] ≡ t
+  -- In particular, we solve for β in the same context; the level does not change
   body <- freshMeta names
-  solve pos names (lvl + 1) body (sub :> (Bound, u)) sp t
+  solve pos names lvl body (sub :> (Bound, u)) sp t
   addSolution mv (Lambda (names !! x) (Meta body))
 solve pos names lvl _ _ (_ :> VApp u) _ = do
   tm <- quote lvl u
@@ -944,6 +975,10 @@ solve pos _ _ mv _ (_ :> VQElim {}) _ = do
   throw (QElimInSpine mv pos)
 solve pos _ _ mv _ (_ :> VJ {}) _ =
   throw (JInSpine mv pos)
+solve pos names lvl mv sub (sp :> VBoxElim) t = do
+  body <- freshMeta names
+  solve pos names lvl body sub sp t
+  addSolution mv (BoxProof (Meta body))
 solve pos _ _ mv _ (_ :> VMatch {}) _ =
   throw (MatchInSpine mv pos)
 
@@ -1020,6 +1055,7 @@ conv pos names = conv' names names
       conv' (ns :> x :> pf) (ns' :> x' :> pf') (lvl + 2) b_x_pf b'_x_pf
       conv' ns ns' lvl u u'
       conv' ns ns' lvl v v'
+    convSp ns ns' lvl (sp :> VBoxElim) (sp' :> VBoxElim) = convSp ns ns' lvl sp sp'
     convSp ns ns' lvl (sp :> VMatch x p bs) (sp' :> VMatch x' p' bs') = do
       convSp ns ns' lvl sp sp'
       let vx = VVar lvl
@@ -1132,6 +1168,8 @@ conv pos names = conv' names names
       conv' ns ns' lvl a a'
       conv' ns ns' lvl t t'
       conv' ns ns' lvl u u'
+    conv' _ _ _ (VBoxProof _) (VBoxProof _) = pure ()
+    conv' ns ns' lvl (VBox a) (VBox a') = conv' ns ns' lvl a a'
     conv' ns ns' lvl a b = do
       aTS <- TS . prettyPrintTerm ns <$> quote lvl a
       bTS <- TS . prettyPrintTerm ns' <$> quote lvl b
@@ -1457,6 +1495,16 @@ infer gamma (R _ (IdF a t u)) = do
   t <- check gamma t va
   u <- check gamma u va
   pure (Id a t u, VU Relevant, Relevant)
+infer gamma (R pos (BoxElimF e)) = do
+  (e, a, _) <- infer gamma e
+  case a of
+    VBox a -> pure (BoxElim e, a, Relevant)
+    _ -> do
+      aTS <- ppVal gamma a
+      throw (BoxElimHead aTS pos)
+infer gamma (R _ (BoxF a)) = do
+  a <- check gamma a (VU Irrelevant)
+  pure (Box a, VU Relevant, Relevant)
 infer gamma (R _ (MatchF t x p bs)) = do
   (t, a, s) <- infer gamma t
   (p, s') <- checkType (gamma & bind x s a) p
@@ -1576,6 +1624,12 @@ check gamma (R _ (IdPathF e)) (VId a t u) = do
 check gamma (R pos (IdPathF {})) tty = do
   tTS <- ppVal gamma tty
   throw (CheckIdPath tTS pos)
+check gamma (R _ (BoxProofF e)) (VBox a) = do
+  e <- check gamma e a
+  pure (BoxProof e)
+check gamma (R pos (BoxProofF {})) tty = do
+  tTS <- ppVal gamma tty
+  throw (CheckBoxProof tTS pos)
 check gamma (R _ (LetF x a t u)) uty = do
   (a, s) <- checkType gamma a
   va <- eval (env gamma) a
