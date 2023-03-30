@@ -1,19 +1,21 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE GADTSyntax #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE ImportQualifiedPost #-}
 {-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 module Syntax (
   pattern (:>),
+  (++:>),
   Name,
   Binder (..),
   Loc (..),
@@ -27,13 +29,9 @@ module Syntax (
   ULevel,
   TermF (..),
   Term,
-  BranchF (..),
-  Branch,
-  Pattern (..),
   Type,
   RawF (..),
   Raw,
-  RawBranch,
   pattern R,
   pattern HoleF,
   pattern Var,
@@ -75,13 +73,13 @@ module Syntax (
   pattern BoxProof,
   pattern BoxElim,
   pattern Box,
+  pattern Cons,
   pattern Match,
-  pattern Branch,
+  pattern Mu,
   pattern Let,
   pattern Annotation,
   pattern Meta,
   VElim (..),
-  VBranch (..),
   VSpine,
   VProp (..),
   ($$$),
@@ -94,6 +92,8 @@ module Syntax (
   PushArgument (..),
   Closure (..),
   ClosureApply (..),
+  appList,
+  appOne,
   A,
   BD (..),
   Env,
@@ -107,10 +107,11 @@ module Syntax (
 )
 where
 
-import Data.Fix
+import Data.Fix hiding (Mu)
+import Data.Type.Nat
 import Data.Void
 import Error.Diagnose.Position (Position (..))
-import GHC.TypeNats qualified as T
+
 import Text.Printf (IsChar (toChar))
 
 -- Snoc lists
@@ -119,6 +120,10 @@ pattern (:>) :: [a] -> a -> [a]
 pattern xs :> x = x : xs
 
 {-# COMPLETE (:>), [] #-}
+
+infixl 4 ++:>
+(++:>) :: [a] -> [a] -> [a]
+xs ++:> ys = ys ++ xs
 
 -- Language source identifiers
 type Name = String
@@ -144,11 +149,11 @@ instance Functor Loc where
 
 -- Internal de Bruijn indices
 newtype Ix = Ix Int
-  deriving (Eq, Ord, Show, Num)
+  deriving (Eq, Ord, Show, Num, Enum)
 
 -- Internal de Bruijn levels
 newtype Lvl = Lvl Int
-  deriving (Eq, Ord, Show, Num)
+  deriving (Eq, Ord, Show, Num, Enum)
 
 lvl2ix :: Lvl -> Lvl -> Ix
 lvl2ix (Lvl l) (Lvl x) = Ix (l - x - 1)
@@ -239,26 +244,17 @@ data TermF proj meta v t
   | BoxProofF t
   | BoxElimF t
   | BoxF t
-  | MatchF t Binder t [BranchF t]
+  | ConsF Name t
+  | MatchF t Binder t [(Name, Binder, t)]
+  | MuF Binder t [Binder] [(Name, t)]
   | -- Annotations
     LetF Binder t t t
   | AnnotationF t t
   | MetaF meta
 
-data Pattern
-  = -- TODO: variable patterns?
-    -- = VarP Binder
-    ZeroP
-  | -- TODO: nested pattern matching
-    SuccP Binder
-
-data BranchF t = BranchF Pattern t
-
 newtype RawF t = RawF (Loc (TermF () () Name t))
 
 type Raw = Fix RawF
-
-type RawBranch = BranchF Raw
 
 pattern R :: Position -> TermF () () Name Raw -> Raw
 pattern R sl term = Fix (RawF (L sl term))
@@ -269,8 +265,6 @@ pattern HoleF = MetaF ()
 {-# COMPLETE R #-}
 
 type Term v = Fix (TermF (RelevanceF Void) MetaVar v)
-
-type Branch v = BranchF (Term v)
 
 type Type v = Term v
 
@@ -419,11 +413,14 @@ pattern BoxElim t = Fix (BoxElimF t)
 pattern Box :: Type v -> Type v
 pattern Box a = Fix (BoxF a)
 
-pattern Match :: Term v -> Binder -> Type v -> [Branch v] -> Term v
+pattern Cons :: Name -> Term v -> Term v
+pattern Cons c t = Fix (ConsF c t)
+
+pattern Match :: Term v -> Binder -> Type v -> [(Name, Binder, Term v)] -> Term v
 pattern Match t x p bs = Fix (MatchF t x p bs)
 
-pattern Branch :: Pattern -> Term v -> Branch v
-pattern Branch p t = BranchF p t
+pattern Mu :: Binder -> Type v -> [Binder] -> [(Name, Type v)] -> Type v
+pattern Mu f t xs cs = Fix (MuF f t xs cs)
 
 pattern Let :: Binder -> Type v -> Term v -> Term v -> Term v
 pattern Let x a t u = Fix (LetF x a t u)
@@ -474,16 +471,13 @@ pattern Meta v = Fix (MetaF v)
   , BoxProof
   , BoxElim
   , Box
+  , Cons
   , Match
+  , Mu
   , Let
   , Annotation
   , Meta
   #-}
-
-{-# COMPLETE Branch #-}
-
-instance Functor BranchF where
-  fmap f (BranchF p t) = BranchF p (f t)
 
 instance Functor (TermF p m v) where
   fmap _ (VarF x) = VarF x
@@ -524,13 +518,12 @@ instance Functor (TermF p m v) where
   fmap f (BoxProofF e) = BoxProofF (f e)
   fmap f (BoxElimF t) = BoxElimF (f t)
   fmap f (BoxF a) = BoxF (f a)
+  fmap f (ConsF c t) = ConsF c (f t)
   fmap f (MatchF t x p bs) = MatchF (f t) x (f p) (fmap (fmap f) bs)
+  fmap f (MuF g t xs cs) = MuF g (f t) xs (fmap (fmap f) cs)
   fmap f (LetF x a t u) = LetF x (f a) (f t) (f u)
   fmap f (AnnotationF t a) = AnnotationF (f t) (f a)
   fmap _ (MetaF m) = MetaF m
-
-instance Foldable BranchF where
-  foldr f e (BranchF _ t) = f t e
 
 instance Foldable (TermF p m v) where
   foldr _ e (VarF _) = e
@@ -570,13 +563,12 @@ instance Foldable (TermF p m v) where
   foldr f e (BoxProofF t) = f t e
   foldr f e (BoxElimF t) = f t e
   foldr f e (BoxF a) = f a e
-  foldr f e (MatchF t _ p bs) = (f t . f p) (foldr (flip (foldr f)) e bs)
+  foldr f e (ConsF _ t) = f t e
+  foldr f e (MatchF t _ p bs) = (f t . f p) (foldr (\(_, _, b) e -> f b e) e bs)
+  foldr f e (MuF _ t _ cs) = f t (foldr (\(_, b) e -> f b e) e cs)
   foldr f e (LetF _ a t u) = (f a . f t . f u) e
   foldr f e (AnnotationF t a) = (f t . f a) e
   foldr _ e (MetaF _) = e
-
-instance Traversable BranchF where
-  traverse f (BranchF p t) = BranchF p <$> f t
 
 instance Traversable (TermF p m v) where
   traverse _ (VarF x) = pure (VarF x)
@@ -620,7 +612,9 @@ instance Traversable (TermF p m v) where
   traverse f (BoxProofF e) = BoxProofF <$> f e
   traverse f (BoxElimF t) = BoxElimF <$> f t
   traverse f (BoxF a) = BoxF <$> f a
-  traverse f (MatchF t x p bs) = MatchF <$> f t <*> pure x <*> f p <*> traverse (traverse f) bs
+  traverse f (ConsF c t) = ConsF c <$> f t
+  traverse f (MatchF t x p bs) = MatchF <$> f t <*> pure x <*> f p <*> traverse (\(c, x, t) -> (c,x,) <$> f t) bs
+  traverse f (MuF g t xs cs) = MuF g <$> f t <*> pure xs <*> traverse (\(c, b) -> (c,) <$> f b) cs
   traverse f (LetF x a t u) = LetF x <$> f a <*> f t <*> f u
   traverse f (AnnotationF t a) = AnnotationF <$> f t <*> f a
   traverse _ (MetaF m) = pure (MetaF m)
@@ -689,7 +683,7 @@ instance VarShowable Ix where
   showsVar (Ix x) ns = shows (ns !! x)
 
 instance IsChar s => VarShowable [s] where
-  showsVar x _ = showString (map toChar x)
+  showsVar x _ = showString (fmap toChar x)
 
 prettyPrintTerm :: VarShowable v => [Binder] -> Term v -> String
 prettyPrintTerm = prettyPrintTermDebug False
@@ -772,7 +766,7 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
     go _ _ One = chr '*'
     go _ _ Unit = chr '⊤'
     go prec ns (Eq t a u) =
-      par prec precPi (go precApp ns t . str " ~[" . go precAtom ns a . str "] " . go precApp ns u)
+      par prec precPi (go precApp ns t . str " ~[" . go precLet ns a . str "] " . go precApp ns u)
     go prec ns (Refl t) = par prec precApp (str "refl " . go precAtom ns t)
     go prec ns (Sym t u e) =
       let go' = go precLet ns
@@ -842,16 +836,23 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
       par prec precApp (str "▢-elim(" . go precLet ns t . chr ')')
     go prec ns (Box a) =
       par prec precApp (str "▢" . go precAtom ns a)
+    go prec ns (Cons c t) =
+      par prec precApp (str c . space . go precAtom ns t)
     go prec ns (Match t x p bs) =
       let t' = go precLet ns t
           p' = go precLet (ns :> x) p
-          -- bs' = foldr ((.) . (str "\n" .) . branch) id bs
           bs' = foldr ((.) . (str "\n" .) . branch) id bs
        in par prec precLet (str "match " . t' . str " as " . binder x . str " return " . p' . str " with" . bs')
       where
-        branch :: Branch v -> ShowS
-        branch (Branch ZeroP t) = str "| 0 -> " . go precLet ns t
-        branch (Branch (SuccP x) t) = str "| S " . binder x . str " -> " . go precLet (ns :> x) t
+        branch :: (Name, Binder, Term v) -> ShowS
+        branch (cons, x, t) = str "| " . str cons . str " " . binder x . str " -> " . go precLet (ns :> x) t
+    go prec ns (Mu f t xs cs) =
+      let xs' = str "λ" . sep space (fmap binder (reverse xs))
+          cs' = chr '[' . sep (str "; ") (fmap showCons cs) . chr ']'
+       in par prec precLet (str "μ" . binder f . str " : " . go precLet ns t . dot . xs' . dot . cs')
+      where
+        showCons :: (Name, Type v) -> ShowS
+        showCons (c, b) = str c . str " : " . go precLet (ns :> f ++:> xs) b
     go prec ns (Let x a t u) =
       let a' = go precLet ns a
           t' = go precLet ns t
@@ -889,18 +890,18 @@ level env = Lvl (length env)
 class Applicative f => PushArgument f where
   push :: (a -> f b) -> f (a -> b)
 
-data Arity = Z | S Arity
+-- data Arity = Z | S Arity
 
-type family A (n :: T.Nat) :: Arity where
-  A 0 = 'Z
-  A n = 'S (A (n T.- 1))
+-- type family A (n :: T.Nat) :: Arity where
+--   A 0 = 'Z
+--   A n = 'S (A (n T.- 1))
 
-data Closure (n :: Arity) v where
+data Closure (n :: Nat) v where
   Closure :: forall n v. Env v -> Term v -> Closure n v
   Lift :: forall n v. Val v -> Closure n v
   Function :: forall n v. (Val v -> Closure n v) -> Closure ('S n) v
 
-class Applicative f => ClosureApply f (n :: Arity) cl v | cl -> v, cl -> f where
+class Applicative f => ClosureApply f (n :: Nat) cl v | cl -> v, cl -> f where
   app :: (Env v -> Term v -> f (Val v)) -> Closure n v -> cl
   makeFnClosure :: PushArgument f => cl -> f (Closure n v)
 
@@ -917,11 +918,46 @@ instance ClosureApply f n res v => ClosureApply f ('S n) (Val v -> res) v where
 
   makeFnClosure f = Function <$> push (makeFnClosure . f)
 
-type VTy = Val
+newtype VectorApp f v (n :: Nat) = VectorApp
+  { unVectorApp :: Closure n v -> [Val v] -> f (Val v)
+  }
 
-data VBranch v
-  = VZeroBranch (Val v)
-  | VSuccBranch Binder (Closure (A 1) v)
+appListBase :: forall f v. Applicative f => (Env v -> Term v -> f (Val v)) -> VectorApp f v 'Z
+appListBase eval = VectorApp app'
+  where
+    app' :: Closure 'Z v -> [Val v] -> f (Val v)
+    app' cl [] = app eval cl
+    app' _ _ = error "Applied list has incorrect length (too long)"
+
+appListInd :: forall m f v. Applicative f => (VectorApp f v m -> VectorApp f v ('S m))
+appListInd (VectorApp recurse) = VectorApp app'
+  where
+    app' :: Closure ('S m) v -> [Val v] -> f (Val v)
+    app' (Closure env t) (a : as) = recurse (Closure (env :> (Bound, a)) t) as
+    app' (Lift v) _ = pure v
+    app' (Function f) (a : as) = recurse (f a) as
+    app' _ [] = error "Applied list has incorrect length (too short)"
+
+appList
+  :: forall f n v
+   . (Applicative f, SNatI n)
+  => (Env v -> Term v -> f (Val v))
+  -> Closure n v
+  -> [Val v]
+  -> f (Val v)
+-- Induction applies the arguments IN REVERSE ORDER. So, to maintain consistency,
+-- this function reverses the list.
+appList eval cl as = unVectorApp (induction (appListBase eval) appListInd) cl (reverse as)
+
+appOne :: Closure ('S n) v -> Val v -> Closure n v
+appOne (Closure env t) u = Closure (env :> (Bound, u)) t
+appOne (Lift v) _ = Lift v
+appOne (Function f) u = f u
+
+type family A n where
+  A n = FromGHC n
+
+type VTy = Val
 
 -- Note that [~] is an eliminator for the universe, however it does not
 -- have a single point on which it might block. Therefore, it cannot be an
@@ -934,7 +970,7 @@ data VElim v
   | VQElim Binder (Closure (A 1) v) Binder (Closure (A 1) v) Binder Binder Binder (VProp v)
   | VJ (VTy v) (Val v) Binder Binder (Closure (A 2) v) (Val v) (Val v)
   | VBoxElim
-  | VMatch Binder (Closure (A 1) v) [VBranch v]
+  | VMatch Binder (Closure (A 1) v) [(Name, Binder, Closure (A 1) v)]
 
 showElimHead :: VElim v -> String
 showElimHead (VApp {}) = "<application>"
@@ -993,6 +1029,8 @@ data Val v
   | VIdRefl (Val v)
   | VIdPath (VProp v)
   | VId (VTy v) (Val v) (Val v)
+  | VCons Name (Val v)
+  | forall n. SNatI n => VMu Binder (VTy v) [Binder] [(Name, Closure ('S n) v)] [Val v]
   | VBoxProof (VProp v)
   | VBox (Val v)
 

@@ -75,12 +75,15 @@ tokens :-
        "return"                 { keyword KWReturn }
        "with"                   { keyword KWWith }
        "|"                      { symbol TokPipe }
+       "mu"                     { symbol SymMu }
+       "μ"                      { symbol SymMu }
        "let"                    { keyword KWLet }
        "="                      { symbol TokEquals }
        "in"                     { keyword KWIn}
        "_"                      { symbol TokHole }
 
-       [a-z A-Z 0-9 \_ \']+   { identifier TokName }
+       \'[a-z A-Z 0-9 \_ \']+   { identifier TokCons }
+       [a-z A-Z 0-9 \_ \']+     { identifier TokName }
 {
 
 data Token
@@ -127,19 +130,21 @@ data Token
   | KWIdPath
   | KWJ
   | KWId
+  | SymBox
+  | SymDiamond
+  | KWBoxElim
   | KWMatch
   | KWAs
   | KWReturn
   | KWWith
   | TokPipe
-  | SymBox
-  | SymDiamond
-  | KWBoxElim
+  | SymMu
   | KWLet
   | TokEquals
   | KWIn
   | TokHole
-  | TokName Name
+  | TokName (Loc Name)
+  | TokCons (Loc Name)
   | TokEOF
   deriving (Show)
 
@@ -147,9 +152,10 @@ keyword, symbol :: Token -> AlexInput -> Int -> Alex (Loc Token)
 keyword t ((AlexPn _ line col), _, _, _) len = pure (L (Position (line, col) (line, col + len) "<test-file>") t)
 symbol = keyword
 
-identifier :: (Name -> Token) -> AlexInput -> Int -> Alex (Loc Token)
+identifier :: (Loc Name -> Token) -> AlexInput -> Int -> Alex (Loc Token)
 identifier t ((AlexPn _ line col), _, _, input) len =
-  pure (L (Position (line, col) (line, col + len) "<test-file>") (t (take len input)))
+  let pos = Position (line, col) (line, col + len) "<test-file>"
+   in pure (L pos (t (L pos (take len input))))
 
 alexEOF :: Alex (Loc Token)
 alexEOF = pure (L (Position (0, 0) (0, 0) "<test-file>") TokEOF)

@@ -46,11 +46,14 @@ library
     , containers
     , data-fix
     , diagnose
+    , fin
     , lens
     , mtl
     , oops
     , raw-strings-qq
     , sized
+    , type-natural
+    , unordered-containers
     , vector
   default-language: Haskell2010
 
