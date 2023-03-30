@@ -555,6 +555,24 @@ tm27 =
     (refl (◇ * : ▢ ⊤) : ◇ (refl 0) ~[▢ ⊤] ◇ *)
   |]
 
+tm28 :: String
+tm28 =
+  [r|
+    let Vec : U → ℕ → U =
+      λA. λn. rec(_. U, ▢⊤, _ vn. A × vn, n)
+    in
+    ((0; (0; ◇*)): Vec ℕ (S (S 0)))
+  |]
+
+tm29 :: String
+tm29 =
+  [r|
+    let Vec : U → ℕ → U =
+      λA. (μF : ℕ → U. λn. [Nil : ▢⊤; Cons : A × Σ(m : ℕ). (▢(n ~ S m) × F m)])
+    in
+    *
+  |]
+
 test :: String -> IO ()
 test input = do
   (result, mctx) <-

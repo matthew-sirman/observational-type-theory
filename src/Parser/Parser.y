@@ -74,11 +74,12 @@ import qualified Error.Diagnose as Err
   return                { L _ KWReturn }
   with                  { L _ KWWith }
   '|'                   { L _ TokPipe }
+  mu                    { L _ SymMu }
   let                   { L _ KWLet }
   '='                   { L _ TokEquals }
   in                    { L _ KWIn }
   '_'                   { L _ TokHole }
-  var                   { L _ (TokName _) }
+  var                   { L _ (TokName $$) }
 
 %right in
 %right '->'
@@ -94,8 +95,19 @@ rel :: { Loc (RelevanceF ()) }
 exp :: { Raw }
   : '\\' binder '.' exp                                             { rloc (LambdaF $2 $4) $1 $> }
   | let binder ':' exp '=' exp in exp                               { rloc (LetF $2 $4 $6 $8) $1 $> }
-  | match exp as binder return exp with branches                    { rloc (MatchF $2 $4 $6 $8) $1 $7 }
+  | match exp as binder return exp with branches                    { rloc (MatchF $2 $4 $6 (reverse $8)) $1 $7 }
+  | mu binder ':' term '.' '\\' vars '.' '[' constructors ']'       { rloc (MuF $2 $4 (reverse $7) (reverse $10)) $1 $> }
   | term                                                            { $1 }
+
+vars :: { [Binder] }
+  : {-# empty #-}                                                   { [] }
+  | binder                                                          { [$1] }
+  | binder vars                                                     { $1 : $2 }
+
+constructors :: { [(Name, Raw)] }
+  : {-# empty #-}                                                   { [] }
+  | var ':' exp                                                     { [(syntax $1, $3)] }
+  | var ':' exp ';' constructors                                    { (syntax $1, $3) : $5 }
 
 term :: { Raw }
   : '(' binder ':' rel exp ')' '->' term                            { rloc (PiF (syntax $4) $2 $5 $8) $1 $> }
@@ -147,13 +159,14 @@ apps :: { Raw }
   | J '(' exp',' exp',' binder binder '.' exp','
           exp',' exp',' exp ')'                                     { rloc (JF $3 $5 $7 $8 $10 $12 $14 $16) $1 $> }
   | Id '(' exp ',' exp ',' exp ')'                                  { rloc (IdF $3 $5 $7) $1 $> }
+  | atom '.' var atom                                               { rloc (ConsF $1 (syntax $3) $4) $1 $> }
   | Box atom                                                        { rloc (BoxF $2) $1 $> }
   | Diamond atom                                                    { rloc (BoxProofF $2) $1 $> }
   | Boxelim '(' exp ')'                                             { rloc (BoxElimF $3) $1 $> }
   | atom                                                            { $1 }
 
 atom :: { Raw }
-  : var                                                             { rloc (VarF (projName $1)) $1 $> }
+  : var                                                             { rloc (VarF (syntax $1)) $1 $> }
   | '_'                                                             { rloc HoleF $1 $> }
   | rel                                                             { Fix (RawF (fmap UF $1)) }
   | '0'                                                             { rloc ZeroF $1 $> }
@@ -168,16 +181,12 @@ atom :: { Raw }
   | '<' exp '>'                                                     { rloc (BoxProofF $2) $1 $> }
   | '(' exp ')'                                                     { $2 }
 
-branches :: { [RawBranch] }
+branches :: { [(Name, Binder, Raw)] }
   : {-# empty #-}                                                   { [] }
-  | '|' pattern '->' exp branches                                   { BranchF $2 $4 : $5 }
-
-pattern :: { Pattern }
-  : '0'                                                             { ZeroP }
-  | S binder                                                        { SuccP $2 }
+  | '|' var binder '->' exp branches                                { (syntax $2, $3, $5) : $6 }
 
 binder :: { Binder }
-  : var                                                             { Name (projName $1) }
+  : var                                                             { Name (syntax $1) }
   | '_'                                                             { Hole }
 
 {
@@ -203,10 +212,6 @@ instance Located (RawF a) where
 
 instance Located (Fix RawF) where
   projectLoc (Fix r) = projectLoc r
-
-projName :: Loc Token -> Name
-projName (L _ (TokName n)) = n
-projName (L _ t) = error ("BUG: Tried to project the name of token " ++ show t)
 
 loc :: (Located start, Located end) => a -> start -> end -> Loc a
 loc element start end =

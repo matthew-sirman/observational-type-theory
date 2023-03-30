@@ -49,6 +49,9 @@ library:
     - containers
     - sized
     - vector
+    - fin
+    - unordered-containers
+    - type-natural
 
     - raw-strings-qq
     - HUnit

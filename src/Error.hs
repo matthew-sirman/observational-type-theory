@@ -113,6 +113,9 @@ data InferenceError
   | CastBetweenUniverses Relevance Position Relevance Position
   | QuotientHead TermString Position
   | IdReflIrrelevant TermString Position
+  | ConstructorNotInType Name TermString Position
+  | NonTotalMatch [Name] Position
+  | MatchHead TermString Position
   | BoxElimHead TermString Position
   | InferenceFailure Position
 
@@ -173,6 +176,18 @@ instance Reportable InferenceError where
   report (IdReflIrrelevant t pos) =
     let msg = "Can only form inductive equality type over relevant types."
         ctx = "Term has type [" ++ unTS t ++ "] which is irrelevant."
+     in createError msg [(pos, ctx)]
+  report (ConstructorNotInType c t pos) =
+    let msg = "Constructor not in type found in match expression."
+        ctx = "Matching on type [" ++ unTS t ++ "] which does not contain constructor [" ++ c ++ "]."
+     in createError msg [(pos, ctx)]
+  report (NonTotalMatch missing pos) =
+    let msg = "Match expression is not total."
+        ctx = "Missing cases are " ++ show (map TS missing) ++ "."
+     in createError msg [(pos, ctx)]
+  report (MatchHead t pos) =
+    let msg = "Expected inductive type (μF. t) in argument of match expression."
+        ctx = "Expected inductive type, but found [" ++ unTS t ++ "]."
      in createError msg [(pos, ctx)]
   report (BoxElimHead t pos) =
     let msg = "Expected Box (▢A) type in quotient eliminator."
