@@ -36,6 +36,8 @@ data ConversionError
   = ConversionBetweenUniverses Position
   | ConversionFailure TermString TermString Position
   | RigidSpineMismatch (Maybe TermString) (Maybe TermString) Position
+  | InductiveTypesInequalParameterSize Int Int Position
+  | ConstructorMismatch Name Name Position
 
 instance Reportable ConversionError where
   report (ConversionBetweenUniverses pos) =
@@ -54,6 +56,19 @@ instance Reportable ConversionError where
             (Just a, Nothing) -> "Spines must have equal length (found extra eliminator [" ++ unTS a ++ "])"
             (Nothing, Just b) -> "Spines must have equal length (found extra eliminator [" ++ unTS b ++ "])"
             (Just a, Just b) -> "Could not match different eliminators [" ++ unTS a ++ " ≡ " ++ unTS b ++ "]"
+     in createError msg [(pos, ctx)]
+  report (InductiveTypesInequalParameterSize n m pos) =
+    let msg = "Type conversion failed."
+        ctx =
+          "Inductive types with different numbers of parameters ["
+            ++ show n
+            ++ " ≢ "
+            ++ show m
+            ++ "] cannot be definitionally equal."
+     in createError msg [(pos, ctx)]
+  report (ConstructorMismatch cons cons' pos) =
+    let msg = "Type conversion failed."
+        ctx = "Inductive types must have equal constructor names; found [" ++ cons ++ " ≢ " ++ cons' ++ "]."
      in createError msg [(pos, ctx)]
 
 data UnificationError
@@ -113,9 +128,11 @@ data InferenceError
   | CastBetweenUniverses Relevance Position Relevance Position
   | QuotientHead TermString Position
   | IdReflIrrelevant TermString Position
-  | ConstructorNotInType Name TermString Position
+  | ConstructorNotInTypeMatch Name TermString Position
   | NonTotalMatch [Name] Position
   | MatchHead TermString Position
+  | InductiveTypeFamily TermString Position
+  | InductiveTypeIncorrectArgumentCount Position
   | BoxElimHead TermString Position
   | InferenceFailure Position
 
@@ -177,7 +194,7 @@ instance Reportable InferenceError where
     let msg = "Can only form inductive equality type over relevant types."
         ctx = "Term has type [" ++ unTS t ++ "] which is irrelevant."
      in createError msg [(pos, ctx)]
-  report (ConstructorNotInType c t pos) =
+  report (ConstructorNotInTypeMatch c t pos) =
     let msg = "Constructor not in type found in match expression."
         ctx = "Matching on type [" ++ unTS t ++ "] which does not contain constructor [" ++ c ++ "]."
      in createError msg [(pos, ctx)]
@@ -188,6 +205,14 @@ instance Reportable InferenceError where
   report (MatchHead t pos) =
     let msg = "Expected inductive type (μF. t) in argument of match expression."
         ctx = "Expected inductive type, but found [" ++ unTS t ++ "]."
+     in createError msg [(pos, ctx)]
+  report (InductiveTypeFamily t pos) =
+    let msg = "Inductive type must be an indexed type family (x₁ : A₁) → ⋯ (xₙ : Aₙ) → U)."
+        ctx = "Expected indexed type family, but found [" ++ unTS t ++ "]."
+     in createError msg [(pos, ctx)]
+  report (InductiveTypeIncorrectArgumentCount pos) =
+    let msg = "Inductive type definition parameter mismatch."
+        ctx = "Parameter argument count must match size of type family parameters."
      in createError msg [(pos, ctx)]
   report (BoxElimHead t pos) =
     let msg = "Expected Box (▢A) type in quotient eliminator."
@@ -205,6 +230,8 @@ data CheckError
   | CheckPair TermString Position
   | CheckQuotientProj TermString Position
   | CheckIdPath TermString Position
+  | ConstructorNotInTypeCons Name TermString Position
+  | CheckCons TermString Name Position
   | CheckBoxProof TermString Position
 
 instance Reportable CheckError where
@@ -231,6 +258,24 @@ instance Reportable CheckError where
   report (CheckIdPath t pos) =
     let msg = "Idpath type checking failed."
         ctx = "Checking Idpath argument against type [" ++ unTS t ++ "] failed (expected inductive identity type Id(A, t, u))."
+     in createError msg [(pos, ctx)]
+  report (ConstructorNotInTypeCons c t pos) =
+    let msg = "Constructor not in type."
+        ctx =
+          "Checking against inductive type ["
+            ++ unTS t
+            ++ "] which does not contain constructor ["
+            ++ c
+            ++ "]."
+     in createError msg [(pos, ctx)]
+  report (CheckCons t c pos) =
+    let msg = "Constructor type checking failed."
+        ctx =
+          "Checking constructor ["
+            ++ c
+            ++ "] against type ["
+            ++ unTS t
+            ++ "] failed (expected inductive type containing constructor)."
      in createError msg [(pos, ctx)]
   report (CheckBoxProof t pos) =
     let msg = "Box proof type checking failed."

@@ -611,7 +611,7 @@ tm31 =
     --         let x_eq_y : x ~ y = trans(x, a, y, sym(a, x, a_eq_x), a_eq_y) in
     --         transp(x, z x_eq_z. C x z ('Refl (x; (<refl x>; <x_eq_z>))), f x, y, x_eq_y)
     -- in
-    *
+    IEq ℕ 0 (S 0)
   |]
 
 tm32 :: String

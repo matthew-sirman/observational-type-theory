@@ -686,7 +686,6 @@ quote lvl (VMu @_ @n f fty xs cs as) = do
   cs <- mapM quoteCons cs
   let muF = Mu f fty xs cs
   -- Create an application term for each parametric argument
-  -- TODO: check this is the right way round
   foldM (\muF_as a -> App muF_as <$> quote lvl a) muF as
 quote lvl (VBoxProof e) = BoxProof <$> quoteProp lvl e
 quote lvl (VBox a) = Box <$> quote lvl a
@@ -988,7 +987,6 @@ rename pos ns m sub (VMu @_ @n f fty xs cs as) = do
   cs <- mapM renameCons cs
   let muF = Mu f fty xs cs
   -- Create an application term for each parametric argument
-  -- TODO: check this is the right way round
   foldM (\muF_as a -> App muF_as <$> rename pos ns m sub a) muF as
 rename pos ns m sub (VBoxProof e) = BoxProof <$> renameProp pos ns m sub e
 rename pos ns m sub (VBox a) = Box <$> rename pos ns m sub a
@@ -1249,7 +1247,10 @@ conv pos names = conv' names names
           -- of the parameters for each type) are equal, then the length of [as] and [as']
           -- must be equal.
           zipWithM_ (conv' ns ns' lvl) as as'
-        Nothing -> error "TODO: different sized closures; cannot be equal"
+        Nothing ->
+          let nVal = reflectToNum @n Proxy
+              n'Val = reflectToNum @n' Proxy
+           in throw (InductiveTypesInequalParameterSize nVal n'Val pos)
       where
         convCons :: (Name, Closure ('S n) Ix) -> (Name, Closure ('S n) Ix) -> Checker (Variant e) ()
         convCons (c, b) (c', b')
@@ -1259,7 +1260,9 @@ conv pos names = conv' names names
               b_muF_xs <- appList' (appOne b vf) vxs
               b'_muF_xs <- appList' (appOne b' vf) vxs
               conv' (ns :> f ++:> xs) (ns' :> f' ++:> xs') (lvl + Lvl (length xs + 1)) b_muF_xs b'_muF_xs
-          | otherwise = error "TODO: inequal constructors (possibly allow reordering though)"
+          | otherwise =
+            -- TODO: consider allowing reordering of constructors in definitional equality
+            throw (ConstructorMismatch c c' pos)
     conv' _ _ _ (VBoxProof _) (VBoxProof _) = pure ()
     conv' ns ns' lvl (VBox a) (VBox a') = conv' ns ns' lvl a a'
     conv' ns ns' lvl a b = do
@@ -1601,15 +1604,16 @@ infer gamma (R pos (MatchF t@(R argPos _) x p bs)) = do
   (t, a, s) <- infer gamma t
   (p, s') <- checkType (gamma & bind x s a) p
   case a of
-    muF_as@(VMu f fty xs constructors as) -> do
+    (VMu f fty xs constructors as) -> do
       let
+        muF = VMu f fty xs constructors []
         checkBranches [] = pure ([], M.fromList constructors)
         checkBranches (brs :> (c, x, t)) = do
           (brs, cs) <- checkBranches brs
           case M.lookup c cs of
             Nothing -> do
-              muFTS <- ppVal gamma muF_as
-              throw (ConstructorNotInType c muFTS pos)
+              muFTS <- ppVal gamma muF
+              throw (ConstructorNotInTypeMatch c muFTS pos)
             Just b -> do
               let b_muF = appOne b (VMu f fty xs constructors [])
               b_muF_as <- appList' b_muF as
@@ -1624,14 +1628,16 @@ infer gamma (R pos (MatchF t@(R argPos _) x p bs)) = do
     a -> do
       aTS <- ppVal gamma a
       throw (MatchHead aTS argPos)
-infer gamma (R _ (MuF f fty xs cs)) = do
+infer gamma (R _ (MuF f fty@(R pos _) xs cs)) = do
   (fty, _) <- checkType gamma fty
   vfty <- eval (env gamma) fty
   argTypes <- typeFamily (lvl gamma) vfty (Just [])
   case argTypes of
-    Nothing -> error "TODO: mu type must have by type family"
+    Nothing -> do
+      ftyTS <- ppVal gamma vfty
+      throw (InductiveTypeFamily ftyTS pos)
     Just argTypes -> do
-      unless (length argTypes == length xs) (error "TODO: incorrect number of args to Mu type")
+      unless (length argTypes == length xs) (throw (InductiveTypeIncorrectArgumentCount pos))
       let gamma' = gamma & bindR f vfty & bindAll (zip xs argTypes)
       cs <- mapM (\(c, b) -> (c, ) <$> check gamma' b (VU Relevant)) cs
       pure (Mu f fty xs cs, vfty, Relevant)
@@ -1751,17 +1757,21 @@ check gamma (R _ (IdPathF e)) (VId a t u) = do
 check gamma (R pos (IdPathF {})) tty = do
   tTS <- ppVal gamma tty
   throw (CheckIdPath tTS pos)
-check gamma (R _ (ConsF c t)) (VMu f fty xs cs as) = do
+check gamma (R pos (ConsF c t)) (VMu f fty xs cs as) = do
   case lookup c cs of
-    Nothing -> error "TODO: cons not in type"
+    Nothing -> do
+      let muF = VMu f fty xs cs []
+      muFTS <- ppVal gamma muF
+      throw (ConstructorNotInTypeCons c muFTS pos)
     Just b -> do
       -- Apply to inductive type with *no* parameters
       let b_muF = appOne b (VMu f fty xs cs [])
       b_muF_as <- appList' b_muF as
       t <- check gamma t b_muF_as
       pure (Cons c t)
-check gamma (R pos (ConsF {})) tty = do
-  error "TODO: cons must construct inductive type"
+check gamma (R pos (ConsF c _)) tty = do
+  tTS <- ppVal gamma tty
+  throw (CheckCons tTS c pos)
 check gamma (R _ (BoxProofF e)) (VBox a) = do
   e <- check gamma e a
   pure (BoxProof e)
