@@ -568,9 +568,59 @@ tm29 :: String
 tm29 =
   [r|
     let Vec : U → ℕ → U =
-      λA. (μF : ℕ → U. λn. [Nil : ▢⊤; Cons : A × Σ(m : ℕ). (▢(n ~ S m) × F m)])
+      λA. μF : ℕ → U. λn. ['Nil : [n ~ 0] × [⊤]; 'Cons : A × (Σ(m : ℕ). ([n ~ S m] × F m))]
     in
+    ('Cons (S (S 0); (0; (<refl (S 0)>; 'Nil (<refl 0>; <*>)))) : Vec ℕ (S 0))
+  |]
+
+tm30 :: String
+tm30 =
+  [r|
+    let Vec : U → ℕ → U =
+      λA. μF : ℕ → U. λn. ['Nil : [n ~ 0] × [⊤]; 'Cons : A × (Σ(m : ℕ). ([n ~ S m] × F m))]
+    in
+    let empty : Vec ℕ 0 =
+      'Nil (<refl 0>; <*>)
+    in
+    let ls : Vec ℕ (S 0) =
+      'Cons (S (S 0); (0; (<refl (S 0)>; 'Nil (<refl 0>; <*>))))
+    in
+    match ls as _ return ℕ with
+      | 'Cons x -> fst x
+      | 'Nil _ -> 0
+  |]
+
+tm31 :: String
+tm31 =
+  [r|
+    -- This is possibly a naive translation of inductive equality into a uniform
+    -- inductive type, but could possibly be simplified by having ['Refl : [x ~ y]]
+    let IEq : (A :U U) → A → A → U =
+      λA. μ_ : A → A → U. λx y. ['Refl : Σ(a : A). ([a ~ x] × [a ~ y])]
+    in
+    -- This implementation of J does not work, as we cannot transport observational
+    -- equality into a relevant universe.
+    -- let J' : (A :U U) → (C :U (x :U A) → (y :U A) → IEq A x y → U) → (x :U A) → (y :U A)
+    --        → (t :U IEq A x y) → ((w :U A) → C w w ('Refl (w; (<refl w>; <refl w>)))) → C x y t =
+    --   λA. λC. λx. λy. λt. λf.
+    --     match t as t return C x y t with
+    --       | 'Refl p ->
+    --         let a : A = fst p in
+    --         let a_eq_x : a ~ x = ▢-elim(fst (snd p)) in
+    --         let a_eq_y : a ~ y = ▢-elim(snd (snd p)) in
+    --         let x_eq_y : x ~ y = trans(x, a, y, sym(a, x, a_eq_x), a_eq_y) in
+    --         transp(x, z x_eq_z. C x z ('Refl (x; (<refl x>; <x_eq_z>))), f x, y, x_eq_y)
+    -- in
     *
+  |]
+
+tm32 :: String
+tm32 =
+  [r|
+    let Nat' : U =
+      μN : U. λ. ['Zero : [⊤]; 'Succ : N]
+    in
+    (λn. 'Succ n ~[Nat'] 'Succ n : Nat' → Ω)
   |]
 
 test :: String -> IO ()

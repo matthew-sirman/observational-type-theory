@@ -80,6 +80,7 @@ import qualified Error.Diagnose as Err
   in                    { L _ KWIn }
   '_'                   { L _ TokHole }
   var                   { L _ (TokName $$) }
+  cons                  { L _ (TokCons $$) }
 
 %right in
 %right '->'
@@ -95,8 +96,8 @@ rel :: { Loc (RelevanceF ()) }
 exp :: { Raw }
   : '\\' binder '.' exp                                             { rloc (LambdaF $2 $4) $1 $> }
   | let binder ':' exp '=' exp in exp                               { rloc (LetF $2 $4 $6 $8) $1 $> }
-  | match exp as binder return exp with branches                    { rloc (MatchF $2 $4 $6 (reverse $8)) $1 $7 }
-  | mu binder ':' term '.' '\\' vars '.' '[' constructors ']'       { rloc (MuF $2 $4 (reverse $7) (reverse $10)) $1 $> }
+  | match exp as binder return exp with branches                    { rloc (MatchF $2 $4 $6 $8) $1 $7 }
+  | mu binder ':' term '.' '\\' vars '.' '[' constructors ']'       { rloc (MuF $2 $4 (reverse $7) $10) $1 $> }
   | term                                                            { $1 }
 
 vars :: { [Binder] }
@@ -106,11 +107,13 @@ vars :: { [Binder] }
 
 constructors :: { [(Name, Raw)] }
   : {-# empty #-}                                                   { [] }
-  | var ':' exp                                                     { [(syntax $1, $3)] }
-  | var ':' exp ';' constructors                                    { (syntax $1, $3) : $5 }
+  | cons ':' exp                                                    { [(syntax $1, $3)] }
+  | cons ':' exp ';' constructors                                   { (syntax $1, $3) : $5 }
 
 term :: { Raw }
   : '(' binder ':' rel exp ')' '->' term                            { rloc (PiF (syntax $4) $2 $5 $8) $1 $> }
+  -- Would be nice to have this rule but adds loads of R-R conflicts
+  -- | '(' binder ':' exp ')' '->' term                                { rloc (PiF SortHole $2 $4 $7) $1 $> }
   | apps '->' term                                                  { rloc (PiF SortHole Hole $1 $3) $1 $> }
   | Exists '(' binder ':' exp ')' '.' term                          { rloc (ExistsF $3 $5 $8) $1 $> }
   | apps '/\\' apps                                                 { rloc (ExistsF Hole $1 $3) $1 $> }
@@ -159,7 +162,7 @@ apps :: { Raw }
   | J '(' exp',' exp',' binder binder '.' exp','
           exp',' exp',' exp ')'                                     { rloc (JF $3 $5 $7 $8 $10 $12 $14 $16) $1 $> }
   | Id '(' exp ',' exp ',' exp ')'                                  { rloc (IdF $3 $5 $7) $1 $> }
-  | atom '.' var atom                                               { rloc (ConsF $1 (syntax $3) $4) $1 $> }
+  | cons atom                                                       { rloc (ConsF (syntax $1) $2) $1 $> }
   | Box atom                                                        { rloc (BoxF $2) $1 $> }
   | Diamond atom                                                    { rloc (BoxProofF $2) $1 $> }
   | Boxelim '(' exp ')'                                             { rloc (BoxElimF $3) $1 $> }
@@ -168,7 +171,8 @@ apps :: { Raw }
 atom :: { Raw }
   : var                                                             { rloc (VarF (syntax $1)) $1 $> }
   | '_'                                                             { rloc HoleF $1 $> }
-  | rel                                                             { Fix (RawF (fmap UF $1)) }
+  | U                                                               { rloc (UF Relevant) $1 $> }
+  | O                                                               { rloc (UF Irrelevant) $1 $> }
   | '0'                                                             { rloc ZeroF $1 $> }
   | Nat                                                             { rloc NatF $1 $> }
   | '<' exp ',' exp '>'                                             { rloc (PropPairF $2 $4) $1 $> }
@@ -183,7 +187,7 @@ atom :: { Raw }
 
 branches :: { [(Name, Binder, Raw)] }
   : {-# empty #-}                                                   { [] }
-  | '|' var binder '->' exp branches                                { (syntax $2, $3, $5) : $6 }
+  | '|' cons binder '->' exp branches                               { (syntax $2, $3, $5) : $6 }
 
 binder :: { Binder }
   : var                                                             { Name (syntax $1) }

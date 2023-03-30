@@ -24,6 +24,7 @@ import Data.HashMap.Strict qualified as M
 import Data.IntMap qualified as IM
 import Data.Proxy
 import Data.Type.Nat
+import Data.Type.Equality qualified as  E
 import Data.Variant hiding (throw)
 import Error.Diagnose
 
@@ -280,6 +281,16 @@ eqReduce env vt va vu = eqReduceType va
             bindM3 (eqReduce env'') (cast a a' e u) (pure a') (pure u')
           t_eq_t'_and_u_eq_u' ve = VAnd <$> t_eq_t' ve <*> u_eq_u' ve
       VExists (Name "$e") a_eq_a' <$> makeFnClosure' t_eq_t'_and_u_eq_u'
+    -- Rule Cons-Eq
+    eqReduceAll (VCons c t) (VMu @_ @n f fty xs cs as) (VCons c' t')
+      | c == c' = do
+          case lookup c cs of
+            Nothing -> error "BUG: impossible (constructor not well typed in equality)"
+            Just b -> do
+              let b_muF = appOne b (VMu f fty xs cs [])
+              b_muF_as <- appList' b_muF as
+              eqReduce env t b_muF_as t'
+      | otherwise = pure VEmpty
     -- Rule Box-Eq
     eqReduceAll (VBox a) (VU Relevant) (VBox b) =
       eqReduce env a (VU Irrelevant) b
@@ -344,6 +355,7 @@ cast (VId {}) (VId {}) _ (VIdPath (VProp _ _)) = undefined
 --     u_eq_u' = Snd (Snd e')
 --     t'_eq_u' = Trans t'_eq_t (Trans t_eq_u u_eq_u')
 -- pure (VIdPath (VProp env t'_eq_u'))
+-- TODO: casting rules for constructors (requires OE for inductive types)
 cast (VBox a) (VBox b) e (VBoxProof t@(VProp env _)) = do
   t' <- cast a b e (VOne t)
   VBoxProof <$> quoteToProp env t'
@@ -436,7 +448,7 @@ eval env (BoxElim t) = do
   t <- eval env t
   t $$ VBoxElim
 eval env (Box a) = VBox <$> eval env a
-eval env (Cons t c u) = VCons <$> eval env t <*> pure c <*> eval env u
+eval env (Cons c t) = VCons c <$> eval env t
 eval env (Match t x p bs) = do
   t <- eval env t
   p <- closure env p
@@ -473,7 +485,7 @@ match
   -> Closure (A 1) Ix
   -> [(Name, Binder, Closure (A 1) Ix)]
   -> m (Val Ix)
-match (VCons _ c u) _ _ ((c', _, t) : _)
+match (VCons c u) _ _ ((c', _, t) : _)
   | c == c' = app' t u
 match (VRigid x sp) x' p bs = pure (VRigid x (sp :> VMatch x' p bs))
 match (VFlex m env sp) x p bs = pure (VFlex m env (sp :> VMatch x p bs))
@@ -662,7 +674,7 @@ quote lvl (VQProj t) = QProj <$> quote lvl t
 quote lvl (VIdRefl t) = IdRefl <$> quote lvl t
 quote lvl (VIdPath e) = IdPath <$> quoteProp lvl e
 quote lvl (VId a t u) = Id <$> quote lvl a <*> quote lvl t <*> quote lvl u
-quote lvl (VCons t c u) = Cons <$> quote lvl t <*> pure c <*> quote lvl u
+quote lvl (VCons c t) = Cons c <$> quote lvl t
 quote lvl (VMu @_ @n f fty xs cs as) = do
   fty <- quote lvl fty
   let vf = VVar lvl
@@ -960,10 +972,9 @@ rename pos ns m sub (VId a t u) = do
   t <- rename pos ns m sub t
   u <- rename pos ns m sub u
   pure (Id a t u)
-rename pos ns m sub (VCons t c u) = do
+rename pos ns m sub (VCons c t) = do
   t <- rename pos ns m sub t
-  u <- rename pos ns m sub u
-  pure (Cons t c u)
+  pure (Cons c t)
 rename pos ns m sub (VMu @_ @n f fty xs cs as) = do
   fty <- rename pos ns m sub fty
   let vf = VVar (cod sub)
@@ -1226,6 +1237,29 @@ conv pos names = conv' names names
       conv' ns ns' lvl a a'
       conv' ns ns' lvl t t'
       conv' ns ns' lvl u u'
+    conv' ns ns' lvl (VCons c t) (VCons c' t')
+      | c == c' = do
+          conv' ns ns' lvl t t'
+    conv' ns ns' lvl (VMu @_ @n f fty xs cs as) (VMu @_ @n' f' fty' xs' cs' as') =
+      case eqNat @n @n' of
+        Just E.Refl -> do
+          conv' ns ns' lvl fty fty'
+          zipWithM_ convCons cs cs'
+          -- By assumption, these terms have the same type, so if [n ≡ n'] (the lengths
+          -- of the parameters for each type) are equal, then the length of [as] and [as']
+          -- must be equal.
+          zipWithM_ (conv' ns ns' lvl) as as'
+        Nothing -> error "TODO: different sized closures; cannot be equal"
+      where
+        convCons :: (Name, Closure ('S n) Ix) -> (Name, Closure ('S n) Ix) -> Checker (Variant e) ()
+        convCons (c, b) (c', b')
+          | c == c' = do
+              let vf = VVar lvl
+                  vxs = zipWith (\x _ -> VVar x) [lvl + 1..] xs
+              b_muF_xs <- appList' (appOne b vf) vxs
+              b'_muF_xs <- appList' (appOne b' vf) vxs
+              conv' (ns :> f ++:> xs) (ns' :> f' ++:> xs') (lvl + Lvl (length xs + 1)) b_muF_xs b'_muF_xs
+          | otherwise = error "TODO: inequal constructors (possibly allow reordering though)"
     conv' _ _ _ (VBoxProof _) (VBoxProof _) = pure ()
     conv' ns ns' lvl (VBox a) (VBox a') = conv' ns ns' lvl a a'
     conv' ns ns' lvl a b = do
@@ -1563,36 +1597,23 @@ infer gamma (R pos (BoxElimF e)) = do
 infer gamma (R _ (BoxF a)) = do
   a <- check gamma a (VU Irrelevant)
   pure (Box a, VU Relevant, Relevant)
-infer gamma (R _ (ConsF t c u)) = do
-  t <- check gamma t (VU Relevant)
-  vt <- eval (env gamma) t
-  case vt of
-    muF@(VMu _ _ _ cs as) -> do
-      case lookup c cs of
-        Nothing -> error "TODO: cons not in type"
-        Just b -> do
-          let b_muF = appOne b muF
-          b_muF_as <- appList' b_muF as
-          u <- check gamma u b_muF_as
-          pure (Cons t c u, muF, Relevant)
-    _ -> error "TODO: cons must construct inductive type"
 infer gamma (R pos (MatchF t@(R argPos _) x p bs)) = do
   (t, a, s) <- infer gamma t
   (p, s') <- checkType (gamma & bind x s a) p
   case a of
-    muF@(VMu _ _ _ cs as) -> do
+    muF_as@(VMu f fty xs constructors as) -> do
       let
-        checkBranches [] = pure ([], M.fromList cs)
+        checkBranches [] = pure ([], M.fromList constructors)
         checkBranches (brs :> (c, x, t)) = do
           (brs, cs) <- checkBranches brs
           case M.lookup c cs of
             Nothing -> do
-              muFTS <- ppVal gamma muF
+              muFTS <- ppVal gamma muF_as
               throw (ConstructorNotInType c muFTS pos)
             Just b -> do
-              let b_muF = appOne b muF
+              let b_muF = appOne b (VMu f fty xs constructors [])
               b_muF_as <- appList' b_muF as
-              br <- checkBranch gamma a (c, x, t) b_muF_as p
+              br <- checkBranch gamma (c, x, t) b_muF_as p
               pure (brs :> br, M.delete c cs)
 
       (bs, remaining) <- checkBranches bs
@@ -1671,14 +1692,13 @@ checkBranch
      , e `CouldBe` UnificationError
      )
   => Context
-  -> VTy Ix
   -> (Name, Binder, Raw)
   -> VTy Ix
   -> Term Ix
   -> Checker (Variant e) (Name, Binder, Term Ix)
-checkBranch gamma a (c, x, t) bty p = do
+checkBranch gamma (c, x, t) bty p = do
   let vx = VVar (lvl gamma)
-  pCx <- eval (env gamma :> (Bound, VCons a c vx)) p
+  pCx <- eval (env gamma :> (Bound, VCons c vx)) p
   t <- check (gamma & bindR x bty) t pCx
   pure (c, x, t)
 
@@ -1731,6 +1751,17 @@ check gamma (R _ (IdPathF e)) (VId a t u) = do
 check gamma (R pos (IdPathF {})) tty = do
   tTS <- ppVal gamma tty
   throw (CheckIdPath tTS pos)
+check gamma (R _ (ConsF c t)) (VMu f fty xs cs as) = do
+  case lookup c cs of
+    Nothing -> error "TODO: cons not in type"
+    Just b -> do
+      -- Apply to inductive type with *no* parameters
+      let b_muF = appOne b (VMu f fty xs cs [])
+      b_muF_as <- appList' b_muF as
+      t <- check gamma t b_muF_as
+      pure (Cons c t)
+check gamma (R pos (ConsF {})) tty = do
+  error "TODO: cons must construct inductive type"
 check gamma (R _ (BoxProofF e)) (VBox a) = do
   e <- check gamma e a
   pure (BoxProof e)

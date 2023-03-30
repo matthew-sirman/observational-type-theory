@@ -82,7 +82,8 @@ tokens :-
        "in"                     { keyword KWIn}
        "_"                      { symbol TokHole }
 
-       [a-z A-Z 0-9 \_ \']+   { identifier TokName }
+       \'[a-z A-Z 0-9 \_ \']+   { identifier TokCons }
+       [a-z A-Z 0-9 \_ \']+     { identifier TokName }
 {
 
 data Token
@@ -136,13 +137,14 @@ data Token
   | KWAs
   | KWReturn
   | KWWith
-  | SymMu
   | TokPipe
+  | SymMu
   | KWLet
   | TokEquals
   | KWIn
   | TokHole
   | TokName (Loc Name)
+  | TokCons (Loc Name)
   | TokEOF
   deriving (Show)
 
