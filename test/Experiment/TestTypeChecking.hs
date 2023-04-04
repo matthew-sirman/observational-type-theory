@@ -638,6 +638,9 @@ tm34 =
     let List : U → U =
       λA. μF : U. λ. ['Nil : [⊤]; 'Cons : A × F]
     in
+    let generate : (A :U U) → (ℕ → A) → ℕ → List A =
+      λA. λf. λn. rec(_. List A, 'Nil <*>, k ls. 'Cons (f k; ls), n)
+    in
     let length : (A :U U) → List A → ℕ =
       λA. fix [List A as G] length x : ℕ =
         match x as _ return ℕ with
@@ -648,17 +651,28 @@ tm34 =
     in
     let map : (A :U U) → (B :U U) → (A → B) → List A → List B =
       λA. λB. λf. fix [List A as G] mapf x : List B =
-      match x as _ return List B with
-          | 'Nil _ -> 'Nil <*>
-          | 'Cons ls ->
+        match x as _ return List B with
+          | 'Nil _ → 'Nil <*>
+          | 'Cons ls →
             let a : A = fst ls in
             let tl : G = snd ls in
             'Cons (f a; mapf tl)
     in
-    let ls : List ℕ =
-      'Cons (0; 'Cons (0; 'Cons (0; 'Nil <*>)))
+    let foldr : (A :U U) → (B :U U) → B → (A → B → B) → List A → B =
+      λA. λB. λnil. λcons. fix [List A as G] fold x : B =
+        match x as _ return B with
+          | 'Nil _ → nil
+          | 'Cons ls →
+            let a : A = fst ls in
+            let tl : G = snd ls in
+            cons a (fold tl)
     in
-    map _ _ (λx. S x) ls
+    let ls : List ℕ =
+      generate _ (λ_. 0) (S (S 0))
+    in
+    -- length _ ls
+    -- map _ _ (λx. S x) ls
+    foldr _ _ 0 (λ_. λn. S n) ls
   |]
 
 tm35 :: String
@@ -681,7 +695,18 @@ tm35 =
             let tl : G m = snd (snd (snd ls)) in
             'Cons (f a; (m; (pf; mapf m tl)))
     in
-    map _ [⊤] (λx. <*>) _ (generate _ (λn. n) (S (S 0)))
+    let foldr : (A :U U) → (B :U U) → B → (A → B → B) → (n :U ℕ) → Vec A n → B =
+      λA. λB. λnil. λcons. fix [Vec A as G] fold n x : B =
+        match x as _ return B with
+          | 'Nil _ → nil
+          | 'Cons ls →
+            let a : A = fst ls in
+            let m : ℕ = fst (snd ls) in
+            let tl : G m = snd (snd (snd ls)) in
+            cons a (fold m tl)
+    in
+    -- map _ [⊤] (λx. <*>) _ (generate _ (λn. n) (S (S 0)))
+    foldr _ _ 0 (λ_. λn. S n) _ (generate _ (λn. n) (S (S (S 0))))
   |]
 
 test :: String -> IO ()

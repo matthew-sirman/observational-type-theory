@@ -141,6 +141,7 @@ data InferenceError
   | ConstructorNotInTypeMatch Name TermString Position
   | NonTotalMatch [Name] Position
   | MatchHead TermString Position
+  | FixAnnotation TermString Position
   | InductiveTypeFamily TermString Position
   | InductiveTypeIncorrectArgumentCount Position
   | BoxElimHead TermString Position
@@ -215,6 +216,10 @@ instance Reportable InferenceError where
   report (MatchHead t pos) =
     let msg = "Expected inductive type (μF. t) in argument of match expression."
         ctx = "Expected inductive type, but found [" ++ unTS t ++ "]."
+     in createError msg [(pos, ctx)]
+  report (FixAnnotation t pos) =
+    let msg = "Fixed point must be annotated with inductive type."
+        ctx = "Expected inductive type (μF. t) in fixed point annotation, but found [" ++ unTS t ++ "]."
      in createError msg [(pos, ctx)]
   report (InductiveTypeFamily t pos) =
     let msg = "Inductive type must be an indexed type family (x₁ : A₁) → ⋯ (xₙ : Aₙ) → U)."

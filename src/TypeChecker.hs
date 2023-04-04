@@ -1356,12 +1356,12 @@ conv pos names = conv' names names
 ppVal :: MonadEvaluator m => Context -> Val Ix -> m TermString
 ppVal gamma v = TS . prettyPrintTerm (names gamma) <$> quote (lvl gamma) v
 
-ppCtx (Context [] [] _) = pure []
-ppCtx (Context (_ : env) (ts :> (x, (s, a))) l) = do
-  let gamma = Context env ts (l - 1)
-  aTS <- ppVal gamma a
-  rest <- ppCtx gamma
-  pure (rest :> (x, (s, aTS)))
+-- ppCtx (Context [] [] _) = pure []
+-- ppCtx (Context (_ : env) (ts :> (x, (s, a))) l) = do
+--   let gamma = Context env ts (l - 1)
+--   aTS <- ppVal gamma a
+--   rest <- ppCtx gamma
+--   pure (rest :> (x, (s, aTS)))
 
 ppTerm :: Context -> Term Ix -> TermString
 ppTerm gamma = TS . prettyPrintTerm (names gamma)
@@ -1744,7 +1744,9 @@ infer gamma (R _ (FixedPointF i@(R pos _) g f ps x c t)) = do
       t <- check gammaT t c_f_lift_g_ps_x
       fixTy <- buildFType (zip ps argTypes) (env gamma :> (Bound, vmuF)) vmuF c
       pure (FixedPoint muF g f ps x c t, fixTy, s)
-    _ -> error "TODO: fix must have inductive type family as annotation"
+    _ -> do
+      vmuFTS <- ppVal gamma vmuF
+      throw (FixAnnotation vmuFTS pos)
   where
     buildFType
       :: MonadEvaluator m
