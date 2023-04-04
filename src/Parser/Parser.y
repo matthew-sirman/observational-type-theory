@@ -75,6 +75,7 @@ import qualified Error.Diagnose as Err
   with                  { L _ KWWith }
   '|'                   { L _ TokPipe }
   mu                    { L _ SymMu }
+  fix                   { L _ TokFix }
   let                   { L _ KWLet }
   '='                   { L _ TokEquals }
   in                    { L _ KWIn }
@@ -97,18 +98,9 @@ exp :: { Raw }
   : '\\' binder '.' exp                                             { rloc (LambdaF $2 $4) $1 $> }
   | let binder ':' exp '=' exp in exp                               { rloc (LetF $2 $4 $6 $8) $1 $> }
   | match exp as binder return exp with branches                    { rloc (MatchF $2 $4 $6 $8) $1 $7 }
-  | mu binder ':' term '.' '\\' vars '.' '[' constructors ']'       { rloc (MuF $2 $4 (reverse $7) $10) $1 $> }
+  | fix '[' exp as binder ']' fixArgs ':' exp '=' exp               { rloc (mkFixedPoint $3 $5 $7 $9 $11) $1 $> }
+  | mu binder ':' term '.' '\\' vars '.' '[' constructors ']'       { rloc (MuF $2 $4 $7 $10) $1 $> }
   | term                                                            { $1 }
-
-vars :: { [Binder] }
-  : {-# empty #-}                                                   { [] }
-  | binder                                                          { [$1] }
-  | binder vars                                                     { $1 : $2 }
-
-constructors :: { [(Name, Raw)] }
-  : {-# empty #-}                                                   { [] }
-  | cons ':' exp                                                    { [(syntax $1, $3)] }
-  | cons ':' exp ';' constructors                                   { (syntax $1, $3) : $5 }
 
 term :: { Raw }
   : '(' binder ':' rel exp ')' '->' term                            { rloc (PiF (syntax $4) $2 $5 $8) $1 $> }
@@ -189,6 +181,21 @@ branches :: { [(Name, Binder, Raw)] }
   : {-# empty #-}                                                   { [] }
   | '|' cons binder '->' exp branches                               { (syntax $2, $3, $5) : $6 }
 
+vars :: { [Binder] }
+  : {-# empty #-}                                                   { [] }
+  | binder                                                          { [$1] }
+  | binder vars                                                     { $1 : $2 }
+
+fixArgs :: { (Binder, [Binder], Binder) }
+  : binder binder                                                   { ($1, [], $2) }
+  | binder binder binder                                            { ($1, [$2], $3) }
+  | binder fixArgs binder                                           { extendFixArgs $1 $2 $3 }
+
+constructors :: { [(Name, Raw)] }
+  : {-# empty #-}                                                   { [] }
+  | cons ':' exp                                                    { [(syntax $1, $3)] }
+  | cons ':' exp ';' constructors                                   { (syntax $1, $3) : $5 }
+
 binder :: { Binder }
   : var                                                             { Name (syntax $1) }
   | '_'                                                             { Hole }
@@ -228,6 +235,12 @@ loc element start end =
 
 rloc :: (Located start, Located end) => TermF () () Name Raw -> start -> end -> Raw
 rloc e start end = Fix (RawF (loc e start end))
+
+extendFixArgs :: Binder -> (Binder, [Binder], Binder) -> Binder -> (Binder, [Binder], Binder)
+extendFixArgs f (f', ps, x') x = (f, f' : ps ++ [x'], x)
+
+mkFixedPoint :: Raw -> Binder -> (Binder, [Binder], Binder) -> Raw -> Raw -> TermF () () Name Raw
+mkFixedPoint i g (f, ps, x) c t = FixedPointF i g f ps x c t
 
 parseError :: Loc Token -> Parser a
 parseError (L _ TokEOF) = do

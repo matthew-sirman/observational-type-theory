@@ -1,3 +1,4 @@
+{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE FlexibleContexts #-}
@@ -5,6 +6,7 @@
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE GADTSyntax #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE ImportQualifiedPost #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -75,6 +77,7 @@ module Syntax (
   pattern Box,
   pattern Cons,
   pattern Match,
+  pattern FixedPoint,
   pattern Mu,
   pattern Let,
   pattern Annotation,
@@ -92,7 +95,8 @@ module Syntax (
   PushArgument (..),
   Closure (..),
   ClosureApply (..),
-  appList,
+  appVector,
+  appVectorFull,
   appOne,
   A,
   BD (..),
@@ -107,7 +111,10 @@ module Syntax (
 )
 where
 
+import Vector qualified as V
+
 import Data.Fix hiding (Mu)
+import Data.Type.Equality qualified as E
 import Data.Type.Nat
 import Data.Void
 import Error.Diagnose.Position (Position (..))
@@ -123,7 +130,8 @@ pattern xs :> x = x : xs
 
 infixl 4 ++:>
 (++:>) :: [a] -> [a] -> [a]
-xs ++:> ys = ys ++ xs
+xs ++:> [] = xs
+xs ++:> (y : ys) = (xs :> y) ++:> ys
 
 -- Language source identifiers
 type Name = String
@@ -246,6 +254,7 @@ data TermF proj meta v t
   | BoxF t
   | ConsF Name t
   | MatchF t Binder t [(Name, Binder, t)]
+  | FixedPointF t Binder Binder [Binder] Binder t t
   | MuF Binder t [Binder] [(Name, t)]
   | -- Annotations
     LetF Binder t t t
@@ -419,6 +428,9 @@ pattern Cons c t = Fix (ConsF c t)
 pattern Match :: Term v -> Binder -> Type v -> [(Name, Binder, Term v)] -> Term v
 pattern Match t x p bs = Fix (MatchF t x p bs)
 
+pattern FixedPoint :: Type v -> Binder -> Binder -> [Binder] -> Binder -> Type v -> Term v -> Term v
+pattern FixedPoint i g f ps x c t = Fix (FixedPointF i g f ps x c t)
+
 pattern Mu :: Binder -> Type v -> [Binder] -> [(Name, Type v)] -> Type v
 pattern Mu f t xs cs = Fix (MuF f t xs cs)
 
@@ -473,6 +485,7 @@ pattern Meta v = Fix (MetaF v)
   , Box
   , Cons
   , Match
+  , FixedPoint
   , Mu
   , Let
   , Annotation
@@ -520,6 +533,7 @@ instance Functor (TermF p m v) where
   fmap f (BoxF a) = BoxF (f a)
   fmap f (ConsF c t) = ConsF c (f t)
   fmap f (MatchF t x p bs) = MatchF (f t) x (f p) (fmap (fmap f) bs)
+  fmap f (FixedPointF i g f' ps x c t) = FixedPointF (f i) g f' ps x (f c) (f t)
   fmap f (MuF g t xs cs) = MuF g (f t) xs (fmap (fmap f) cs)
   fmap f (LetF x a t u) = LetF x (f a) (f t) (f u)
   fmap f (AnnotationF t a) = AnnotationF (f t) (f a)
@@ -565,6 +579,7 @@ instance Foldable (TermF p m v) where
   foldr f e (BoxF a) = f a e
   foldr f e (ConsF _ t) = f t e
   foldr f e (MatchF t _ p bs) = (f t . f p) (foldr (\(_, _, b) e -> f b e) e bs)
+  foldr f e (FixedPointF i _ _ _ _ c t) = (f i . f c . f t) e
   foldr f e (MuF _ t _ cs) = f t (foldr (\(_, b) e -> f b e) e cs)
   foldr f e (LetF _ a t u) = (f a . f t . f u) e
   foldr f e (AnnotationF t a) = (f t . f a) e
@@ -614,6 +629,7 @@ instance Traversable (TermF p m v) where
   traverse f (BoxF a) = BoxF <$> f a
   traverse f (ConsF c t) = ConsF c <$> f t
   traverse f (MatchF t x p bs) = MatchF <$> f t <*> pure x <*> f p <*> traverse (\(c, x, t) -> (c,x,) <$> f t) bs
+  traverse f (FixedPointF i g f' ps x c t) = FixedPointF <$> f i <*> pure g <*> pure f' <*> pure ps <*> pure x <*> f c <*> f t
   traverse f (MuF g t xs cs) = MuF g <$> f t <*> pure xs <*> traverse (\(c, b) -> (c,) <$> f b) cs
   traverse f (LetF x a t u) = LetF x <$> f a <*> f t <*> f u
   traverse f (AnnotationF t a) = AnnotationF <$> f t <*> f a
@@ -846,8 +862,14 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
       where
         branch :: (Name, Binder, Term v) -> ShowS
         branch (cons, x, t) = str "| " . str cons . str " " . binder x . str " -> " . go precLet (ns :> x) t
+    go prec ns (FixedPoint i g f ps x c t) =
+      let i' = go precLet ns i . str " as " . binder g
+          args = sep space (fmap binder (f : ps ++ [x]))
+          c' = go precLet (ns :> g ++:> ps :> x) c
+          t' = go precLet (ns :> g :> f ++:> ps :> x) t
+       in par prec precLet (str "fix [" . i' . str "] " . args . str " : " . c' . str " = " . t')
     go prec ns (Mu f t xs cs) =
-      let xs' = str "λ" . sep space (fmap binder (reverse xs))
+      let xs' = str "λ" . sep space (fmap binder xs)
           cs' = chr '[' . sep (str "; ") (fmap showCons cs) . chr ']'
        in par prec precLet (str "μ" . binder f . str " : " . go precLet ns t . dot . xs' . dot . cs')
       where
@@ -890,15 +912,10 @@ level env = Lvl (length env)
 class Applicative f => PushArgument f where
   push :: (a -> f b) -> f (a -> b)
 
--- data Arity = Z | S Arity
-
--- type family A (n :: T.Nat) :: Arity where
---   A 0 = 'Z
---   A n = 'S (A (n T.- 1))
-
 data Closure (n :: Nat) v where
   Closure :: forall n v. Env v -> Term v -> Closure n v
   Lift :: forall n v. Val v -> Closure n v
+  LiftClosure :: forall n v. Closure n v -> Closure ('S n) v
   Function :: forall n v. (Val v -> Closure n v) -> Closure ('S n) v
 
 class Applicative f => ClosureApply f (n :: Nat) cl v | cl -> v, cl -> f where
@@ -914,44 +931,62 @@ instance Applicative f => ClosureApply f 'Z (f (Val v)) v where
 instance ClosureApply f n res v => ClosureApply f ('S n) (Val v -> res) v where
   app eval (Closure env t) u = app eval (Closure @n @v (env :> (Bound, u)) t)
   app eval (Lift v) _ = app eval (Lift @n @v v)
+  app eval (LiftClosure cl) _ = app eval cl
   app eval (Function f) u = app eval (f u)
 
   makeFnClosure f = Function <$> push (makeFnClosure . f)
 
-newtype VectorApp f v (n :: Nat) = VectorApp
-  { unVectorApp :: Closure n v -> [Val v] -> f (Val v)
+newtype VectorApp f v (n :: Nat) (m :: Nat) = VectorApp
+  { runVectorApp :: Closure (Plus n m) v -> V.Vec m (Val v) -> f (Closure n v)
   }
 
-appListBase :: forall f v. Applicative f => (Env v -> Term v -> f (Val v)) -> VectorApp f v 'Z
-appListBase eval = VectorApp app'
+appVectorBase :: forall f n v. (Applicative f, SNatI n) => VectorApp f v n 'Z
+appVectorBase =
+  case proofPlusNZero @n of
+    E.Refl -> VectorApp app'
   where
-    app' :: Closure 'Z v -> [Val v] -> f (Val v)
-    app' cl [] = app eval cl
-    app' _ _ = error "Applied list has incorrect length (too long)"
+    app' :: Closure n v -> V.Vec 'Z (Val v) -> f (Closure n v)
+    app' cl V.Nil = pure cl
 
-appListInd :: forall m f v. Applicative f => (VectorApp f v m -> VectorApp f v ('S m))
-appListInd (VectorApp recurse) = VectorApp app'
+appVectorInd
+  :: forall m k f v
+   . (SNatI m, SNatI k)
+  => (VectorApp f v k m -> VectorApp f v k ('S m))
+appVectorInd (VectorApp recurse) =
+  case V.proofSuccDistributes (snat @k) (snat @m) of
+    E.Refl -> VectorApp app'
   where
-    app' :: Closure ('S m) v -> [Val v] -> f (Val v)
-    app' (Closure env t) (a : as) = recurse (Closure (env :> (Bound, a)) t) as
-    app' (Lift v) _ = pure v
-    app' (Function f) (a : as) = recurse (f a) as
-    app' _ [] = error "Applied list has incorrect length (too short)"
+    app' :: Closure ('S (Plus k m)) v -> V.Vec ('S m) (Val v) -> f (Closure k v)
+    app' cl (a V.:<| as) = recurse (appOne cl a) as
 
-appList
-  :: forall f n v
-   . (Applicative f, SNatI n)
+-- app' (Closure env t) (a V.:<| as) = -- recurse (Closure (env :> (Bound, a)) t) as
+-- app' (Lift v) (_ V.:<| as) = recurse (Lift v) as
+-- app' (LiftClosure cl) (_ V.:<| as) = recurse cl as
+-- app' (Function f) (a V.:<| as) = recurse (f a) as
+
+appVector
+  :: forall n m f v
+   . (Applicative f, SNatI n, SNatI m)
+  => Closure (Plus n m) v
+  -> V.Vec m (Val v)
+  -> f (Closure n v)
+appVector = runVectorApp @f @v @n @m (induction appVectorBase appVectorInd)
+
+appVectorFull
+  :: forall n f v
+   . (Monad f, SNatI n)
   => (Env v -> Term v -> f (Val v))
   -> Closure n v
-  -> [Val v]
+  -> V.Vec n (Val v)
   -> f (Val v)
--- Induction applies the arguments IN REVERSE ORDER. So, to maintain consistency,
--- this function reverses the list.
-appList eval cl as = unVectorApp (induction (appListBase eval) appListInd) cl (reverse as)
+appVectorFull eval cl v = do
+  cl0 <- appVector @'Z @n cl v
+  app eval cl0
 
 appOne :: Closure ('S n) v -> Val v -> Closure n v
 appOne (Closure env t) u = Closure (env :> (Bound, u)) t
 appOne (Lift v) _ = Lift v
+appOne (LiftClosure cl) _ = cl
 appOne (Function f) u = f u
 
 type family A n where
@@ -1030,7 +1065,8 @@ data Val v
   | VIdPath (VProp v)
   | VId (VTy v) (Val v) (Val v)
   | VCons Name (Val v)
-  | forall n. SNatI n => VMu Binder (VTy v) [Binder] [(Name, Closure ('S n) v)] [Val v]
+  | forall n m. (SNatI n, SNatI m) => VFixedPoint (VTy v) Binder Binder [Binder] Binder (Closure ('S ('S n)) v) (Closure ('S ('S ('S n))) v) (V.Vec m (Val v))
+  | forall n m. (SNatI n, SNatI m) => VMu Binder (VTy v) [Binder] [(Name, Closure ('S n) v)] (V.Vec m (Val v))
   | VBoxProof (VProp v)
   | VBox (Val v)
 

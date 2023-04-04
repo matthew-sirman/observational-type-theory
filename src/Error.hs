@@ -36,6 +36,7 @@ data ConversionError
   = ConversionBetweenUniverses Position
   | ConversionFailure TermString TermString Position
   | RigidSpineMismatch (Maybe TermString) (Maybe TermString) Position
+  | FixedPointsInequalParameterSize Int Int Position
   | InductiveTypesInequalParameterSize Int Int Position
   | ConstructorMismatch Name Name Position
 
@@ -56,6 +57,15 @@ instance Reportable ConversionError where
             (Just a, Nothing) -> "Spines must have equal length (found extra eliminator [" ++ unTS a ++ "])"
             (Nothing, Just b) -> "Spines must have equal length (found extra eliminator [" ++ unTS b ++ "])"
             (Just a, Just b) -> "Could not match different eliminators [" ++ unTS a ++ " ≡ " ++ unTS b ++ "]"
+     in createError msg [(pos, ctx)]
+  report (FixedPointsInequalParameterSize n m pos) =
+    let msg = "Type conversion failed."
+        ctx =
+          "Fixed points with different numbers of parameters ["
+            ++ show n
+            ++ " ≢ "
+            ++ show m
+            ++ "] cannot be definitionally equal."
      in createError msg [(pos, ctx)]
   report (InductiveTypesInequalParameterSize n m pos) =
     let msg = "Type conversion failed."
