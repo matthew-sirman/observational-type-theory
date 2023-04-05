@@ -75,6 +75,7 @@ tokens :-
        "return"                 { keyword KWReturn }
        "with"                   { keyword KWWith }
        "|"                      { symbol TokPipe }
+       "fix"                    { symbol TokFix }
        "mu"                     { symbol SymMu }
        "μ"                      { symbol SymMu }
        "let"                    { keyword KWLet }
@@ -138,6 +139,7 @@ data Token
   | KWReturn
   | KWWith
   | TokPipe
+  | TokFix
   | SymMu
   | KWLet
   | TokEquals
