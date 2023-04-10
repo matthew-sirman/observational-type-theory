@@ -18,7 +18,10 @@ import Control.Monad.Oops
 import Error.Diagnose
 
 test :: String -> IO ()
-test input = do
+test = testDebug False
+
+testDebug :: Bool -> String -> IO ()
+testDebug debug input = do
   (result, mctx) <-
     runStateT
       ( runOopsInEither
@@ -39,11 +42,13 @@ test input = do
       putStrLn (prettyPrintTerm [] (runEvaluator (quote 0 tty) mctx))
       putStrLn "\nReduces to:"
       putStrLn (prettyPrintTerm [] (runEvaluator (normalForm [] t) mctx))
-      putStrLn "\nMeta context:"
-      print mctx
-    Left () -> do
-      putStrLn "\nMeta context:"
-      print mctx
+      when debug $ do
+        putStrLn "\nMeta context:"
+        print mctx
+    Left () ->
+      when debug $ do
+        putStrLn "\nMeta context:"
+        print mctx
   where
     result = do
       let parsed = hoistEither (parse input)

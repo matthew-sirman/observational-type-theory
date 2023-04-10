@@ -98,7 +98,7 @@ exp :: { Raw }
   : '\\' binder '.' exp                                             { rloc (LambdaF $2 $4) $1 $> }
   | let binder ':' exp '=' exp in exp                               { rloc (LetF $2 $4 $6 $8) $1 $> }
   | match exp as binder return exp with branches                    { rloc (MatchF $2 $4 $6 $8) $1 $7 }
-  | fix '[' exp as binder ']' fixArgs ':' exp '=' exp               { rloc (mkFixedPoint $3 $5 $7 $9 $11) $1 $> }
+  | fix '[' exp as binder ']' binder fixArgs ':' exp '=' exp        { rloc (mkFixedPoint $3 $5 $7 $8 $10 $12) $1 $> }
   | mu binder ':' term '.' '\\' vars '.' '[' constructors ']'       { rloc (MuF $2 $4 $7 $10) $1 $> }
   | term                                                            { $1 }
 
@@ -175,7 +175,7 @@ atom :: { Raw }
   | '(' exp ':' exp ')'                                             { rloc (AnnotationF $2 $4) $1 $>}
   | '[' exp ']'                                                     { rloc (BoxF $2) $1 $> }
   | '<' exp '>'                                                     { rloc (BoxProofF $2) $1 $> }
-  | '(' exp ')'                                                     { $2 }
+  | '(' exp ')'                                                     { uloc $2 $1 $> }
 
 branches :: { [(Name, Binder, Raw)] }
   : {-# empty #-}                                                   { [] }
@@ -186,10 +186,9 @@ vars :: { [Binder] }
   | binder                                                          { [$1] }
   | binder vars                                                     { $1 : $2 }
 
-fixArgs :: { (Binder, [Binder], Binder) }
-  : binder binder                                                   { ($1, [], $2) }
-  | binder binder binder                                            { ($1, [$2], $3) }
-  | binder fixArgs binder                                           { extendFixArgs $1 $2 $3 }
+fixArgs :: { ([Binder], Binder) }
+  : binder                                                          { ([], $1) }
+  | binder fixArgs                                                  { ($1 : fst $2, snd $2) }
 
 constructors :: { [(Name, Raw)] }
   : {-# empty #-}                                                   { [] }
@@ -236,11 +235,11 @@ loc element start end =
 rloc :: (Located start, Located end) => TermF () () Name Raw -> start -> end -> Raw
 rloc e start end = Fix (RawF (loc e start end))
 
-extendFixArgs :: Binder -> (Binder, [Binder], Binder) -> Binder -> (Binder, [Binder], Binder)
-extendFixArgs f (f', ps, x') x = (f, f' : ps ++ [x'], x)
+uloc :: (Located start, Located end) => Raw -> start -> end -> Raw
+uloc (R _ e) = rloc e
 
-mkFixedPoint :: Raw -> Binder -> (Binder, [Binder], Binder) -> Raw -> Raw -> TermF () () Name Raw
-mkFixedPoint i g (f, ps, x) c t = FixedPointF i g f ps x c t
+mkFixedPoint :: Raw -> Binder -> Binder -> ([Binder], Binder) -> Raw -> Raw -> TermF () () Name Raw
+mkFixedPoint i g f (ps, x) c t = FixedPointF i g f ps x c t
 
 parseError :: Loc Token -> Parser a
 parseError (L _ TokEOF) = do
