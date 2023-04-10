@@ -55,7 +55,6 @@ import qualified Error.Diagnose as Err
   ap                    { L _ KWAp }
   transp                { L _ KWTransp }
   cast                  { L _ KWCast }
-  castrefl              { L _ KWCastRefl }
   Sigma                 { L _ SymSigma }
   times                 { L _ SymTimes }
   ';'                   { L _ SymSemiColon }
@@ -139,7 +138,6 @@ apps :: { Raw }
   | transp '(' exp ',' binder binder '.' exp ','
                exp ',' exp ',' exp ')'                              { rloc (TranspF $3 $5 $6 $8 $10 $12 $14) $1 $> }
   | cast '(' exp ',' exp ',' exp ',' exp ')'                        { rloc (CastF $3 $5 $7 $9) $1 $> }
-  | castrefl '(' exp ',' exp ')'                                    { rloc (CastReflF $3 $5) $1 $> }
   | proj atom                                                       { rloc (QProjF $2) $1 $> }
   | Qelim '(' binder '.' exp ','
               binder '.' exp ','

@@ -416,7 +416,6 @@ eval env p@(Trans {}) = VOne <$> prop env p
 eval env p@(Ap {}) = VOne <$> prop env p
 eval env p@(Transp {}) = VOne <$> prop env p
 eval env (Cast a b e t) = bindM4 cast (eval env a) (eval env b) (prop env e) (eval env t)
-eval env p@(CastRefl {}) = VOne <$> prop env p
 eval env (Pair t u) = VPair <$> eval env t <*> eval env u
 eval env (Fst p) = elimM (eval env p) (pure VFst)
 eval env (Snd p) = elimM (eval env p) (pure VSnd)
@@ -1258,6 +1257,16 @@ conv pos names = conv' names names
       conv' ns ns' lvl b b'
       -- [e ≡ e'] follows from proof irrelevance, given [a ≡ a'] and [b ≡ b']
       conv' ns ns' lvl t t'
+    -- These rules implement definitional castrefl. Instead of a propositional
+    -- constant [castrefl : cast(A, A, e, t) ~ t], we make this hold definitionally.
+    -- Note that it does _not_ reduce in general, and is only handled in the conversion
+    -- algorithm.
+    conv' ns ns' lvl (VCast a b _ t) u = do
+      conv' ns ns lvl a b
+      conv' ns ns' lvl t u
+    conv' ns ns' lvl t (VCast a b _ u) = do
+      conv' ns' ns' lvl a b
+      conv' ns ns' lvl t u
     conv' ns ns' lvl (VPair t u) (VPair t' u') = do
       conv' ns ns' lvl t t'
       conv' ns ns' lvl u u'
@@ -1578,14 +1587,6 @@ infer gamma (R _ (CastF a@(R aPos _) b@(R bPos _) e t)) = do
   e <- check gamma e va_eq_vb
   t <- check gamma t va
   pure (Cast a b e t, vb, s)
-infer gamma (R _ (CastReflF a t)) = do
-  a <- check gamma a (VU Relevant)
-  va <- eval (env gamma) a
-  t <- check gamma t va
-  vt <- eval (env gamma) t
-  cast_a_a_t <- cast va va (VProp (env gamma) (Refl a)) vt
-  t_eq_cast_a_a_t <- eqReduce (env gamma) vt va cast_a_a_t
-  pure (CastRefl a t, t_eq_cast_a_a_t, Irrelevant)
 infer gamma (R _ (SigmaF x a b)) = do
   a <- check gamma a (VU Relevant)
   va <- eval (env gamma) a

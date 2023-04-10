@@ -60,7 +60,6 @@ module Syntax (
   pattern Ap,
   pattern Transp,
   pattern Cast,
-  pattern CastRefl,
   pattern Pair,
   pattern Fst,
   pattern Snd,
@@ -234,7 +233,6 @@ data TermF proj meta v t
     TranspF t Binder Binder t t t t
   | -- Type casting
     CastF t t t t
-  | CastReflF t t
   | -- Sigma Types
     PairF t t
   | SigmaF Binder t t
@@ -348,9 +346,6 @@ pattern Transp t x pf b u t' e = Fix (TranspF t x pf b u t' e)
 
 pattern Cast :: Type v -> Type v -> Term v -> Term v -> Term v
 pattern Cast a b e t = Fix (CastF a b e t)
-
-pattern CastRefl :: Type v -> Term v -> Term v
-pattern CastRefl a t = Fix (CastReflF a t)
 
 pattern Pair :: Term v -> Term v -> Term v
 pattern Pair t u = Fix (PairF t u)
@@ -468,7 +463,6 @@ pattern Meta v = Fix (MetaF v)
   , Ap
   , Transp
   , Cast
-  , CastRefl
   , Pair
   , Fst
   , Snd
@@ -517,7 +511,6 @@ instance Functor (TermF p m v) where
   fmap f (ApF b x t u v e) = ApF (f b) x (f t) (f u) (f v) (f e)
   fmap f (TranspF t x pf b u t' e) = TranspF (f t) x pf (f b) (f u) (f t') (f e)
   fmap f (CastF a b e t) = CastF (f a) (f b) (f e) (f t)
-  fmap f (CastReflF a t) = CastReflF (f a) (f t)
   fmap f (PairF t u) = PairF (f t) (f u)
   fmap f (SigmaF x a b) = SigmaF x (f a) (f b)
   fmap f (QuotientF a x y r rx rr sx sy sxy rs tx ty tz txy tyz rt) =
@@ -564,7 +557,6 @@ instance Foldable (TermF p m v) where
   foldr f e (ApF b _ t u v e') = (f b . f t . f u . f v . f e') e
   foldr f e (TranspF t _ _ b u t' v) = (f t . f b . f u . f t' . f v) e
   foldr f e (CastF a b u t) = (f a . f b . f u . f t) e
-  foldr f e (CastReflF a t) = (f a . f t) e
   foldr f e (PairF t u) = (f t . f u) e
   foldr f e (SigmaF _ a b) = (f a . f b) e
   foldr f e (QuotientF a _ _ r _ rr _ _ _ rs _ _ _ _ _ rt) = (f a . f r . f rr . f rs . f rt) e
@@ -611,7 +603,6 @@ instance Traversable (TermF p m v) where
   traverse f (TranspF t x pf b u t' e) =
     TranspF <$> f t <*> pure x <*> pure pf <*> f b <*> f u <*> f t' <*> f e
   traverse f (CastF a b e t) = CastF <$> f a <*> f b <*> f e <*> f t
-  traverse f (CastReflF a t) = CastReflF <$> f a <*> f t
   traverse f (PairF t u) = PairF <$> f t <*> f u
   traverse f (SigmaF x a b) = SigmaF x <$> f a <*> f b
   traverse f (QuotientF a x y r rx rr sx sy sxy rs tx ty tz txy tyz rt) =
@@ -666,7 +657,6 @@ instance Functor RawF where
 --     alg (ApF b x t u v e) = Ap b x t u v e
 --     alg (TranspF t x pf b u t' e) = Transp t x pf b u t' e
 --     alg (CastF a b e t) = Cast a b e t
---     alg (CastReflF a t) = CastRefl a t
 --     alg (PairF t u) = Pair t u
 --     alg (FstF Relevant p) = Fst p
 --     alg (SndF Relevant p) = Snd p
@@ -807,8 +797,6 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
           e' = go precLet ns e
           t' = go precLet ns t
        in par prec precApp (str "cast" . showParen True (sep comma [a', b', e', t']))
-    go prec ns (CastRefl a t) =
-      par prec precApp (str "castrefl" . showParen True (go precLet ns a . comma . go precLet ns t))
     go _ ns (Pair t u) = chr '(' . go precLet ns t . str "; " . go precLet ns u . chr ')'
     go prec ns (Fst p) = par prec precApp (str "fst " . go precAtom ns p)
     go prec ns (Snd p) = par prec precApp (str "snd " . go precAtom ns p)

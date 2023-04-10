@@ -261,13 +261,16 @@ tm16 =
     --             -> x ~[A] z =
     --   λA. λx. λy. λz. λxy. transp(x, y' _. (_ :Ω y' ~[A] z) -> x ~[A] z, λw. w, y, xy)
     -- in
+    let castrefl : (A :U U) -> (t :U A) -> t ~ cast(A, A, refl A, t) =
+      λA. λt. refl t
+    in
     let cast_compose : (A :U U) -> (B :U U) -> (C :U U)
-                    -> (AB :Ω A ~[U] B) -> (BC :Ω B ~[U] C) -> (AC :Ω A ~[U] C)
+                    -> (AB :Ω A ~[U] B) -> (BC :Ω B ~[U] C)
                     -> (x :U A)
-                    -> cast(A, C, AC, x) ~[C] cast(B, C, BC, cast(A, B, AB, x)) =
-      λA. λB. λC. λAB. λBC. λAC. λx.
+                    -> cast(A, C, trans(A, B, C, AB, BC), x) ~[C] cast(B, C, BC, cast(A, B, AB, x)) =
+      λA. λB. λC. λAB. λBC. λx.
         transp(B, B' BB'. cast(A, B', trans(A, B, B', AB, BB'), x) ~[B'] cast(B, B', BB', cast(A, B, AB, x)),
-               castrefl(B, cast(A, B, AB, x)), C, BC)
+               castrefl B (cast(A, B, AB, x)), C, BC)
     in
 
     let R : (_ :U ℕ) -> (_ :U ℕ) -> Ω =
@@ -328,7 +331,7 @@ tm16 =
         let pres : (x :U ℕ) -> (y :U ℕ) -> presT x y =
           λx. λy. rec(x'. presT x' y,
                         rec(y'. presT 0 y',
-                            λ_. castrefl(B true, t),
+                            λ_. castrefl (B true) t,
                             l _. λw. ⊥-elim(presTRhs 0 (S l) w, w),
                             y),
                       k _.
@@ -337,7 +340,6 @@ tm16 =
                             l _. λ_. cast_compose (B false) (B (π (S l))) (B (π (S k)))
                                                         (congB (S 0) (S l) *)
                                                         (congB (S l) (S k) *)
-                                                        (congB (S 0) (S k) *)
                                                         f,
                             y),
                       x)
@@ -353,13 +355,16 @@ tm16 =
 tm17 :: String
 tm17 =
   [r|
+    let castrefl : (A :U U) -> (t :U A) -> t ~ cast(A, A, refl A, t) =
+      λA. λt. refl t
+    in
     let cast_compose : (A :U U) -> (B :U U) -> (C :U U)
-                    -> (AB :Ω A ~[U] B) -> (BC :Ω B ~[U] C) -> (AC :Ω A ~[U] C)
+                    -> (AB :Ω A ~[U] B) -> (BC :Ω B ~[U] C)
                     -> (x :U A)
-                    -> cast(A, C, AC, x) ~[C] cast(B, C, BC, cast(A, B, AB, x)) =
-      λA. λB. λC. λAB. λBC. λAC. λx.
+                    -> cast(A, C, trans(A, B, C, AB, BC), x) ~[C] cast(B, C, BC, cast(A, B, AB, x)) =
+      λA. λB. λC. λAB. λBC. λx.
         transp(B, B' BB'. cast(A, B', trans(A, B, B', AB, BB'), x) ~[B'] cast(B, B', BB', cast(A, B, AB, x)),
-               castrefl(B, cast(A, B, AB, x)), C, BC)
+               castrefl B (cast(A, B, AB, x)), C, BC)
     in
 
     let R : (_ :U ℕ) -> (_ :U ℕ) -> Ω =
@@ -420,7 +425,7 @@ tm17 =
         let pres : (x :U ℕ) -> (y :U ℕ) -> presT x y =
           λx. λy. rec(x'. presT x' y,
                         rec(y'. presT 0 y',
-                            λ_. castrefl(B true, t),
+                            λ_. castrefl (B true) t,
                             l _. λw. ⊥-elim(presTRhs 0 (S l) w, w),
                             y),
                       k _.
@@ -429,7 +434,6 @@ tm17 =
                             l _. λ_. cast_compose (B false) (B (π (S l))) (B (π (S k)))
                                                         (congB (S 0) (S l) *)
                                                         (congB (S l) (S k) *)
-                                                        (congB (S 0) (S k) *)
                                                         f,
                             y),
                       x)
