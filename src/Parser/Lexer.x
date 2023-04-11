@@ -54,7 +54,6 @@ tokens :-
        "ap"                     { keyword KWAp }
        "transp"                 { keyword KWTransp }
        "cast"                   { keyword KWCast }
-       "castrefl"               { keyword KWCastRefl }
        "Σ"                      { symbol SymSigma }
        "×"                      { symbol SymTimes }
        ";"                      { symbol SymSemiColon }
@@ -120,7 +119,6 @@ data Token
   | KWAp
   | KWTransp
   | KWCast
-  | KWCastRefl
   | SymSigma
   | SymTimes
   | SymSemiColon
