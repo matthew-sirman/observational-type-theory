@@ -510,15 +510,18 @@ infixl 8 $$
 ($$) :: MonadEvaluator m => Val Ix -> VElim Ix -> m (Val Ix)
 (VLambda _ c) $$ (VApp u) = app' c u
 (VFixedPoint @_ @n @m muF g f ps x c t as) $$ (VApp u) =
-  case eqNat @n @m of
-    Just E.Refl -> do
+  case (eqNat @n @m, u) of
+    -- Only reduce a fixed point [(fix f) ps a => f (fix f) ps a] when
+    -- [a] is a normal form; i.e. a constructor. This avoids the risk of
+    -- infinitely looping.
+    (Just E.Refl, VCons {}) -> do
       let t_muF = appOne t muF
           fix_f = VFixedPoint muF g f ps x c t V.Nil
           t_muF_fix_f = appOne t_muF fix_f
       t_muF_fix_f_ps <- appVector @('S 'Z) t_muF_fix_f as
       let t_muF_fix_f_ps_u = appOne t_muF_fix_f_ps u
       app' t_muF_fix_f_ps_u
-    Nothing -> pure (VFixedPoint muF g f ps x c t (as V.:|> u))
+    _ -> pure (VFixedPoint muF g f ps x c t (as V.:|> u))
 (VMu @_ @n @m f t xs cs as) $$ (VApp a) = pure (VMu @Ix @n @('S m) f t xs cs (as V.:|> a))
 VZero $$ (VNElim _ _ t0 _ _ _) = pure t0
 (VSucc n) $$ elim@(VNElim _ _ _ _ _ ts) = app' ts n =<< n $$ elim
@@ -1731,9 +1734,9 @@ infer gamma (R _ (FixedPointF i@(R pos _) g f ps x c t)) = do
       let vg = VVar (lvl gamma)
           vpsC = zipWith (\x _ -> VVar x) [lvl gamma + 1 ..] ps
       vg_ps <- foldlM ($$) vg (map VApp vpsC)
-      let gammaC = gamma & bindR g vmuFty & bindAll (zip ps argTypes) & bindR x vg_ps
+      let gammaC = gamma & bindR g vmuFty & bindAll (zip (reverse ps) argTypes) & bindR x vg_ps
       (c, s) <- checkType gammaC c
-      fty <- buildFType (zip ps argTypes) (env (gamma & bindR g vmuFty)) vg c
+      fty <- buildFType (zip ps (reverse argTypes)) (env (gamma & bindR g vmuFty)) vg c
       -- In type checking the body, there is one additional argument (the recursive function [f])
       -- preceding the parameters. Therefore, we shift their semantic values by one
       let vpsT = zipWith (\x _ -> VVar x) [lvl gamma + 2 ..] ps
@@ -1741,9 +1744,9 @@ infer gamma (R _ (FixedPointF i@(R pos _) g f ps x c t)) = do
       f_lift_g_ps <- foldlM ($$) f_lift_g (map VApp vpsT)
       let vx = VVar (lvl gamma + fromIntegral (length ps) + 2)
       c_f_lift_g_ps_x <- eval (env gamma :> (Bound, f_lift_g) ++:> map (Bound,) vpsT :> (Bound, vx)) c
-      let gammaT = gamma & bindR g vmuFty & bind f s fty & bindAll (zip ps argTypes) & bindR x f_lift_g_ps
+      let gammaT = gamma & bindR g vmuFty & bind f s fty & bindAll (zip (reverse ps) argTypes) & bindR x f_lift_g_ps
       t <- check gammaT t c_f_lift_g_ps_x
-      fixTy <- buildFType (zip ps argTypes) (env gamma :> (Bound, vmuF)) vmuF c
+      fixTy <- buildFType (zip ps (reverse argTypes)) (env gamma :> (Bound, vmuF)) vmuF c
       pure (FixedPoint muF g f ps x c t, fixTy, s)
     _ -> do
       vmuFTS <- ppVal gamma vmuF
@@ -1761,7 +1764,7 @@ infer gamma (R _ (FixedPointF i@(R pos _) g f ps x c t)) = do
         buildFType'
           :: MonadEvaluator m => [Val Ix] -> [(Binder, (Relevance, VTy Ix))] -> m (VTy Ix)
         buildFType' vps [] = do
-          xty <- foldlM ($$) vg (map VApp vps)
+          xty <- foldrM (flip ($$)) vg (map VApp vps)
           VPi Relevant x xty <$> makeFnClosure' (\vx -> eval (env ++:> map (Bound,) vps :> (Bound, vx)) c)
         buildFType' vps ((p, (s, a)) : ps) =
           VPi s p a <$> makeFnClosure' (\vp -> buildFType' (vps :> vp) ps)
@@ -1773,7 +1776,7 @@ infer gamma (R _ (MuF f fty@(R pos _) xs cs)) = do
   vfty <- eval (env gamma) fty
   argTypes <- checkTypeFamily gamma pos vfty
   unless (length argTypes == length xs) (throw (InductiveTypeIncorrectArgumentCount pos))
-  let gamma' = gamma & bindR f vfty & bindAll (zip xs argTypes)
+  let gamma' = gamma & bindR f vfty & bindAll (zip xs (reverse argTypes))
   cs <- mapM (\(c, b) -> (c,) <$> check gamma' b (VU Relevant)) cs
   pure (Mu f fty xs cs, vfty, Relevant)
 infer gamma (R _ (LetF x a t u)) = do
