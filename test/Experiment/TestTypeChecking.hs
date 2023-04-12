@@ -6,6 +6,7 @@
 module Experiment.TestTypeChecking where
 
 import Error
+import Parser.Lexer
 import Parser.Parser
 import Syntax
 import TypeChecker
@@ -713,6 +714,12 @@ tm35 =
     foldr _ _ 0 (λ_. λn. S n) _ (generate _ (λn. n) (S (S (S 0))))
   |]
 
+tm36 :: String
+tm36 =
+  [r|
+    let _⊢_∶_ : ℕ → ℕ → ℕ → ℕ = λ_. λ_. λ_. 0 in 0 ⊢ (S 0) ∶ (S (S 0))
+  |]
+
 test :: String -> IO ()
 test input = do
   (result, mctx) <-
@@ -755,3 +762,10 @@ test input = do
        in do
             lift (printDiagnostic stdout True True 4 defaultStyle diagnostic')
             throw ()
+
+lexAll :: Alex [Token]
+lexAll = do
+  next <- alexMonadScan
+  case syntax next of
+    TokEOF -> pure []
+    t -> (t :) <$> lexAll

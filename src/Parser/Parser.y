@@ -11,6 +11,7 @@ import Syntax
 import Control.Monad.State
 import Control.Monad.Except
 import Data.Fix (Fix (..))
+import Data.Bifunctor (bimap)
 import qualified Error.Diagnose as Err
 
 }
@@ -123,8 +124,7 @@ term :: { Raw }
   | apps                                                            { $1 }
 
 apps :: { Raw }
-  : apps atom                                                       { rloc (AppF $1 $2) $1 $> }
-  | S atom                                                          { rloc (SuccF $2) $1 $> }
+  : S atom                                                          { rloc (SuccF $2) $1 $> }
   | rec '(' binder '.' exp ',' exp ','
             binder binder '.' exp ',' exp ')'                       { rloc (NElimF $3 $5 $7 $9 $10 $12 $14) $1 $> }
   | fst atom                                                        { rloc (FstF () $2) $1 $> }
@@ -156,7 +156,12 @@ apps :: { Raw }
   | Box atom                                                        { rloc (BoxF $2) $1 $> }
   | Diamond atom                                                    { rloc (BoxProofF $2) $1 $> }
   | Boxelim '(' exp ')'                                             { rloc (BoxElimF $3) $1 $> }
-  | atom                                                            { $1 }
+  | appsList                                                        {% constructApps $1 }
+
+appsList :: { Loc ([Raw], Raw) }
+appsList
+  : appsList atom                                                   { loc (fst (syntax $1) :> snd (syntax $1), $2) $1 $> }
+  | atom                                                            { loc ([], $1) $1 $> }
 
 atom :: { Raw }
   : var                                                             { rloc (VarF (syntax $1)) $1 $> }
@@ -194,20 +199,23 @@ constructors :: { [(Name, Raw)] }
   | cons ':' exp ';' constructors                                   { (syntax $1, $3) : $5 }
 
 binder :: { Binder }
-  : var                                                             { Name (syntax $1) }
+  : var                                                             {% addComposite (syntax $1) >>
+                                                                       pure (Name (syntax $1)) }
   | '_'                                                             { Hole }
 
 {
 
-type Parser a = StateT AlexState (Except ParseError) a
+type CompositeContext = [([Binder], Name, Int)]
+
+type Parser a = StateT (AlexState, CompositeContext) (Except ParseError) a
 
 liftAlex :: forall a. Alex a -> Parser  a
 liftAlex alex =
-  StateT (boxError . unAlex alex)
+  StateT (boxError . bimap (unAlex alex) id)
   where
-    boxError :: Either String (AlexState, a) -> Except ParseError (a, AlexState)
-    boxError (Left msg) = throwError (LexerError msg)
-    boxError (Right (s, a)) = pure (a, s)
+    boxError :: (Either String (AlexState, a), CompositeContext) -> Except ParseError (a, (AlexState, CompositeContext))
+    boxError ((Left msg), _) = throwError (LexerError msg)
+    boxError ((Right (s, a)), ctx) = pure (a, (s, ctx))
 
 class Located a where
   projectLoc :: a -> Err.Position
@@ -239,6 +247,55 @@ uloc (R _ e) = rloc e
 mkFixedPoint :: Raw -> Binder -> Binder -> ([Binder], Binder) -> Raw -> Raw -> TermF () () Name Raw
 mkFixedPoint i g f (ps, x) c t = FixedPointF i g f ps x c t
 
+addComposite :: Name -> Parser ()
+addComposite x = do
+  let (bs, size) = split x
+  case bs of
+    -- If the name is not a composite mixfix symbol, do nothing special
+    [Name _] -> pure ()
+    _ -> modify (bimap id ((bs, x, size) :))
+  where
+    split :: Name -> ([Binder], Int)
+    split [] = ([], 0)
+    split ('_' : cs) = bimap (Hole :) (+ 1) (split cs)
+    split (c : cs) =
+      case split cs of
+        ([], _) -> ([Name [c]], 1)
+        (Hole : rest, n) -> (Name [c] : Hole : rest, n + 1)
+        (Name name : rest, n) -> (Name (c : name) : rest, n)
+
+constructApps :: Loc ([Raw], Raw) -> Parser Raw
+-- short circuit trivial case to avoid unnecessary work
+constructApps (L _ ([], t)) = pure t
+constructApps apps@(L _ tms) = do
+  patterns <- gets snd
+  pure (checkPatterns patterns tms)
+  where
+    checkPatterns :: [([Binder], Name, Int)] -> ([Raw], Raw) -> Raw
+    checkPatterns [] tms = mkApps tms
+    checkPatterns ((pat, name, size) : ps) tms@(ts, t)
+      | size /= length ts + 1 = checkPatterns ps tms
+      | otherwise =
+        case matches name (zip (reverse pat) (ts :> t)) of
+          Just tm -> tm
+          Nothing -> checkPatterns ps tms
+
+    matches :: Name -> [(Binder, Raw)] -> Maybe Raw
+    matches name [] = Just (rloc (VarF name) apps apps)
+    matches name (rest :> (Hole, t)) =
+      case matches name rest of
+        Nothing -> Nothing
+        Just rest -> Just (rloc (AppF rest t) rest t)
+    matches name (rest :> (Name x, R _ (VarF x')))
+      | x == x' = matches name rest
+    matches _ _ = Nothing
+
+    mkApps :: ([Raw], Raw) -> Raw
+    mkApps ([], t) = t
+    mkApps (ts :> t', t) =
+      let ts_app_t' = mkApps (ts, t')
+       in rloc (AppF ts_app_t' t) ts_app_t' t
+
 parseError :: Loc Token -> Parser a
 parseError (L _ TokEOF) = do
   ((AlexPn _ line col), _, _, input) <- liftAlex alexGetInput
@@ -253,7 +310,7 @@ lexer continuation = do
   continuation nextToken
 
 parse :: String -> Either ParseError Raw
-parse input = runExcept (evalStateT parser initState)
+parse input = runExcept (evalStateT parser (initState, []))
   where
     initState :: AlexState
     initState =
