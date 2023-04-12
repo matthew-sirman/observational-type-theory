@@ -336,7 +336,8 @@ cast (VPi _ _ a b) (VPi _ x' a' b') e f = do
   VLambda x' <$> makeFnClosure' cast_b_b'
 cast (VSigma _ a b) (VSigma _ a' b') e (VPair t u) = do
   t' <- cast a a' (PropFst $$$ e) t
-  u' <- bindM4 cast (app' b t) (app' b' t') (pure ((\e -> App (PropSnd e) (Var 0)) $$$ e)) (pure u)
+  -- TODO: this proof should actually be [snd e t] but as of now there is no way to quote [t]
+  u' <- bindM4 cast (app' b t) (app' b' t') (pure (PropSnd $$$ e)) (pure u)
   pure (VPair t' u')
 cast a@(VSigma {}) b@(VSigma {}) e p = do
   t <- p $$ VFst
