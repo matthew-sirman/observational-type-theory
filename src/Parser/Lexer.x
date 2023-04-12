@@ -8,6 +8,12 @@ import Error.Diagnose.Position(Position(..))
 
 %wrapper "monad"
 
+$varchars = $printable # [\( \) \[ \] \. \; \~ \=] # $white
+$start = $varchars # [\\ λ \: → \, \| μ ▢ ◇ \<]
+$end = $varchars # [\: → \, \| \>]
+
+@var = [^ ~$start ~$end] | $start $varchars* $end
+
 tokens :-
        $white+                  ;
        "--".*                   ;
@@ -82,8 +88,8 @@ tokens :-
        "in"                     { keyword KWIn}
        "_"                      { symbol TokHole }
 
-       \'[a-z A-Z 0-9 \_ \']+   { identifier TokCons }
-       [a-z A-Z 0-9 \_ \']+     { identifier TokName }
+       \'@var                   { identifier TokCons }
+       @var                     { identifier TokName }
 {
 
 data Token
