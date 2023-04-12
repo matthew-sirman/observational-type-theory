@@ -332,11 +332,11 @@ cast (VU s) (VU s') _ a
 cast (VPi _ _ a b) (VPi _ x' a' b') e f = do
   let cast_b_b' va' = do
         va <- cast a' a (PropFst $$$ e) va'
-        bindM4 cast (app' b va) (app' b' va') (pure (PropSnd $$$ e)) (f $$ VApp va)
+        bindM4 cast (app' b va) (app' b' va') (pure ((\e -> App (PropSnd e) (Var 0)) $$$ e)) (f $$ VApp va)
   VLambda x' <$> makeFnClosure' cast_b_b'
 cast (VSigma _ a b) (VSigma _ a' b') e (VPair t u) = do
   t' <- cast a a' (PropFst $$$ e) t
-  u' <- bindM4 cast (app' b t) (app' b' t') (pure (PropSnd $$$ e)) (pure u)
+  u' <- bindM4 cast (app' b t) (app' b' t') (pure ((\e -> App (PropSnd e) (Var 0)) $$$ e)) (pure u)
   pure (VPair t' u')
 cast a@(VSigma {}) b@(VSigma {}) e p = do
   t <- p $$ VFst
