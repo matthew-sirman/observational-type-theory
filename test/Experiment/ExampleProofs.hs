@@ -121,30 +121,41 @@ stlcInterpreter =
         ; 'Function : Ty × Ty
         ]
     in
-    let Context : U =
+    let 1 : Type = 'Unit <*> in
+    let _✶_ : Type → Type → Type =
+      λt. λu. 'Product (t; u)
+    in
+    let _⇒_ : Type → Type → Type =
+      λdom. λcod. 'Function (dom; cod)
+    in
+    let 𝔽↓T : U =
       μCtx : U. λ. ['Empty : [⊤]; 'Extend : (Ctx × Type)]
     in
-    let Ix : Type → Context → U =
-      μIx : Type → Context → U. λT G.
-        [ 'Ix0 : Σ(G' : Context). [G ~[Context] 'Extend (G'; T)]
-        ; 'IxS : Σ(T' : Type). Σ(G' : Context). [G ~[Context] 'Extend (G'; T')] × (Ix T G')
+    let · : 𝔽↓T = 'Empty <*> in
+    let _∷_ : 𝔽↓T → Type -> 𝔽↓T =
+      λΓ. λτ. 'Extend (Γ; τ)
+    in
+    let Ix : Type → 𝔽↓T → U =
+      μIx : Type → 𝔽↓T → U. λτ Γ.
+        [ 'Ix0 : Σ(Γ' : 𝔽↓T). [Γ ~ Γ' ∷ τ]
+        ; 'IxS : Σ(τ' : Type). Σ(Γ' : 𝔽↓T). [Γ ~ Γ' ∷ τ'] × (Ix τ Γ')
         ]
     in
-    let Renaming : (Context × Context) → U =
+    let 𝔽↓̃T : (𝔽↓T × 𝔽↓T) → U =
       λCs.
-        let Delta : Context = fst Cs in
-        let Gamma : Context = snd Cs in
-        (T :U Type) → Ix T Delta → Ix T Gamma
+        let Δ : 𝔽↓T = fst Cs in
+        let Γ : 𝔽↓T = snd Cs in
+        (τ :U Type) → Ix τ Δ → Ix τ Γ
     in
-    let Term : Type → Context → U =
-      μTm : Type → Context → U. λT G.
-        [ 'Var : Ix T G
-        ; 'One : [T ~[Type] 'Unit <*>]
-        ; 'Pair : Σ(t1 : Type). Σ(t2 : Type). (Tm t1 G × Tm t2 G) × [T ~[Type] 'Product (t1; t2)]
-        ; 'Fst : Σ(t2 : Type). Tm ('Product (T; t2)) G
-        ; 'Snd : Σ(t1 : Type). Tm ('Product (t1; T)) G
-        ; 'Lambda : Σ(dom : Type). Σ(cod : Type). Tm cod ('Extend (G; dom)) × [T ~[Type] 'Function (dom; cod)]
-        ; 'App : Σ(dom : Type). Tm ('Function (dom; T)) G × Tm dom G
+    let Term : Type → 𝔽↓T → U =
+      μTm : Type → 𝔽↓T → U. λτ Γ.
+        [ 'Var : Ix τ Γ
+        ; 'One : [τ ~ 1]
+        ; 'Pair : Σ(τ₁ : Type). Σ(τ₂ : Type). (Tm τ₁ Γ × Tm τ₂ Γ) × [τ ~ τ₁ ✶ τ₂]
+        ; 'Fst : Σ(τ₂ : Type). Tm (τ ✶ τ₂) Γ
+        ; 'Snd : Σ(τ₁ : Type). Tm (τ₁ ✶ τ) Γ
+        ; 'Lambda : Σ(τ₁ : Type). Σ(τ₂ : Type). Tm τ₂ (Γ ∷ τ₁) × [τ ~ τ₁ ⇒ τ₂]
+        ; 'App : Σ(τ₁ : Type). Tm (τ₁ ⇒ τ) Γ × Tm τ₁ Γ
         ]
     in
     -- let Vec : U → ℕ → U =
@@ -196,7 +207,7 @@ stlcInterpreter =
             let G' : Context = fst x0 in
             let extension : G ~[Context] 'Extend (G'; T) = ▢-elim(snd x0) in
             -- Needs better casting for fixed points.
-            fst (cast(Env G D, Env ('Extend (G'; T)) D, ?, env))
+            fst (cast(Env G D, Env ('Extend (G'; T)) D, 0, env))
           -- | 'IxS xS →
           --   let G' : Context = fst (snd xS) in
           --   let ix' : I T G' = snd (snd (snd xS)) in
@@ -262,6 +273,31 @@ stlcInterpreter =
     -- in
     *
   |]
+
+{-
+let Term : Type → 𝔽↓T → U =
+  μTm : Type → 𝔽↓T → U. λτ Γ.
+    [ 'Var : Ix τ Γ                                                   indexed (τ ~ τ), (Γ ~ Γ)
+    ; 'One : [τ ~ 1]                                                  indexed (τ ~ 1), (Γ ~ Γ)
+    ; 'Pair : (x : Σ(τ₁ : Type). Σ(τ₂ : Type). (Tm τ₁ Γ × Tm τ₂ Γ))   indexed (τ ~ (fst x) ✶ (fst (snd x))), (Γ ~ Γ)
+    ; 'Fst : Σ(τ₂ : Type). Tm (τ ✶ τ₂) Γ                              indexed (τ ~ τ), (Γ ~ Γ)
+    ; 'Snd : Σ(τ₁ : Type). Tm (τ₁ ✶ τ) Γ                              indexed (τ ~ τ), (Γ ~ Γ)
+    ; 'Lambda : (x : Σ(τ₁ : Type). Σ(τ₂ : Type). Tm τ₂ (Γ ∷ τ₁))      indexed  (τ ~ (fst x) ⇒ (fst (snd τ₂))), (Γ ~ Γ)
+    ; 'App : Σ(τ₁ : Type). Tm (τ₁ ⇒ τ) Γ × Tm τ₁ Γ                    indexed (τ ~ τ), (Γ ~ Γ)
+    ]
+in
+...
+
+'Pair((A; (B; (t; u))), refl (A ✶ B), *)
+
+\| 'Pair (x, pτ, pΓ) → ...
+
+a ~ S m
+a ~ b
+
+cast(I a₁ ... aₙ, I b₁ ... bₙ, e, 'C(d, p₁, ..., pₙ)) ≡
+  'C(d, (fst e)⁻¹ ∘ p₁, (fst (snd e))⁻¹ ∘ p₂, ..., (fst (sndⁿ⁻¹ e)⁻¹ ∘ pₙ)
+-}
 
 test :: String -> IO ()
 test = testDebug False

@@ -707,8 +707,6 @@ tm35 =
     -- map _ [⊤] (λx. <*>) _ (generate _ (λn. n) (S (S 0)))
     foldr _ _ 0 (λ_. λn. S n) _ (generate _ (λn. n) (S (S (S 0))))
   |]
-<<<<<<< HEAD
-=======
 
 tm36 :: String
 tm36 =
@@ -765,4 +763,3 @@ lexAll = do
   case syntax next of
     TokEOF -> pure []
     t -> (t :) <$> lexAll
->>>>>>> develop
