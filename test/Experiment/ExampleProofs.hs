@@ -164,20 +164,20 @@ stlcInterpreter =
     let Form : U =
       μ_ : U. λ. ['Ne : [⊤]; 'Nf : [⊤]]
     in
-    let Ne : Form = 'Ne <*> in
-    let Nf : Form = 'Nf <*> in
+    let ℳ : Form = 'Ne <*> in
+    let 𝒩 : Form = 'Nf <*> in
     let Val : Form → Type → Context → U =
-      μVal : Form → Type → Context → U. λf T G.
-        [ 'VVar : [f ~ Ne] × Ix T G
-        ; 'VOne : [f ~ Nf] × [T ~[Type] 'Unit <*>]
-        ; 'VPair : [f ~ Nf] × (Σ(t1 : Type). Σ(t2 : Type). (Val Nf t1 G × Val Nf t2 G) × [T ~[Type] 'Product (t1; t2)])
-        ; 'VFst : [f ~ Ne] × (Σ(t2 : Type). Val Ne ('Product (T; t2)) G)
-        ; 'VSnd : [f ~ Ne] × (Σ(t1 : Type). Val Ne ('Product (t1; T)) G)
-        ; 'VLambda : [f ~ Nf] × (Σ(dom : Type). Σ(cod : Type). Val Nf cod ('Extend (G; dom)) × [T ~[Type] 'Function (dom; cod)])
-        ; 'VApp : [f ~ Ne] × (Σ(dom : Type). Val Ne ('Function (dom; T)) G × Val Nf dom G)
+      μVal : Form → Type → 𝔽↓T → U. λf τ Γ.
+        [ 'VVar : [f ~ ℳ] × Ix τ Γ
+        ; 'VOne : [f ~ 𝒩] × [τ ~ 1]
+        ; 'VPair : [f ~ 𝒩] × (Σ(τ₁ : Type). Σ(τ₂ : Type). (Val 𝒩 τ₁ Γ × Val 𝒩 τ₂ Γ) × [τ ~ τ₁ ✶ τ₂])
+        ; 'VFst : [f ~ ℳ] × (Σ(τ₂ : Type). Val ℳ (τ ✶ τ₂) Γ)
+        ; 'VSnd : [f ~ ℳ] × (Σ(τ₁ : Type). Val ℳ (τ₁ ✶ τ) Γ)
+        ; 'VLambda : [f ~ 𝒩] × (Σ(τ₁ : Type). Σ(τ₂ : Type). Val 𝒩 τ₂ (Γ ∷ τ₁) × [τ ~ τ₁ ⇒ τ₂])
+        ; 'VApp : [f ~ ℳ] × (Σ(τ₁ : Type). Val ℳ (τ₁ ⇒ τ) Γ × Val 𝒩 τ₁ Γ)
         ]
     in
-    let SemTy : Type → Context → U =
+    let ⟦_⟧_ : Type → Context → U =
       fix [Type as Ty] SemTy ty : Context → U = λG.
         match ty as _ return U with
         | 'Unit _ → [⊤]
