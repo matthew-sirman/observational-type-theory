@@ -37,7 +37,7 @@ data ConversionError
   | ConversionFailure TermString TermString Position
   | RigidSpineMismatch (Maybe TermString) (Maybe TermString) Position
   | FixedPointsInequalParameterSize Int Int Position
-  | InductiveTypesInequalParameterSize Int Int Position
+  | InductiveTypesInequalParameterCount Int Int Position
   | ConstructorMismatch Name Name Position
 
 instance Reportable ConversionError where
@@ -67,7 +67,7 @@ instance Reportable ConversionError where
             ++ show m
             ++ "] cannot be definitionally equal."
      in createError msg [(pos, ctx)]
-  report (InductiveTypesInequalParameterSize n m pos) =
+  report (InductiveTypesInequalParameterCount n m pos) =
     let msg = "Type conversion failed."
         ctx =
           "Inductive types with different numbers of parameters ["

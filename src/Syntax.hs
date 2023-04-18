@@ -252,8 +252,8 @@ data TermF proj meta v t
   | BoxF t
   | ConsF Name t
   | MatchF t Binder t [(Name, Binder, t)]
-  | FixedPointF t Binder Binder [Binder] Binder t t
-  | MuF Binder t [Binder] [(Name, t)]
+  | FixedPointF t Binder Binder Binder Binder t t
+  | MuF Binder t Binder [(Name, t)]
   | -- Annotations
     LetF Binder t t t
   | AnnotationF t t
@@ -423,11 +423,11 @@ pattern Cons c t = Fix (ConsF c t)
 pattern Match :: Term v -> Binder -> Type v -> [(Name, Binder, Term v)] -> Term v
 pattern Match t x p bs = Fix (MatchF t x p bs)
 
-pattern FixedPoint :: Type v -> Binder -> Binder -> [Binder] -> Binder -> Type v -> Term v -> Term v
-pattern FixedPoint i g f ps x c t = Fix (FixedPointF i g f ps x c t)
+pattern FixedPoint :: Type v -> Binder -> Binder -> Binder -> Binder -> Type v -> Term v -> Term v
+pattern FixedPoint i g f p x c t = Fix (FixedPointF i g f p x c t)
 
-pattern Mu :: Binder -> Type v -> [Binder] -> [(Name, Type v)] -> Type v
-pattern Mu f t xs cs = Fix (MuF f t xs cs)
+pattern Mu :: Binder -> Type v -> Binder -> [(Name, Type v)] -> Type v
+pattern Mu f t x cs = Fix (MuF f t x cs)
 
 pattern Let :: Binder -> Type v -> Term v -> Term v -> Term v
 pattern Let x a t u = Fix (LetF x a t u)
@@ -526,8 +526,8 @@ instance Functor (TermF p m v) where
   fmap f (BoxF a) = BoxF (f a)
   fmap f (ConsF c t) = ConsF c (f t)
   fmap f (MatchF t x p bs) = MatchF (f t) x (f p) (fmap (fmap f) bs)
-  fmap f (FixedPointF i g f' ps x c t) = FixedPointF (f i) g f' ps x (f c) (f t)
-  fmap f (MuF g t xs cs) = MuF g (f t) xs (fmap (fmap f) cs)
+  fmap f (FixedPointF i g f' p x c t) = FixedPointF (f i) g f' p x (f c) (f t)
+  fmap f (MuF g t x cs) = MuF g (f t) x (fmap (fmap f) cs)
   fmap f (LetF x a t u) = LetF x (f a) (f t) (f u)
   fmap f (AnnotationF t a) = AnnotationF (f t) (f a)
   fmap _ (MetaF m) = MetaF m
@@ -620,8 +620,8 @@ instance Traversable (TermF p m v) where
   traverse f (BoxF a) = BoxF <$> f a
   traverse f (ConsF c t) = ConsF c <$> f t
   traverse f (MatchF t x p bs) = MatchF <$> f t <*> pure x <*> f p <*> traverse (\(c, x, t) -> (c,x,) <$> f t) bs
-  traverse f (FixedPointF i g f' ps x c t) = FixedPointF <$> f i <*> pure g <*> pure f' <*> pure ps <*> pure x <*> f c <*> f t
-  traverse f (MuF g t xs cs) = MuF g <$> f t <*> pure xs <*> traverse (\(c, b) -> (c,) <$> f b) cs
+  traverse f (FixedPointF i g f' p x c t) = FixedPointF <$> f i <*> pure g <*> pure f' <*> pure p <*> pure x <*> f c <*> f t
+  traverse f (MuF g t x cs) = MuF g <$> f t <*> pure x <*> traverse (\(c, b) -> (c,) <$> f b) cs
   traverse f (LetF x a t u) = LetF x <$> f a <*> f t <*> f u
   traverse f (AnnotationF t a) = AnnotationF <$> f t <*> f a
   traverse _ (MetaF m) = pure (MetaF m)
@@ -850,19 +850,20 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
       where
         branch :: (Name, Binder, Term v) -> ShowS
         branch (cons, x, t) = str "| " . str cons . str " " . binder x . str " -> " . go precLet (ns :> x) t
-    go prec ns (FixedPoint i g f ps x c t) =
+    go prec ns (FixedPoint i g f p x c t) =
       let i' = go precLet ns i . str " as " . binder g
-          args = sep space (fmap binder (f : ps ++ [x]))
-          c' = go precLet (ns :> g ++:> ps :> x) c
-          t' = go precLet (ns :> g :> f ++:> ps :> x) t
+          -- args = sep space (fmap binder (f : ps ++ [x]))
+          args = sep space (fmap binder [f, p, x])
+          c' = go precLet (ns :> g :> p :> x) c
+          t' = go precLet (ns :> g :> f :> p :> x) t
        in par prec precLet (str "fix [" . i' . str "] " . args . str " : " . c' . str " = " . t')
-    go prec ns (Mu f t xs cs) =
-      let xs' = str "λ" . sep space (fmap binder xs)
+    go prec ns (Mu f t x cs) =
+      let x' = str "λ" . binder x
           cs' = chr '[' . sep (str "; ") (fmap showCons cs) . chr ']'
-       in par prec precLet (str "μ" . binder f . str " : " . go precLet ns t . dot . xs' . dot . cs')
+       in par prec precLet (str "μ" . binder f . str " : " . go precLet ns t . dot . x' . dot . cs')
       where
         showCons :: (Name, Type v) -> ShowS
-        showCons (c, b) = str c . str " : " . go precLet (ns :> f ++:> xs) b
+        showCons (c, b) = str c . str " : " . go precLet (ns :> f :> x) b
     go prec ns (Let x a t u) =
       let a' = go precLet ns a
           t' = go precLet ns t
@@ -1053,8 +1054,9 @@ data Val v
   | VIdPath (VProp v)
   | VId (VTy v) (Val v) (Val v)
   | VCons Name (Val v)
-  | forall n m. (SNatI n, SNatI m) => VFixedPoint (VTy v) Binder Binder [Binder] Binder (Closure ('S ('S n)) v) (Closure ('S ('S ('S n))) v) (V.Vec m (Val v))
-  | forall n m. (SNatI n, SNatI m) => VMu Binder (VTy v) [Binder] [(Name, Closure ('S n) v)] (V.Vec m (Val v))
+  | -- A fixed point will not reduce unless applied to a constructor, so it needs a spine
+    VFixedPoint (VTy v) Binder Binder Binder Binder (Closure (A 3) v) (Closure (A 4) v) (Maybe (Val v)) (VSpine v)
+  | VMu Binder (VTy v) Binder [(Name, Closure (A 2) v)] (Maybe (Val v))
   | VBoxProof (VProp v)
   | VBox (Val v)
 

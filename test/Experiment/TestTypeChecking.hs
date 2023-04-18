@@ -600,8 +600,8 @@ tm31 =
   [r|
     -- This is possibly a naive translation of inductive equality into a uniform
     -- inductive type, but could possibly be simplified by having ['Refl : [x ~ y]]
-    let IEq : (A :U U) → A → A → U =
-      λA. μ_ : A → A → U. λx y. ['Refl : Σ(a : A). ([a ~ x] × [a ~ y])]
+    let IEq : (A :U U) → (A × A) → U =
+      λA. μ_ : (A × A) → U. λx_y. ['Refl : Σ(a : A). ([a ~ fst x_y] × [a ~ snd x_y])]
     in
     -- This implementation of J does not work, as we cannot transport observational
     -- equality into a relevant universe.
@@ -616,14 +616,14 @@ tm31 =
     --         let x_eq_y : x ~ y = trans(x, a, y, sym(a, x, a_eq_x), a_eq_y) in
     --         transp(x, z x_eq_z. C x z ('Refl (x; (<refl x>; <x_eq_z>))), f x, y, x_eq_y)
     -- in
-    IEq ℕ 0 (S 0)
+    IEq ℕ (0; (S 0))
   |]
 
 tm32 :: String
 tm32 =
   [r|
     let Nat' : U =
-      μN : U. λ. ['Zero : [⊤]; 'Succ : N]
+      (μN : [⊤] → U. λ_. ['Zero : [⊤]; 'Succ : N <*>]) <*>
     in
     (λn. 'Succ n ~[Nat'] 'Succ n : Nat' → Ω)
   |]
@@ -631,48 +631,48 @@ tm32 =
 tm33 :: String
 tm33 =
   [r|
-    let Vec : U → ℕ → ℕ → U =
-      λA. μF : ℕ → ℕ → U. λn _. ['Nil : [n ~ 0] × [⊤]; 'Cons : A × (Σ(m : ℕ). ([n ~ S m] × F m 0))]
+    let Vec : U → (ℕ × ℕ) → U =
+      λA. μF : (ℕ × ℕ) → U. λn. ['Nil : [fst n ~ 0] × [⊤]; 'Cons : A × (Σ(m : ℕ). ([fst n ~ S m] × F (m; 0)))]
     in
-    Vec ℕ 0 (S 0)
+    Vec ℕ (0; (S 0))
   |]
 
 tm34 :: String
 tm34 =
   [r|
-    let List : U → U =
-      λA. μF : U. λ. ['Nil : [⊤]; 'Cons : A × F]
+    let List : U → ⊤ → U =
+      λA. μF : ⊤ → U. λ_. ['Nil : [⊤]; 'Cons : A × F *]
     in
-    let generate : (A :U U) → (ℕ → A) → ℕ → List A =
-      λA. λf. λn. rec(_. List A, 'Nil <*>, k ls. 'Cons (f k; ls), n)
+    let generate : (A :U U) → (ℕ → A) → ℕ → List A * =
+      λA. λf. λn. rec(_. List A *, 'Nil <*>, k ls. 'Cons (f k; ls), n)
     in
-    let length : (A :U U) → List A → ℕ =
-      λA. fix [List A as G] length x : ℕ =
+    let length : (A :U U) → List A * → ℕ =
+      λA. (fix [List A as G] length _ x : ℕ =
         match x as _ return ℕ with
           | 'Nil _ → 0
           | 'Cons ls →
-            let tl : G = snd ls in
-            S (length tl)
+            let tl : G * = snd ls in
+            S (length * tl)) *
     in
-    let map : (A :U U) → (B :U U) → (A → B) → List A → List B =
-      λA. λB. λf. fix [List A as G] mapf x : List B =
-        match x as _ return List B with
+    let map : (A :U U) → (B :U U) → (A → B) → List A * → List B * =
+      λA. λB. λf. (fix [List A as G] mapf _ x : List B * =
+        match x as _ return List B * with
           | 'Nil _ → 'Nil <*>
           | 'Cons ls →
             let a : A = fst ls in
-            let tl : G = snd ls in
-            'Cons (f a; mapf tl)
+            let tl : G * = snd ls in
+            'Cons (f a; mapf * tl)) *
     in
-    let foldr : (A :U U) → (B :U U) → B → (A → B → B) → List A → B =
-      λA. λB. λnil. λcons. fix [List A as G] fold x : B =
+    let foldr : (A :U U) → (B :U U) → B → (A → B → B) → List A * → B =
+      λA. λB. λnil. λcons. (fix [List A as G] fold _ x : B =
         match x as _ return B with
           | 'Nil _ → nil
           | 'Cons ls →
             let a : A = fst ls in
-            let tl : G = snd ls in
-            cons a (fold tl)
+            let tl : G * = snd ls in
+            cons a (fold * tl)) *
     in
-    let ls : List ℕ =
+    let ls : List ℕ * =
       generate _ (λ_. 0) (S (S 0))
     in
     -- length _ ls
