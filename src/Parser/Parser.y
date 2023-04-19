@@ -99,7 +99,7 @@ exp :: { Raw }
   | let binder ':' exp '=' exp in exp                               { rloc (LetF $2 $4 $6 $8) $1 $> }
   | match exp as binder return exp with branches                    { rloc (MatchF $2 $4 $6 $8) $1 $7 }
   | fix '[' exp as binder ']' binder binder binder ':' exp '=' exp  { rloc (FixedPointF $3 $5 $7 $8 $9 $11 $13) $1 $> }
-  | mu var ':' term '.' '\\' binder '.' '[' constructors ']'        { rloc (MuF (syntax $2) $4 $7 $10) $1 $> }
+  | mu var ':' term '.' '\\' binder '.' '[' constructors ']'        { rloc (MuF () (syntax $2) $4 $7 $10) $1 $> }
   | term                                                            { $1 }
 
 term :: { Raw }
@@ -233,7 +233,7 @@ loc element start end =
          location = Err.Position (Err.begin s) (Err.end e) (Err.file s)
        }
 
-rloc :: (Located start, Located end) => TermF () () Name Raw -> start -> end -> Raw
+rloc :: (Located start, Located end) => TermF () () () Name Raw -> start -> end -> Raw
 rloc e start end = Fix (RawF (loc e start end))
 
 uloc :: (Located start, Located end) => Raw -> start -> end -> Raw

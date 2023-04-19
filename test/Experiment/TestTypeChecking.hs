@@ -733,6 +733,33 @@ tm36 =
     let _⊢_∶_ : ℕ → ℕ → ℕ → ℕ = λ_. λ_. λ_. 0 in 0 ⊢ (S 0) ∶ (S (S 0))
   |]
 
+tm37 :: String
+tm37 =
+  [r|
+    let add : ℕ → ℕ → ℕ =
+      λn. λm. rec(_. ℕ, m, _ k. S k, n)
+    in
+    let add_comm : (n :U ℕ) → (m :U ℕ) → add n m ~ add m n =
+      let zero_right_unit : (n :U ℕ) → n ~ add n 0 =
+        λn. rec(k. k ~ add k 0, refl 0, _ p. p, n)
+      in
+      let succ_dist : (n :U ℕ) → (m :U ℕ) → S (add n m) ~ add n (S m) =
+        λn. λm. rec(k. S (add k m) ~ add k (S m), refl (S m), _ p. p, n)
+      in
+      λn. λm. rec(k. add k m ~ add m k, zero_right_unit m, k p. trans(_, _, _, succ_dist k m, p), n)
+    in
+    let Vec : U → ℕ → U =
+      λA. μVecA : ℕ → U. λn.
+        [ 'Nil : ⊤ → VecA 0
+        ; 'Cons : (data :U Σ(m : ℕ). A × VecA m) → VecA (S (fst data))
+        ]
+    in
+    let flip : (A :U U) → (n :U ℕ) → (m :U ℕ) → Vec A (add n m) → Vec A (add m n) =
+      λA. λn. λm. λv. cast(Vec A (add n m), Vec A (add m n), add_comm n m, v)
+    in
+    flip ℕ 0 (S 0) ('Cons ((0; (S (S (S 0)); 'Nil (*, *))), *))
+  |]
+
 test :: String -> IO ()
 test input = do
   (result, mctx) <-
@@ -746,7 +773,7 @@ test input = do
               & catch @InferenceError showReport
           )
       )
-      emptyMetaContext
+      emptyCheckState
   case result of
     Right (t, tty, _) -> do
       putStrLn "Program:"
@@ -768,7 +795,7 @@ test input = do
       :: CouldBe e ()
       => Reportable r
       => r
-      -> ExceptT (Variant e) (StateT MetaContext IO) a
+      -> ExceptT (Variant e) (StateT CheckState IO) a
     showReport r =
       let diagnostic = addFile def "<test-file>" input
           diagnostic' = addReport diagnostic (report r)
