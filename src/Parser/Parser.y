@@ -99,7 +99,7 @@ exp :: { Raw }
   | let binder ':' exp '=' exp in exp                               { rloc (LetF $2 $4 $6 $8) $1 $> }
   | match exp as binder return exp with branches                    { rloc (MatchF $2 $4 $6 $8) $1 $7 }
   | fix '[' exp as binder ']' binder binder binder ':' exp '=' exp  { rloc (FixedPointF $3 $5 $7 $8 $9 $11 $13) $1 $> }
-  | mu binder ':' term '.' '\\' binder '.' '[' constructors ']'     { rloc (MuF $2 $4 $7 $10) $1 $> }
+  | mu var ':' term '.' '\\' binder '.' '[' constructors ']'        { rloc (MuF (syntax $2) $4 $7 $10) $1 $> }
   | term                                                            { $1 }
 
 term :: { Raw }
@@ -152,7 +152,7 @@ apps :: { Raw }
   | J '(' exp',' exp',' binder binder '.' exp','
           exp',' exp',' exp ')'                                     { rloc (JF $3 $5 $7 $8 $10 $12 $14 $16) $1 $> }
   | Id '(' exp ',' exp ',' exp ')'                                  { rloc (IdF $3 $5 $7) $1 $> }
-  | cons atom                                                       { rloc (ConsF (syntax $1) $2) $1 $> }
+  | cons '(' exp ',' exp ')'                                        { rloc (ConsF (syntax $1) $3 $5) $1 $> }
   | Box atom                                                        { rloc (BoxF $2) $1 $> }
   | Diamond atom                                                    { rloc (BoxProofF $2) $1 $> }
   | Boxelim '(' exp ')'                                             { rloc (BoxElimF $3) $1 $> }
@@ -180,14 +180,18 @@ atom :: { Raw }
   | '<' exp '>'                                                     { rloc (BoxProofF $2) $1 $> }
   | '(' exp ')'                                                     { uloc $2 $1 $> }
 
-branches :: { [(Name, Binder, Raw)] }
+branches :: { [(Name, Binder, Binder, Raw)] }
   : {-# empty #-}                                                   { [] }
-  | '|' cons binder '->' exp branches                               { (syntax $2, $3, $5) : $6 }
+  | '|' cons '(' binder ',' binder ')' '->' exp branches            { (syntax $2, $4, $6, $9) : $10 }
 
-constructors :: { [(Name, Raw)] }
+constructors :: { [(Name, RelevanceF (), Binder, Raw, Name, Raw)] }
   : {-# empty #-}                                                   { [] }
-  | cons ':' exp                                                    { [(syntax $1, $3)] }
-  | cons ':' exp ';' constructors                                   { (syntax $1, $3) : $5 }
+  | constructor                                                     { [$1] }
+  | constructor ';' constructors                                    { $1 : $3 }
+
+constructor :: { (Name, RelevanceF (), Binder, Raw, Name, Raw) }
+  : cons ':' '(' binder ':' rel exp ')' '->' var atom               { (syntax $1, syntax $6, $4, $7, syntax $10, $11) }
+  | cons ':' apps '->' var atom                                     { (syntax $1, SortHole, Hole, $3, syntax $5, $6) }
 
 binder :: { Binder }
   : var                                                             {% addComposite (syntax $1) >>

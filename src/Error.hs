@@ -36,8 +36,7 @@ data ConversionError
   = ConversionBetweenUniverses Position
   | ConversionFailure TermString TermString Position
   | RigidSpineMismatch (Maybe TermString) (Maybe TermString) Position
-  | FixedPointsInequalParameterSize Int Int Position
-  | InductiveTypesInequalParameterCount Int Int Position
+  | MatchBranchMismatch Name Name Position
   | ConstructorMismatch Name Name Position
 
 instance Reportable ConversionError where
@@ -58,23 +57,9 @@ instance Reportable ConversionError where
             (Nothing, Just b) -> "Spines must have equal length (found extra eliminator [" ++ unTS b ++ "])"
             (Just a, Just b) -> "Could not match different eliminators [" ++ unTS a ++ " ≡ " ++ unTS b ++ "]"
      in createError msg [(pos, ctx)]
-  report (FixedPointsInequalParameterSize n m pos) =
+  report (MatchBranchMismatch cons cons' pos) =
     let msg = "Type conversion failed."
-        ctx =
-          "Fixed points with different numbers of parameters ["
-            ++ show n
-            ++ " ≢ "
-            ++ show m
-            ++ "] cannot be definitionally equal."
-     in createError msg [(pos, ctx)]
-  report (InductiveTypesInequalParameterCount n m pos) =
-    let msg = "Type conversion failed."
-        ctx =
-          "Inductive types with different numbers of parameters ["
-            ++ show n
-            ++ " ≢ "
-            ++ show m
-            ++ "] cannot be definitionally equal."
+        ctx = "Match expressions must have equal constructor names; found [" ++ cons ++ " ≢ " ++ cons' ++ "]."
      in createError msg [(pos, ctx)]
   report (ConstructorMismatch cons cons' pos) =
     let msg = "Type conversion failed."
@@ -143,7 +128,7 @@ data InferenceError
   | MatchHead TermString Position
   | FixAnnotation TermString Position
   | InductiveTypeFamily TermString Position
-  | InductiveTypeIncorrectArgumentCount Position
+  | InductiveTypeConstructor Name Name Position
   | BoxElimHead TermString Position
   | InferenceFailure Position
 
@@ -222,12 +207,12 @@ instance Reportable InferenceError where
         ctx = "Expected inductive type (μF. t) in fixed point annotation, but found [" ++ unTS t ++ "]."
      in createError msg [(pos, ctx)]
   report (InductiveTypeFamily t pos) =
-    let msg = "Inductive type must be an indexed type family (x₁ : A₁) → ⋯ (xₙ : Aₙ) → U)."
-        ctx = "Expected indexed type family, but found [" ++ unTS t ++ "]."
+    let msg = "Inductive type must be a type family (A → U)."
+        ctx = "Expected proof relevant indexed type family, but found [" ++ unTS t ++ "]."
      in createError msg [(pos, ctx)]
-  report (InductiveTypeIncorrectArgumentCount pos) =
-    let msg = "Inductive type definition parameter mismatch."
-        ctx = "Parameter argument count must match size of type family parameters."
+  report (InductiveTypeConstructor f f' pos) =
+    let msg = "Inductive type constructors must construct correct type."
+        ctx = "Constructor in type [" ++ f ++ "] attempts to construct in [" ++ f' ++ "]."
      in createError msg [(pos, ctx)]
   report (BoxElimHead t pos) =
     let msg = "Expected Box (▢A) type in quotient eliminator."

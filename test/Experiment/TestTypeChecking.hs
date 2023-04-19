@@ -573,26 +573,33 @@ tm29 :: String
 tm29 =
   [r|
     let Vec : U → ℕ → U =
-      λA. μF : ℕ → U. λn. ['Nil : [n ~ 0] × [⊤]; 'Cons : A × (Σ(m : ℕ). ([n ~ S m] × F m))]
+      λA. μF : ℕ → U. λn.
+        ['Nil : ⊤ → F 0
+        ; 'Cons : (m :U Σ(m : ℕ). A × F m) → F (S (fst m))
+        ]
     in
-    ('Cons (S (S 0); (0; (<refl (S 0)>; 'Nil (<refl 0>; <*>)))) : Vec ℕ (S 0))
+    -- ('Cons (S (S 0); (0; (<refl (S 0)>; 'Nil (<refl 0>; <*>)))) : Vec ℕ (S 0))
+    ('Cons ((0; (S (S 0); 'Nil (*, *))), *) : Vec ℕ (S 0))
   |]
 
 tm30 :: String
 tm30 =
   [r|
     let Vec : U → ℕ → U =
-      λA. μF : ℕ → U. λn. ['Nil : [n ~ 0] × [⊤]; 'Cons : A × (Σ(m : ℕ). ([n ~ S m] × F m))]
+      λA. μF : ℕ → U. λn.
+        ['Nil : ⊤ → F 0
+        ; 'Cons : (m :U Σ(m : ℕ). A × F m) → F (S (fst m))
+        ]
     in
     let empty : Vec ℕ 0 =
-      'Nil (<refl 0>; <*>)
+      'Nil (*, *)
     in
     let ls : Vec ℕ (S 0) =
-      'Cons (S (S 0); (0; (<refl (S 0)>; 'Nil (<refl 0>; <*>))))
+      'Cons ((0; (S (S 0); 'Nil (*, *))), *)
     in
     match ls as _ return ℕ with
-      | 'Cons x -> fst x
-      | 'Nil _ -> 0
+      | 'Cons (x, _) -> fst x
+      | 'Nil (_, _) -> 0
   |]
 
 tm31 :: String
@@ -601,7 +608,8 @@ tm31 =
     -- This is possibly a naive translation of inductive equality into a uniform
     -- inductive type, but could possibly be simplified by having ['Refl : [x ~ y]]
     let IEq : (A :U U) → (A × A) → U =
-      λA. μ_ : (A × A) → U. λx_y. ['Refl : Σ(a : A). ([a ~ fst x_y] × [a ~ snd x_y])]
+      λA. μIEq : (A × A) → U. λx_y.
+        ['Refl : (a :U A) → IEq (a; a)]
     in
     -- This implementation of J does not work, as we cannot transport observational
     -- equality into a relevant universe.
@@ -623,16 +631,19 @@ tm32 :: String
 tm32 =
   [r|
     let Nat' : U =
-      (μN : [⊤] → U. λ_. ['Zero : [⊤]; 'Succ : N <*>]) <*>
+      (μN : [⊤] → U. λ_. ['Zero : ⊤ → N <*>; 'Succ : N <*> → N <*>]) <*>
     in
-    (λn. 'Succ n ~[Nat'] 'Succ n : Nat' → Ω)
+    (λn. 'Succ (n, *) ~[Nat'] 'Succ (n, *) : Nat' → Ω)
   |]
 
 tm33 :: String
 tm33 =
   [r|
     let Vec : U → (ℕ × ℕ) → U =
-      λA. μF : (ℕ × ℕ) → U. λn. ['Nil : [fst n ~ 0] × [⊤]; 'Cons : A × (Σ(m : ℕ). ([fst n ~ S m] × F (m; 0)))]
+      λA. μF : (ℕ × ℕ) → U. λn.
+        ['Nil : ⊤ → F (0; 0)
+        ; 'Cons : (m :U Σ(m : ℕ). A × F (m; 0)) → F (S (fst m); 0)
+        ]
     in
     Vec ℕ (0; (S 0))
   |]
@@ -640,39 +651,39 @@ tm33 =
 tm34 :: String
 tm34 =
   [r|
-    let List : U → ⊤ → U =
-      λA. μF : ⊤ → U. λ_. ['Nil : [⊤]; 'Cons : A × F *]
+    let List : U → [⊤] → U =
+      λA. μF : [⊤] → U. λ_. ['Nil : ⊤ → F <*>; 'Cons : (A × F <*>) → F <*>]
     in
-    let generate : (A :U U) → (ℕ → A) → ℕ → List A * =
-      λA. λf. λn. rec(_. List A *, 'Nil <*>, k ls. 'Cons (f k; ls), n)
+    let generate : (A :U U) → (ℕ → A) → ℕ → List A <*> =
+      λA. λf. λn. rec(_. List A <*>, 'Nil (*, *), k ls. 'Cons ((f k; ls), *), n)
     in
-    let length : (A :U U) → List A * → ℕ =
+    let length : (A :U U) → List A <*> → ℕ =
       λA. (fix [List A as G] length _ x : ℕ =
         match x as _ return ℕ with
-          | 'Nil _ → 0
-          | 'Cons ls →
-            let tl : G * = snd ls in
-            S (length * tl)) *
+          | 'Nil (_, _) → 0
+          | 'Cons (ls, _) →
+            let tl : G <*> = snd ls in
+            S (length <*> tl)) <*>
     in
-    let map : (A :U U) → (B :U U) → (A → B) → List A * → List B * =
-      λA. λB. λf. (fix [List A as G] mapf _ x : List B * =
-        match x as _ return List B * with
-          | 'Nil _ → 'Nil <*>
-          | 'Cons ls →
+    let map : (A :U U) → (B :U U) → (A → B) → List A <*> → List B <*> =
+      λA. λB. λf. (fix [List A as G] mapf _ x : List B <*> =
+        match x as _ return List B <*> with
+          | 'Nil (_, _) → 'Nil (*, *)
+          | 'Cons (ls, _) →
             let a : A = fst ls in
-            let tl : G * = snd ls in
-            'Cons (f a; mapf * tl)) *
+            let tl : G <*> = snd ls in
+            'Cons ((f a; mapf <*> tl), *)) <*>
     in
-    let foldr : (A :U U) → (B :U U) → B → (A → B → B) → List A * → B =
+    let foldr : (A :U U) → (B :U U) → B → (A → B → B) → List A <*> → B =
       λA. λB. λnil. λcons. (fix [List A as G] fold _ x : B =
         match x as _ return B with
-          | 'Nil _ → nil
-          | 'Cons ls →
+          | 'Nil (_, _) → nil
+          | 'Cons (ls, _) →
             let a : A = fst ls in
-            let tl : G * = snd ls in
-            cons a (fold * tl)) *
+            let tl : G <*> = snd ls in
+            cons a (fold <*> tl)) <*>
     in
-    let ls : List ℕ * =
+    let ls : List ℕ <*> =
       generate _ (λ_. 0) (S (S 0))
     in
     -- length _ ls
@@ -684,30 +695,32 @@ tm35 :: String
 tm35 =
   [r|
     let Vec : U → ℕ → U =
-       λA. μF : ℕ → U. λn. ['Nil : [n ~ 0]; 'Cons : A × (Σ(m : ℕ). ([n ~ S m] × F m))]
+       λA. μF : ℕ → U. λn.
+         ['Nil : ⊤ → F 0
+         ; 'Cons : (m :U Σ(m : ℕ). A × F m) → F (S (fst m))
+         ]
     in
     let generate : (A :U U) → (ℕ → A) → (n :U ℕ) → Vec A n =
-      λA. λf. λn. rec(k. Vec A k, 'Nil <refl 0>, k vs. 'Cons (f k; (k; (<refl (S k)>; vs))), n)
+      λA. λf. λn. rec(k. Vec A k, 'Nil (*, *), k vs. 'Cons ((k; (f k; vs)), refl k), n)
     in
     let map : (A :U U) → (B :U U) → (A → B) → (n :U ℕ) → Vec A n → Vec B n =
       λA. λB. λf. fix [Vec A as G] mapf n x : Vec B n =
         match x as _ return Vec B n with
-          | 'Nil pf → 'Nil pf
-          | 'Cons ls →
-            let a : A = fst ls in
-            let m : ℕ = fst (snd ls) in
-            let pf : [n ~ S m] = fst (snd (snd ls)) in
-            let tl : G m = snd (snd (snd ls)) in
-            'Cons (f a; (m; (pf; mapf m tl)))
+          | 'Nil (_, pf) → 'Nil (*, pf)
+          | 'Cons (ls, pf) →
+            let m : ℕ = fst ls in
+            let a : A = fst (snd ls) in
+            let tl : G m = snd (snd ls) in
+            'Cons ((m; (f a; mapf m tl)), pf)
     in
     let foldr : (A :U U) → (B :U U) → B → (A → B → B) → (n :U ℕ) → Vec A n → B =
       λA. λB. λnil. λcons. fix [Vec A as G] fold n x : B =
         match x as _ return B with
-          | 'Nil _ → nil
-          | 'Cons ls →
-            let a : A = fst ls in
-            let m : ℕ = fst (snd ls) in
-            let tl : G m = snd (snd (snd ls)) in
+          | 'Nil (_, _) → nil
+          | 'Cons (ls, _) →
+            let m : ℕ = fst ls in
+            let a : A = fst (snd ls) in
+            let tl : G m = snd (snd ls) in
             cons a (fold m tl)
     in
     -- map _ [⊤] (λx. <*>) _ (generate _ (λn. n) (S (S 0)))

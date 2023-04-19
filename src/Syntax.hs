@@ -250,10 +250,10 @@ data TermF proj meta v t
   | BoxProofF t
   | BoxElimF t
   | BoxF t
-  | ConsF Name t
-  | MatchF t Binder t [(Name, Binder, t)]
+  | ConsF Name t t
+  | MatchF t Binder t [(Name, Binder, Binder, t)]
   | FixedPointF t Binder Binder Binder Binder t t
-  | MuF Binder t Binder [(Name, t)]
+  | MuF Name t Binder [(Name, RelevanceF meta, Binder, t, Name, t)]
   | -- Annotations
     LetF Binder t t t
   | AnnotationF t t
@@ -417,16 +417,16 @@ pattern BoxElim t = Fix (BoxElimF t)
 pattern Box :: Type v -> Type v
 pattern Box a = Fix (BoxF a)
 
-pattern Cons :: Name -> Term v -> Term v
-pattern Cons c t = Fix (ConsF c t)
+pattern Cons :: Name -> Term v -> Term v -> Term v
+pattern Cons c t e = Fix (ConsF c t e)
 
-pattern Match :: Term v -> Binder -> Type v -> [(Name, Binder, Term v)] -> Term v
+pattern Match :: Term v -> Binder -> Type v -> [(Name, Binder, Binder, Term v)] -> Term v
 pattern Match t x p bs = Fix (MatchF t x p bs)
 
 pattern FixedPoint :: Type v -> Binder -> Binder -> Binder -> Binder -> Type v -> Term v -> Term v
 pattern FixedPoint i g f p x c t = Fix (FixedPointF i g f p x c t)
 
-pattern Mu :: Binder -> Type v -> Binder -> [(Name, Type v)] -> Type v
+pattern Mu :: Name -> Type v -> Binder -> [(Name, Relevance, Binder, Type v, Name, Type v)] -> Type v
 pattern Mu f t x cs = Fix (MuF f t x cs)
 
 pattern Let :: Binder -> Type v -> Term v -> Term v -> Term v
@@ -524,10 +524,10 @@ instance Functor (TermF p m v) where
   fmap f (BoxProofF e) = BoxProofF (f e)
   fmap f (BoxElimF t) = BoxElimF (f t)
   fmap f (BoxF a) = BoxF (f a)
-  fmap f (ConsF c t) = ConsF c (f t)
+  fmap f (ConsF c t e) = ConsF c (f t) (f e)
   fmap f (MatchF t x p bs) = MatchF (f t) x (f p) (fmap (fmap f) bs)
   fmap f (FixedPointF i g f' p x c t) = FixedPointF (f i) g f' p x (f c) (f t)
-  fmap f (MuF g t x cs) = MuF g (f t) x (fmap (fmap f) cs)
+  fmap f (MuF g t x cs) = MuF g (f t) x (fmap (\(ci, si, xi, ti, gi, ixi) -> (ci, si, xi, f ti, gi, f ixi)) cs)
   fmap f (LetF x a t u) = LetF x (f a) (f t) (f u)
   fmap f (AnnotationF t a) = AnnotationF (f t) (f a)
   fmap _ (MetaF m) = MetaF m
@@ -569,10 +569,10 @@ instance Foldable (TermF p m v) where
   foldr f e (BoxProofF t) = f t e
   foldr f e (BoxElimF t) = f t e
   foldr f e (BoxF a) = f a e
-  foldr f e (ConsF _ t) = f t e
-  foldr f e (MatchF t _ p bs) = (f t . f p) (foldr (\(_, _, b) e -> f b e) e bs)
+  foldr f e (ConsF _ t p) = (f t . f p) e
+  foldr f e (MatchF t _ p bs) = (f t . f p) (foldr (\(_, _, _, b) e -> f b e) e bs)
   foldr f e (FixedPointF i _ _ _ _ c t) = (f i . f c . f t) e
-  foldr f e (MuF _ t _ cs) = f t (foldr (\(_, b) e -> f b e) e cs)
+  foldr f e (MuF _ t _ cs) = f t (foldr (\(_, _, _, bi, _, ixi) e -> (f bi . f ixi) e) e cs)
   foldr f e (LetF _ a t u) = (f a . f t . f u) e
   foldr f e (AnnotationF t a) = (f t . f a) e
   foldr _ e (MetaF _) = e
@@ -618,10 +618,11 @@ instance Traversable (TermF p m v) where
   traverse f (BoxProofF e) = BoxProofF <$> f e
   traverse f (BoxElimF t) = BoxElimF <$> f t
   traverse f (BoxF a) = BoxF <$> f a
-  traverse f (ConsF c t) = ConsF c <$> f t
-  traverse f (MatchF t x p bs) = MatchF <$> f t <*> pure x <*> f p <*> traverse (\(c, x, t) -> (c,x,) <$> f t) bs
+  traverse f (ConsF c t e) = ConsF c <$> f t <*> f e
+  traverse f (MatchF t x p bs) = MatchF <$> f t <*> pure x <*> f p <*> traverse (\(c, x, e, t) -> (c,x,e,) <$> f t) bs
   traverse f (FixedPointF i g f' p x c t) = FixedPointF <$> f i <*> pure g <*> pure f' <*> pure p <*> pure x <*> f c <*> f t
-  traverse f (MuF g t x cs) = MuF g <$> f t <*> pure x <*> traverse (\(c, b) -> (c,) <$> f b) cs
+  traverse f (MuF g t x cs) =
+    MuF g <$> f t <*> pure x <*> traverse (\(ci, si, xi, bi, gi, ixi) -> (ci,si,xi,,gi,) <$> f bi <*> f ixi) cs
   traverse f (LetF x a t u) = LetF x <$> f a <*> f t <*> f u
   traverse f (AnnotationF t a) = AnnotationF <$> f t <*> f a
   traverse _ (MetaF m) = pure (MetaF m)
@@ -840,16 +841,18 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
       par prec precApp (str "▢-elim(" . go precLet ns t . chr ')')
     go prec ns (Box a) =
       par prec precApp (str "▢" . go precAtom ns a)
-    go prec ns (Cons c t) =
-      par prec precApp (str c . space . go precAtom ns t)
+    go prec ns (Cons c t e) =
+      par prec precApp (str c . space . showParen True (go precLet ns t . comma . go precLet ns e))
     go prec ns (Match t x p bs) =
       let t' = go precLet ns t
           p' = go precLet (ns :> x) p
           bs' = foldr ((.) . (str "\n" .) . branch) id bs
        in par prec precLet (str "match " . t' . str " as " . binder x . str " return " . p' . str " with" . bs')
       where
-        branch :: (Name, Binder, Term v) -> ShowS
-        branch (cons, x, t) = str "| " . str cons . str " " . binder x . str " -> " . go precLet (ns :> x) t
+        branch :: (Name, Binder, Binder, Term v) -> ShowS
+        branch (cons, x, e, t) =
+          let cons' = str cons . str " " . showParen True (binder x . comma . binder e)
+           in str "| " . cons' . str " -> " . go precLet (ns :> x) t
     go prec ns (FixedPoint i g f p x c t) =
       let i' = go precLet ns i . str " as " . binder g
           -- args = sep space (fmap binder (f : ps ++ [x]))
@@ -860,10 +863,17 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
     go prec ns (Mu f t x cs) =
       let x' = str "λ" . binder x
           cs' = chr '[' . sep (str "; ") (fmap showCons cs) . chr ']'
-       in par prec precLet (str "μ" . binder f . str " : " . go precLet ns t . dot . x' . dot . cs')
+       in par prec precLet (str "μ" . str f . str " : " . go precLet ns t . dot . x' . dot . cs')
       where
-        showCons :: (Name, Type v) -> ShowS
-        showCons (c, b) = str c . str " : " . go precLet (ns :> f :> x) b
+        showCons :: (Name, Relevance, Binder, Type v, Name, Type v) -> ShowS
+        showCons (ci, _, Hole, bi, gi, ixi) =
+          let bi' = go precApp (ns :> Name f :> x) bi
+              ixi' = go precAtom (ns :> Name f :> x :> Hole) ixi
+           in str ci . str " : " . bi' . str " → " . str gi . space . ixi'
+        showCons (ci, si, xi, bi, gi, ixi) =
+          let bi' = showParen True (binder xi . str " :" . shows si . space . go precLet (ns :> Name f :> x) bi)
+              ixi' = go precAtom (ns :> Name f :> x :> xi) ixi
+           in str ci . str " : " . bi' . str " → " . str gi . space . ixi'
     go prec ns (Let x a t u) =
       let a' = go precLet ns a
           t' = go precLet ns t
@@ -994,7 +1004,7 @@ data VElim v
   | VQElim Binder (Closure (A 1) v) Binder (Closure (A 1) v) Binder Binder Binder (VProp v)
   | VJ (VTy v) (Val v) Binder Binder (Closure (A 2) v) (Val v) (Val v)
   | VBoxElim
-  | VMatch Binder (Closure (A 1) v) [(Name, Binder, Closure (A 1) v)]
+  | VMatch Binder (Closure (A 1) v) [(Name, Binder, Binder, Closure (A 2) v)]
 
 showElimHead :: VElim v -> String
 showElimHead (VApp {}) = "<application>"
@@ -1053,10 +1063,10 @@ data Val v
   | VIdRefl (Val v)
   | VIdPath (VProp v)
   | VId (VTy v) (Val v) (Val v)
-  | VCons Name (Val v)
+  | VCons Name (Val v) (VProp v)
   | -- A fixed point will not reduce unless applied to a constructor, so it needs a spine
     VFixedPoint (VTy v) Binder Binder Binder Binder (Closure (A 3) v) (Closure (A 4) v) (Maybe (Val v)) (VSpine v)
-  | VMu Binder (VTy v) Binder [(Name, Closure (A 2) v)] (Maybe (Val v))
+  | VMu Name (VTy v) Binder [(Name, (Relevance, Binder, Closure (A 2) v, Closure (A 3) v))] (Maybe (Val v))
   | VBoxProof (VProp v)
   | VBox (Val v)
 
