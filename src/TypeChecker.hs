@@ -20,11 +20,8 @@ import Control.Monad.Reader
 import Control.Monad.State
 
 import Data.Fix (Fix (..))
-import Data.Foldable
 import Data.HashMap.Strict qualified as M
 import Data.IntMap qualified as IM
-import Data.Proxy
-import Data.Type.Equality qualified as E
 import Data.Type.Nat
 import Data.Variant hiding (throw)
 import Error.Diagnose
@@ -33,8 +30,8 @@ import Error
 import Syntax
 import Vector qualified as V
 
-newtype Checker e a = Checker {runChecker :: ExceptT e (State MetaContext) a}
-  deriving (Functor, Applicative, Monad, MonadState MetaContext, MonadError e)
+newtype Checker e a = Checker {runChecker :: ExceptT e (State CheckState) a}
+  deriving (Functor, Applicative, Monad, MonadState CheckState, MonadError e)
 
 type Types = [(Binder, (Relevance, VTy Ix))]
 
@@ -58,16 +55,18 @@ data SortMetaEntry
   = UnsolvedSort
   | SolvedSort Relevance
 
-data MetaContext = MetaContext
+-- Ideally, this would be split into a distinct MetaContext and CheckState.
+data CheckState = CheckState
   { _metas :: IM.IntMap MetaEntry
   , _fresh :: MetaVar
   , _sortMetas :: IM.IntMap SortMetaEntry
   , _freshSort :: MetaVar
+  , _nextTag :: Tag
   }
 
-makeLenses ''MetaContext
+makeLenses ''CheckState
 
-instance Show MetaContext where
+instance Show CheckState where
   show mctx =
     "{ "
       ++ showEntries showMeta (IM.assocs (mctx ^. metas))
@@ -97,8 +96,8 @@ instance Show MetaContext where
       showEntries f [e] = f e
       showEntries f (es :> e) = showEntries f es ++ "\n, " ++ f e
 
-emptyMetaContext :: MetaContext
-emptyMetaContext = MetaContext {_metas = IM.empty, _fresh = 0, _sortMetas = IM.empty, _freshSort = 0}
+emptyCheckState :: CheckState
+emptyCheckState = CheckState {_metas = IM.empty, _fresh = 0, _sortMetas = IM.empty, _freshSort = 0, _nextTag = 0}
 
 freshMeta :: [Binder] -> Checker (Variant e) MetaVar
 freshMeta ns = do
@@ -133,6 +132,12 @@ addSortSolution (MetaVar v) solution = do
     Just (SolvedSort _) -> pure ()
     Just UnsolvedSort -> modify (sortMetas %~ IM.insert v (SolvedSort solution))
 
+freshTag :: Checker (Variant e) Tag
+freshTag = do
+  tag <- gets (^. nextTag)
+  nextTag += 1
+  pure tag
+
 bindM2 :: Monad m => (a -> b -> m r) -> m a -> m b -> m r
 bindM2 f a b = join (liftM2 f a b)
 
@@ -142,8 +147,8 @@ bindM3 f a b c = join (liftM3 f a b c)
 bindM4 :: Monad m => (a -> b -> c -> d -> m r) -> m a -> m b -> m c -> m d -> m r
 bindM4 f a b c d = join (liftM4 f a b c d)
 
-newtype Evaluator a = Evaluator {runEvaluator :: MetaContext -> a}
-  deriving (Functor, Applicative, Monad, MonadReader MetaContext)
+newtype Evaluator a = Evaluator {runEvaluator :: CheckState -> a}
+  deriving (Functor, Applicative, Monad, MonadReader CheckState)
 
 class Monad m => MonadEvaluator m where
   evaluate :: Evaluator a -> m a
@@ -284,15 +289,18 @@ eqReduce env vt va vu = eqReduceType va
           t_eq_t'_and_u_eq_u' ve = VAnd <$> t_eq_t' ve <*> u_eq_u' ve
       VExists (Name "$e") a_eq_a' <$> makeFnClosure' t_eq_t'_and_u_eq_u'
     -- Rule Cons-Eq
-    eqReduceAll (VCons c t) (VMu @_ @n @n' f fty xs cs as) (VCons c' t')
+    eqReduceAll (VCons c t _) (VMu tag f fty x cs (Just a)) (VCons c' t' _)
       | c == c' = do
-          case (lookup c cs, eqNat @n @n') of
-            (Nothing, _) -> error "BUG: impossible (constructor not well typed in equality)"
-            (_, Nothing) -> error "BUG: impossible (inductive type not fully applied; so not a type)"
-            (Just b, Just E.Refl) -> do
-              let b_muF = appOne b (VMu @Ix @n @'Z f fty xs cs V.Nil)
-              b_muF_as <- appVectorFull' b_muF as
-              eqReduce env t b_muF_as t'
+          case lookup c cs of
+            Nothing -> error "BUG: Impossible (constructor not well typed in equality)"
+            Just (_, _, bi, _) -> do
+              let muF = VMu tag f fty x cs Nothing
+              b_muF_a <- app' bi muF a
+              eqReduce env t b_muF_a t'
+      | otherwise = pure VEmpty
+    -- Rule Mu-Eq
+    eqReduceAll (VMu tag _ (VPi _ _ aTy _) _ _ (Just a)) (VU Relevant) (VMu tag' _ _ _ _ (Just a'))
+      | tag == tag' = eqReduce env a aTy a'
       | otherwise = pure VEmpty
     -- Rule Box-Eq
     eqReduceAll (VBox a) (VU Relevant) (VBox b) =
@@ -359,7 +367,15 @@ cast (VId {}) (VId {}) _ (VIdPath (VProp _ _)) = undefined
 --     u_eq_u' = Snd (Snd e')
 --     t'_eq_u' = Trans t'_eq_t (Trans t_eq_u u_eq_u')
 -- pure (VIdPath (VProp env t'_eq_u'))
--- TODO: casting rules for constructors (requires OE for inductive types)
+cast (VMu tag f fty x cs (Just a)) (VMu _ _ _ _ _ (Just a')) e (VCons ci t (VProp env e')) = do
+  let (_, _, _, ixi) = maybe (error "BUG: Impossible") id (lookup ci cs)
+      muF = VMu tag f fty x cs Nothing
+  ixi_muF_a_t <- app' ixi muF a t
+  -- TODO: Do this properly (hopefully) with semantic propositions
+  ixi_tm <- quote (level env) ixi_muF_a_t
+  a_tm <- quote (level env) a
+  a'_tm <- quote (level env) a'
+  pure (VCons ci t (Trans ixi_tm a_tm a'_tm e' $$$ e))
 cast (VBox a) (VBox b) e (VBoxProof t@(VProp env _)) = do
   t' <- cast a b e (VOne t)
   VBoxProof <$> quoteToProp env t'
@@ -374,8 +390,12 @@ prop env t = pure (VProp env t)
 closure :: forall n m. MonadEvaluator m => Env Ix -> Term Ix -> m (Closure n Ix)
 closure env t = pure (Closure env t)
 
-branch :: MonadEvaluator m => Env Ix -> (Name, Binder, Term Ix) -> m (Name, Binder, Closure (A 1) Ix)
-branch env (c, x, t) = (c,x,) <$> closure env t
+branch
+  :: MonadEvaluator m
+  => Env Ix
+  -> (Name, Binder, Binder, Term Ix)
+  -> m (Name, Binder, Binder, Closure (A 2) Ix)
+branch env (c, x, e, t) = (c,x,e,) <$> closure env t
 
 evalSort :: MonadEvaluator m => Relevance -> m Relevance
 evalSort Relevant = pure Relevant
@@ -451,33 +471,21 @@ eval env (BoxElim t) = do
   t <- eval env t
   t $$ VBoxElim
 eval env (Box a) = VBox <$> eval env a
-eval env (Cons c t) = VCons c <$> eval env t
+eval env (Cons c t e) = VCons c <$> eval env t <*> prop env e
 eval env (Match t x p bs) = do
   t <- eval env t
   p <- closure env p
   bs <- mapM (branch env) bs
   t $$ VMatch x p bs
-eval env (FixedPoint i g f ps x c t) = do
-  reify (fromIntegral (length ps)) withBoxedLength
-  where
-    -- Type magic to box the length of the closure into the constructor
-    -- via reification
-    withBoxedLength :: forall n. SNatI n => Proxy n -> m (Val Ix)
-    withBoxedLength Proxy = do
-      i <- eval env i
-      c <- closure @('S ('S n)) env c
-      t <- closure @('S ('S ('S n))) env t
-      pure (VFixedPoint @Ix @n @'Z i g f ps x c t V.Nil)
-eval env (Mu f t xs cs) = do
-  reify (fromIntegral (length xs)) withBoxedLength
-  where
-    -- Type magic to box the length of the closure into the constructor
-    -- via reification
-    withBoxedLength :: forall n. SNatI n => Proxy n -> m (Val Ix)
-    withBoxedLength Proxy = do
-      t <- eval env t
-      cs <- mapM (\(c, b) -> (c,) <$> closure @('S n) env b) cs
-      pure (VMu @Ix @n @'Z f t xs cs V.Nil)
+eval env (FixedPoint i g f p x c t) = do
+  i <- eval env i
+  c <- closure env c
+  t <- closure env t
+  pure (VFixedPoint i g f p x c t Nothing [])
+eval env (Mu tag f t x cs) = do
+  t <- eval env t
+  cs <- mapM (\(ci, si, xi, bi, _, ixi) -> (ci,) <$> ((si,xi,,) <$> closure env bi <*> closure env ixi)) cs
+  pure (VMu tag f t x cs Nothing)
 eval env (Let _ _ t u) = do
   t <- eval env t
   eval (env :> (Defined, t)) u
@@ -493,10 +501,10 @@ match
   => Val Ix
   -> Binder
   -> Closure (A 1) Ix
-  -> [(Name, Binder, Closure (A 1) Ix)]
+  -> [(Name, Binder, Binder, Closure (A 2) Ix)]
   -> m (Val Ix)
-match (VCons c u) _ _ ((c', _, t) : _)
-  | c == c' = app' t u
+match (VCons c u e) _ _ ((c', _, _, t) : _)
+  | c == c' = app' t u (VOne e)
 match (VRigid x sp) x' p bs = pure (VRigid x (sp :> VMatch x' p bs))
 match (VFlex m env sp) x p bs = pure (VFlex m env (sp :> VMatch x p bs))
 match t x p (_ : bs) = match t x p bs
@@ -510,20 +518,17 @@ infixl 8 $$
 
 ($$) :: MonadEvaluator m => Val Ix -> VElim Ix -> m (Val Ix)
 (VLambda _ c) $$ (VApp u) = app' c u
-(VFixedPoint @_ @n @m muF g f ps x c t as) $$ (VApp u) =
-  case (eqNat @n @m, u) of
-    -- Only reduce a fixed point [(fix f) ps a => f (fix f) ps a] when
-    -- [a] is a normal form; i.e. a constructor. This avoids the risk of
-    -- infinitely looping.
-    (Just E.Refl, VCons {}) -> do
-      let t_muF = appOne t muF
-          fix_f = VFixedPoint muF g f ps x c t V.Nil
-          t_muF_fix_f = appOne t_muF fix_f
-      t_muF_fix_f_ps <- appVector @('S 'Z) t_muF_fix_f as
-      let t_muF_fix_f_ps_u = appOne t_muF_fix_f_ps u
-      app' t_muF_fix_f_ps_u
-    _ -> pure (VFixedPoint muF g f ps x c t (as V.:|> u))
-(VMu @_ @n @m f t xs cs as) $$ (VApp a) = pure (VMu @Ix @n @('S m) f t xs cs (as V.:|> a))
+-- Only reduce a fixed point [(fix f) ps a => f (fix f) ps a] when
+-- [a] is a normal form; i.e. a constructor. This avoids the risk of
+-- infinitely looping.
+(VFixedPoint muF g f p x c t (Just a) []) $$ (VApp u@(VCons {})) = do
+  let fix_f = VFixedPoint muF g f p x c t Nothing []
+  app' t muF fix_f a u
+(VFixedPoint muF g f p x c t Nothing []) $$ (VApp u) =
+  pure (VFixedPoint muF g f p x c t (Just u) [])
+(VFixedPoint muF g f p x c t a sp) $$ u =
+  pure (VFixedPoint muF g f p x c t a (sp :> u))
+(VMu tag f t xs cs Nothing) $$ (VApp a) = pure (VMu tag f t xs cs (Just a))
 VZero $$ (VNElim _ _ t0 _ _ _) = pure t0
 (VSucc n) $$ elim@(VNElim _ _ _ _ _ ts) = app' ts n =<< n $$ elim
 (VPair t _) $$ VFst = pure t
@@ -591,8 +596,8 @@ quoteSp l base (sp :> VMatch x p bs) = do
   sp <- quoteSp l base sp
   pure (Match sp x p bs)
   where
-    quoteBranch :: (Name, Binder, Closure (A 1) Ix) -> m (Name, Binder, Term Ix)
-    quoteBranch (c, x, t) = (c,x,) <$> (quote (l + 1) =<< app' t (VVar l))
+    quoteBranch :: (Name, Binder, Binder, Closure (A 2) Ix) -> m (Name, Binder, Binder, Term Ix)
+    quoteBranch (c, x, e, t) = (c,x,e,) <$> (quote (l + 2) =<< app' t (VVar l) (VVar (l + 1)))
 
 quoteProp' :: MonadEvaluator m => Lvl -> Lvl -> VProp Ix -> m (Term Ix)
 quoteProp' lvl by (VProp env t) = quoteProp (lvl + by) (VProp (liftEnv by env) t)
@@ -654,20 +659,20 @@ quoteProp lvl (VProp env t) = q env t
       bs <- mapM qBranch bs
       pure (Match t x p bs)
       where
-        qBranch :: (Name, Binder, Term Ix) -> m (Name, Binder, Term Ix)
-        qBranch (c, x, t) = (c,x,) <$> q' 1 env t
-    q env (FixedPoint i g f ps x c t) = do
+        qBranch :: (Name, Binder, Binder, Term Ix) -> m (Name, Binder, Binder, Term Ix)
+        qBranch (c, x, e, t) = (c,x,e,) <$> q' 2 env t
+    q env (FixedPoint i g f p x c t) = do
       i <- q env i
-      c <- q' (Lvl (length ps + 2)) env c
-      t <- q' (Lvl (length ps + 3)) env t
-      pure (FixedPoint i g f ps x c t)
-    q env (Mu f fty xs cs) = do
+      c <- q' 3 env c
+      t <- q' 4 env t
+      pure (FixedPoint i g f p x c t)
+    q env (Mu tag f fty xs cs) = do
       fty <- q env fty
       cs <- mapM qCons cs
-      pure (Mu f fty xs cs)
+      pure (Mu tag f fty xs cs)
       where
-        qCons :: (Name, Term Ix) -> m (Name, Term Ix)
-        qCons (c, b) = (c,) <$> q' (Lvl (length xs + 1)) env b
+        qCons :: (Name, Relevance, Binder, Type Ix, Name, Type Ix) -> m (Name, Relevance, Binder, Type Ix, Name, Type Ix)
+        qCons (ci, si, xi, bi, fi, ixi) = (ci,si,xi,,fi,) <$> q' 2 env bi <*> q' 3 env ixi
     q env (Let x a t u) =
       Let x <$> q env a <*> q env t <*> q' 1 env u
     q env (Fix t) = Fix <$> traverse (q env) t
@@ -706,27 +711,34 @@ quote lvl (VQProj t) = QProj <$> quote lvl t
 quote lvl (VIdRefl t) = IdRefl <$> quote lvl t
 quote lvl (VIdPath e) = IdPath <$> quoteProp lvl e
 quote lvl (VId a t u) = Id <$> quote lvl a <*> quote lvl t <*> quote lvl u
-quote lvl (VCons c t) = Cons c <$> quote lvl t
-quote lvl (VFixedPoint i g f ps x c t as) = do
+quote lvl (VCons c t e) = Cons c <$> quote lvl t <*> quoteProp lvl e
+quote lvl (VFixedPoint i g f p x c t a sp) = do
   i <- quote lvl i
-  let vg_ps_x = V.generate (\x -> VVar (lvl + fromIntegral x))
-      vg_f_ps_x = V.generate (\x -> VVar (lvl + fromIntegral x))
-  c <- quote (lvl + Lvl (length ps + 2)) =<< appVectorFull' c vg_ps_x
-  t <- quote (lvl + Lvl (length ps + 3)) =<< appVectorFull' t vg_f_ps_x
-  let fix_f = FixedPoint i g f ps x c t
-  foldrM (\a fix_f_as -> App fix_f_as <$> quote lvl a) fix_f as
-quote lvl (VMu @_ @n f fty xs cs as) = do
+  c <- quote (lvl + 3) =<< app' c (VVar lvl) (VVar (lvl + 1)) (VVar (lvl + 2))
+  t <- quote (lvl + 4) =<< app' t (VVar lvl) (VVar (lvl + 1)) (VVar (lvl + 2)) (VVar (lvl + 3))
+  let fix_f = FixedPoint i g f p x c t
+  a <- mapM (quote lvl) a
+  case a of
+    Just a -> quoteSp lvl (App fix_f a) sp
+    Nothing -> pure fix_f
+quote lvl (VMu tag f fty x cs a) = do
   fty <- quote lvl fty
   let vf = VVar lvl
-      vxs = V.generate @n (\x -> VVar (lvl + 1 + fromIntegral x))
-      quoteCons :: (Name, Closure ('S n) Ix) -> m (Name, Term Ix)
-      quoteCons (c, b) = do
-        b_f_xs <- appVectorFull' (appOne b vf) vxs
-        (c,) <$> quote (lvl + Lvl (length xs + 1)) b_f_xs
+      vx = VVar (lvl + 1)
+      quoteCons
+        :: (Name, (Relevance, Binder, Closure (A 2) Ix, Closure (A 3) Ix))
+        -> m (Name, Relevance, Binder, Type Ix, Name, Type Ix)
+      quoteCons (ci, (si, xi, bi, ixi)) = do
+        let vxi = VVar (lvl + 2)
+        bi_f_x <- app' bi vf vx
+        ixi_f_x_xi <- app' ixi vf vx vxi
+        (ci,si,xi,,f,) <$> quote (lvl + 2) bi_f_x <*> quote (lvl + 3) ixi_f_x_xi
   cs <- mapM quoteCons cs
-  let muF = Mu f fty xs cs
-  -- Create an application term for each parametric argument
-  foldrM (\a muF_as -> App muF_as <$> quote lvl a) muF as
+  let muF = Mu tag f fty x cs
+  a <- mapM (quote lvl) a
+  case a of
+    Just a -> pure (App muF a)
+    Nothing -> pure muF
 quote lvl (VBoxProof e) = BoxProof <$> quoteProp lvl e
 quote lvl (VBox a) = Box <$> quote lvl a
 
@@ -857,25 +869,25 @@ renameProp pos ns m sub (VProp env t) = r (level env) ns sub env t
       bs <- mapM rBranch bs
       pure (Match t x p bs)
       where
-        rBranch :: (Name, Binder, Term Ix) -> Checker (Variant e) (Name, Binder, Term Ix)
-        rBranch (c, x, t) = (c,x,) <$> r (l + 1) (ns :> x) (lift 1 sub) (extend l 1 env) t
-    r l ns sub env (FixedPoint i g f ps x c t) = do
+        rBranch :: (Name, Binder, Binder, Term Ix) -> Checker (Variant e) (Name, Binder, Binder, Term Ix)
+        rBranch (c, x, e, t) = (c,x,e,) <$> r (l + 2) (ns :> x) (lift 2 sub) (extend l 2 env) t
+    r l ns sub env (FixedPoint i g f p x c t) = do
       i <- r l ns sub env i
-      let cClSize = Lvl (length ps + 2)
-          tClSize = Lvl (length ps + 3)
-      c <- r (l + cClSize) (ns :> g ++:> ps :> x) (lift cClSize sub) (extend l cClSize env) c
-      t <- r (l + tClSize) (ns :> g :> f ++:> ps :> x) (lift tClSize sub) (extend l tClSize env) t
-      pure (FixedPoint i g f ps x c t)
-    r l ns sub env (Mu f fty xs cs) = do
+      c <- r (l + 3) (ns :> g :> p :> x) (lift 3 sub) (extend l 3 env) c
+      t <- r (l + 4) (ns :> g :> f :> p :> x) (lift 4 sub) (extend l 4 env) t
+      pure (FixedPoint i g f p x c t)
+    r l ns sub env (Mu tag f fty x cs) = do
       fty <- r l ns sub env fty
       cs <- mapM rCons cs
-      pure (Mu f fty xs cs)
+      pure (Mu tag f fty x cs)
       where
-        clSize :: Lvl
-        clSize = Lvl (length xs + 1)
-
-        rCons :: (Name, Term Ix) -> Checker (Variant e) (Name, Term Ix)
-        rCons (c, b) = (c,) <$> r (l + clSize) (ns :> f ++:> xs) (lift clSize sub) (extend l clSize env) b
+        rCons
+          :: (Name, Relevance, Binder, Type Ix, Name, Type Ix)
+          -> Checker (Variant e) (Name, Relevance, Binder, Type Ix, Name, Type Ix)
+        rCons (ci, si, xi, bi, fi, ixi) = do
+          bi <- r (l + 2) (ns :> Name f :> x) (lift 2 sub) (extend l 2 env) bi
+          ixi <- r (l + 3) (ns :> Name f :> x :> xi) (lift 3 sub) (extend l 3 env) ixi
+          pure (ci, si, xi, bi, fi, ixi)
     r l ns sub env (Let x a t u) =
       Let x <$> r l ns sub env a <*> r l ns sub env t <*> r (l + 1) (ns :> x) (lift 1 sub) (extend l 1 env) u
     r l ns sub env (Fix t) = Fix <$> traverse (r l ns sub env) t
@@ -937,8 +949,9 @@ renameSp pos ns m sub base (sp :> VMatch x p bs) = do
   bs <- mapM renameBranch bs
   pure (Match sp x p bs)
   where
-    renameBranch :: (Name, Binder, Closure (A 1) Ix) -> Checker (Variant e) (Name, Binder, Term Ix)
-    renameBranch (c, x, t) = (c,x,) <$> (rename pos ns m (liftRenaming 1 sub) =<< app' t (VVar (cod sub)))
+    renameBranch :: (Name, Binder, Binder, Closure (A 2) Ix) -> Checker (Variant e) (Name, Binder, Binder, Term Ix)
+    renameBranch (c, x, e, t) =
+      (c,x,e,) <$> (rename pos ns m (liftRenaming 2 sub) =<< app' t (VVar (cod sub)) (VVar (cod sub + 1)))
 
 rename
   :: forall e
@@ -1022,31 +1035,41 @@ rename pos ns m sub (VId a t u) = do
   t <- rename pos ns m sub t
   u <- rename pos ns m sub u
   pure (Id a t u)
-rename pos ns m sub (VCons c t) = do
+rename pos ns m sub (VCons c t e) = do
   t <- rename pos ns m sub t
-  pure (Cons c t)
-rename pos ns m sub (VFixedPoint i g f ps x c t as) = do
+  e <- renameProp pos ns m sub e
+  pure (Cons c t e)
+rename pos ns m sub (VFixedPoint i g f p x c t a sp) = do
   i <- rename pos ns m sub i
-  let vg_ps_x = V.generate (\x -> VVar (cod sub + fromIntegral x))
-      vg_f_ps_x = V.generate (\x -> VVar (cod sub + fromIntegral x))
-  c <- rename pos (ns :> g ++:> ps :> x) m (liftRenaming (Lvl (length ps + 2)) sub) =<< appVectorFull' c vg_ps_x
-  t <- rename pos (ns :> g :> f ++:> ps :> x) m (liftRenaming (Lvl (length ps + 3)) sub) =<< appVectorFull' t vg_f_ps_x
-  let fix_f = FixedPoint i g f ps x c t
-  foldrM (\a fix_f_as -> App fix_f_as <$> rename pos ns m sub a) fix_f as
-rename pos ns m sub (VMu @_ @n f fty xs cs as) = do
+  c_g_p_x <- app' c (VVar (cod sub)) (VVar (cod sub + 1)) (VVar (cod sub + 2))
+  t_g_f_p_x <- app' t (VVar (cod sub)) (VVar (cod sub + 1)) (VVar (cod sub + 2)) (VVar (cod sub + 3))
+  c <- rename pos (ns :> g :> p :> x) m (liftRenaming 3 sub) c_g_p_x
+  t <- rename pos (ns :> g :> f :> p :> x) m (liftRenaming 4 sub) t_g_f_p_x
+  a <- mapM (rename pos ns m sub) a
+  let fix_f = FixedPoint i g f p x c t
+  case a of
+    Just a -> renameSp pos ns m sub (App fix_f a) sp
+    Nothing -> pure fix_f
+rename pos ns m sub (VMu tag f fty x cs a) = do
   fty <- rename pos ns m sub fty
   let vf = VVar (cod sub)
-      vxs = V.generate (\x -> VVar (cod sub + 1 + fromIntegral x))
-      clSize :: Lvl
-      clSize = Lvl (length xs + 1)
-      renameCons :: (Name, Closure ('S n) Ix) -> Checker (Variant e) (Name, Term Ix)
-      renameCons (c, b) = do
-        b_f_xs <- appVectorFull' (appOne b vf) vxs
-        (c,) <$> rename pos (ns :> f ++:> xs) m (liftRenaming clSize sub) b_f_xs
+      vx = VVar (cod sub + 1)
+      renameCons
+        :: (Name, (Relevance, Binder, Closure (A 2) Ix, Closure (A 3) Ix))
+        -> Checker (Variant e) (Name, Relevance, Binder, Type Ix, Name, Type Ix)
+      renameCons (ci, (si, xi, bi, ixi)) = do
+        let vxi = VVar (cod sub + 2)
+        bi_f_x <- app' bi vf vx
+        bi <- rename pos (ns :> Name f :> x) m (liftRenaming 2 sub) bi_f_x
+        ixi_f_x_xi <- app' ixi vf vx vxi
+        ixi <- rename pos (ns :> Name f :> x :> xi) m (liftRenaming 3 sub) ixi_f_x_xi
+        pure (ci, si, xi, bi, f, ixi)
   cs <- mapM renameCons cs
-  let muF = Mu f fty xs cs
-  -- Create an application term for each parametric argument
-  foldrM (\a muF_as -> App muF_as <$> rename pos ns m sub a) muF as
+  a <- mapM (rename pos ns m sub) a
+  let muF = Mu tag f fty x cs
+  case a of
+    Just a -> pure (App muF a)
+    Nothing -> pure muF
 rename pos ns m sub (VBoxProof e) = BoxProof <$> renameProp pos ns m sub e
 rename pos ns m sub (VBox a) = Box <$> rename pos ns m sub a
 
@@ -1188,16 +1211,17 @@ conv pos names = conv' names names
       where
         -- TODO: don't assume same ordering
         convBranch
-          :: (Name, Binder, Closure (A 1) Ix)
-          -> (Name, Binder, Closure (A 1) Ix)
+          :: (Name, Binder, Binder, Closure (A 2) Ix)
+          -> (Name, Binder, Binder, Closure (A 2) Ix)
           -> Checker (Variant e) ()
-        convBranch (c, x, t) (c', x', t')
+        convBranch (c, x, e, t) (c', x', e', t')
           | c == c' = do
               let vx = VVar lvl
-              t <- app' t vx
-              t' <- app' t' vx
-              conv' (ns :> x) (ns' :> x') (lvl + 1) t t'
-        convBranch _ _ = undefined
+                  ve = VVar (lvl + 1)
+              t <- app' t vx ve
+              t' <- app' t' vx ve
+              conv' (ns :> x :> e) (ns' :> x' :> e') (lvl + 2) t t'
+          | otherwise = throw (ConstructorMismatch c c' pos)
     convSp _ _ _ sp sp' =
       throw (RigidSpineMismatch (TS . showElimHead <$> safeHead sp) (TS . showElimHead <$> safeHead sp') pos)
       where
@@ -1304,61 +1328,44 @@ conv pos names = conv' names names
       conv' ns ns' lvl a a'
       conv' ns ns' lvl t t'
       conv' ns ns' lvl u u'
-    conv' ns ns' lvl (VCons c t) (VCons c' t')
+    conv' ns ns' lvl (VCons c t _) (VCons c' t' _)
       | c == c' = do
           conv' ns ns' lvl t t'
-    conv' ns ns' lvl (VFixedPoint @_ @n @m i g f ps x c t as) (VFixedPoint @_ @n' @m' i' g' f' ps' x' c' t' as') =
-      case (eqNat @n @n', eqNat @m @m') of
-        (Just E.Refl, Just E.Refl) -> do
-          let vg_ps_x = V.generate (\x -> VVar (lvl + fromIntegral x))
-              vg_f_ps_x = V.generate (\x -> VVar (lvl + fromIntegral x))
-              cClSize = Lvl (length ps + 2)
-              tClSize = Lvl (length ps + 3)
-          -- Possibly there is enough information by this point that it is safe to check inductive types
-          -- first, however there is the danger that both fixed points have equal types, with
-          -- [C ≡ μF → X], [C' ≡ X], and [(fix f) ps : μG → μF → X], [(fix f') ps' : μG → μF → X]
-          -- So the inductive types may not have equal type, breaking the invariant. (This probably
-          -- is not to happen guaranteed by [n ≡ n' ∧ m ≡ m'])
-          c_g_ps_x <- appVectorFull' c vg_ps_x
-          c'_g_ps_x <- appVectorFull' c' vg_ps_x
-          conv' (ns :> g ++:> ps :> x) (ns' :> g' ++:> ps' :> x') (lvl + cClSize) c_g_ps_x c'_g_ps_x
-          conv' ns ns' lvl i i'
-          t_g_f_ps_x <- appVectorFull' t vg_f_ps_x
-          t'_g_f_ps_x <- appVectorFull' t' vg_f_ps_x
-          conv' (ns :> g :> f ++:> ps :> x) (ns' :> g' :> f' ++:> ps' :> x') (lvl + tClSize) t_g_f_ps_x t'_g_f_ps_x
-          sequence_ (V.zipWithSame (conv' ns ns' lvl) as as')
-        -- By assumption, these terms have the same type, so if [n ≡ n'] (the lengths
-        -- of the parameters for each type) are equal, then the length of [as] and [as']
-        -- must be equal. In other words [n ≡ n' ⇒ m ≡ m'].
-        _ ->
-          let nVal = reflectToNum @n Proxy
-              n'Val = reflectToNum @n' Proxy
-           in throw (FixedPointsInequalParameterSize nVal n'Val pos)
-    conv' ns ns' lvl (VMu @_ @n @m f fty xs cs as) (VMu @_ @n' @m' f' fty' xs' cs' as') =
-      case (eqNat @n @n', eqNat @m @m') of
-        (Just E.Refl, Just E.Refl) -> do
-          conv' ns ns' lvl fty fty'
-          zipWithM_ convCons cs cs'
-          sequence_ (V.zipWithSame (conv' ns ns' lvl) as as')
-        -- By assumption, these terms have the same type, so if [n ≡ n'] (the lengths
-        -- of the parameters for each type) are equal, then the length of [as] and [as']
-        -- must be equal. In other words [n ≡ n' ⇒ m ≡ m'].
-        _ ->
-          let nVal = reflectToNum @n Proxy
-              n'Val = reflectToNum @n' Proxy
-           in throw (InductiveTypesInequalParameterSize nVal n'Val pos)
+    conv' ns ns' lvl (VFixedPoint i g f p x c t a sp) (VFixedPoint i' g' f' p' x' c' t' a' sp') = do
+      c_g_p_x <- app' c (VVar lvl) (VVar (lvl + 1)) (VVar (lvl + 2))
+      c'_g_p_x <- app' c' (VVar lvl) (VVar (lvl + 1)) (VVar (lvl + 2))
+      conv' (ns :> g :> p :> x) (ns' :> g' :> p' :> x') (lvl + 3) c_g_p_x c'_g_p_x
+      conv' ns ns' lvl i i'
+      t_g_f_p_x <- app' t (VVar lvl) (VVar (lvl + 1)) (VVar (lvl + 2)) (VVar (lvl + 3))
+      t'_g_f_p_x <- app' t' (VVar lvl) (VVar (lvl + 1)) (VVar (lvl + 2)) (VVar (lvl + 3))
+      conv' (ns :> g :> f :> p :> x) (ns' :> g' :> f' :> p' :> x') (lvl + 4) t_g_f_p_x t'_g_f_p_x
+      -- TODO: this *might* be problematic in the case that exactly one of [a], [a'] is Nothing
+      sequence_ (liftM2 (conv' ns ns' lvl) a a')
+      convSp ns ns' lvl sp sp'
+    conv' ns ns' lvl (VMu _ f fty x cs a) (VMu _ f' fty' x' cs' a') = do
+      conv' ns ns' lvl fty fty'
+      zipWithM_ convCons cs cs'
+      sequence_ (liftM2 (conv' ns ns' lvl) a a')
       where
-        convCons :: (Name, Closure ('S n) Ix) -> (Name, Closure ('S n) Ix) -> Checker (Variant e) ()
-        convCons (c, b) (c', b')
-          | c == c' = do
+        convCons
+          :: (Name, (Relevance, Binder, Closure (A 2) Ix, Closure (A 3) Ix))
+          -> (Name, (Relevance, Binder, Closure (A 2) Ix, Closure (A 3) Ix))
+          -> Checker (Variant e) ()
+        convCons (ci, (si, xi, bi, ixi)) (ci', (si', xi', bi', ixi'))
+          | ci == ci' = do
+              convSort pos si si'
               let vf = VVar lvl
-                  vxs = V.generate (\x -> VVar (lvl + 1 + fromIntegral x))
-              b_muF_xs <- appVectorFull' (appOne b vf) vxs
-              b'_muF_xs <- appVectorFull' (appOne b' vf) vxs
-              conv' (ns :> f ++:> xs) (ns' :> f' ++:> xs') (lvl + Lvl (length xs + 1)) b_muF_xs b'_muF_xs
+                  vx = VVar (lvl + 1)
+                  vxi = VVar (lvl + 2)
+              bi_muF_x <- app' bi vf vx
+              bi'_muF_x <- app' bi' vf vx
+              conv' (ns :> Name f :> x) (ns' :> Name f' :> x') (lvl + 2) bi_muF_x bi'_muF_x
+              ixi_muF_x_xi <- app' ixi vf vx vxi
+              ixi'_muF_x_xi <- app' ixi' vf vx vxi
+              conv' (ns :> Name f :> x :> xi) (ns' :> Name f' :> x' :> xi') (lvl + 3) ixi_muF_x_xi ixi'_muF_x_xi
           | otherwise =
               -- TODO: consider allowing reordering of constructors in definitional equality
-              throw (ConstructorMismatch c c' pos)
+              throw (ConstructorMismatch ci ci' pos)
     conv' _ _ _ (VBoxProof _) (VBoxProof _) = pure ()
     conv' ns ns' lvl (VBox a) (VBox a') = conv' ns ns' lvl a a'
     conv' ns ns' lvl a b = do
@@ -1699,22 +1706,39 @@ infer gamma (R pos (MatchF t@(R argPos _) x p bs)) = do
   (t, a, s) <- infer gamma t
   (p, s') <- checkType (gamma & bind x s a) p
   case a of
-    (VMu @_ @n @m f fty xs constructors as) -> do
+    -- We must have [Just a], otherwise this is not a type. Also, [fty] is
+    -- a type family by induction.
+    -- TODO: maybe a syntactic restriction for the type family is better
+    VMu tag f fty@(VPi _ _ aTy _) xs constructors (Just a) -> do
       let
-        muF = VMu @Ix @n @'Z f fty xs constructors V.Nil
+        muF = VMu tag f fty xs constructors Nothing
+        -- checkBranches returns a set of remaining constructors.
+        -- Each step we check if the constructor is in the remaining set,
+        -- and then remove it. This allows us to check for totality.
         checkBranches [] = pure ([], M.fromList constructors)
-        checkBranches (brs :> (c, x, t)) = do
+        checkBranches (brs :> (c, x, e, t)) = do
           (brs, cs) <- checkBranches brs
-          case (M.lookup c cs, eqNat @n @m) of
-            (Nothing, _) -> do
+          case M.lookup c cs of
+            Nothing -> do
               muFTS <- ppVal gamma muF
               throw (ConstructorNotInTypeMatch c muFTS pos)
-            (_, Nothing) -> error "BUG: Impossible! (this would imply [a] is not a type)"
-            (Just b, Just E.Refl) -> do
-              let b_muF = appOne b muF
-              b_muF_as <- appVectorFull' b_muF as
-              br <- checkBranch gamma (c, x, t) b_muF_as p
-              pure (brs :> br, M.delete c cs)
+            Just (_, _, b, ixi) -> do
+              b_muF_a <- app' b muF a
+              let vx = VVar (lvl gamma)
+                  ve = VVar (lvl gamma + 1)
+
+              ixi_muF_a_x <- app' ixi muF a vx
+
+              let gamma' = gamma & bindR x b_muF_a
+              ixi_eq_a <- eqReduce (env gamma) ixi_muF_a_x aTy a
+
+              let gamma'' = gamma' & bindP e ixi_eq_a
+              e_prop <- quoteToProp (env gamma'') ve
+
+              pCx <- eval (env gamma :> (Bound, VCons c vx e_prop)) p
+              t <- check gamma'' t pCx
+
+              pure (brs :> (c, x, e, t), M.delete c cs)
 
       (bs, remaining) <- checkBranches bs
       unless (M.null remaining) (throw (NonTotalMatch (M.keys remaining) pos))
@@ -1724,62 +1748,89 @@ infer gamma (R pos (MatchF t@(R argPos _) x p bs)) = do
     a -> do
       aTS <- ppVal gamma a
       throw (MatchHead aTS argPos)
-infer gamma (R _ (FixedPointF i@(R pos _) g f ps x c t)) = do
+infer gamma (R _ (FixedPointF i@(R pos _) g f p x c t)) = do
   (muF, vmuFty, _) <- infer gamma i
   vmuF <- eval (env gamma) muF
-  -- By induction, if [vmuF] is well-formed, argTypes is a type family. However it is still
-  -- convenient to extract it again
-  argTypes <- checkTypeFamily gamma pos vmuFty
-  case vmuF of
-    VMu @_ @n _ _ xs cs V.Nil -> do
+  case (vmuF, vmuFty) of
+    (VMu _ f' _ xs cs Nothing, VPi _ _ a _) -> do
       let vg = VVar (lvl gamma)
-          vpsC = zipWith (\x _ -> VVar x) [lvl gamma + 1 ..] ps
-      vg_ps <- foldlM ($$) vg (map VApp vpsC)
-      let gammaC = gamma & bindR g vmuFty & bindAll (zip (reverse ps) argTypes) & bindR x vg_ps
+          vp = VVar (lvl gamma + 1)
+      vg_p <- vg $$ VApp vp
+      let gammaC = gamma & bindR g vmuFty & bindR p a & bindR x vg_p
       (c, s) <- checkType gammaC c
-      fty <- buildFType (zip ps (reverse argTypes)) (env (gamma & bindR g vmuFty)) vg c
+      fty <- buildFType p a (env gamma) vg c
       -- In type checking the body, there is one additional argument (the recursive function [f])
       -- preceding the parameters. Therefore, we shift their semantic values by one
-      let vpsT = zipWith (\x _ -> VVar x) [lvl gamma + 2 ..] ps
-          f_lift_g = VMu Hole vmuFty xs (map (sub vg) cs) V.Nil
-      f_lift_g_ps <- foldlM ($$) f_lift_g (map VApp vpsT)
-      let vx = VVar (lvl gamma + fromIntegral (length ps) + 2)
-      c_f_lift_g_ps_x <- eval (env gamma :> (Bound, f_lift_g) ++:> map (Bound,) vpsT :> (Bound, vx)) c
-      let gammaT = gamma & bindR g vmuFty & bind f s fty & bindAll (zip (reverse ps) argTypes) & bindR x f_lift_g_ps
-      t <- check gammaT t c_f_lift_g_ps_x
-      fixTy <- buildFType (zip ps (reverse argTypes)) (env gamma :> (Bound, vmuF)) vmuF c
-      pure (FixedPoint muF g f ps x c t, fixTy, s)
+      f_lift_g_tag <- freshTag
+      let vp = VVar (lvl gamma + 2)
+          f_lift_g = VMu f_lift_g_tag f' vmuFty xs (map (sub vg) cs) Nothing
+      f_lift_g_p <- f_lift_g $$ VApp vp
+      let vx = VVar (lvl gamma + 3)
+      c_f_lift_g_p_x <- eval (env gamma :> (Bound, f_lift_g) :> (Bound, vp) :> (Bound, vx)) c
+      let gammaT = gamma & bindR g vmuFty & bind f s fty & bind p s a & bindR x f_lift_g_p
+      t <- check gammaT t c_f_lift_g_p_x
+      fixTy <- buildFType p a (env gamma) vmuF c
+      pure (FixedPoint muF g f p x c t, fixTy, s)
     _ -> do
       vmuFTS <- ppVal gamma vmuF
       throw (FixAnnotation vmuFTS pos)
   where
     buildFType
       :: MonadEvaluator m
-      => [(Binder, (Relevance, VTy Ix))]
+      => Binder
+      -> VTy Ix
       -> Env Ix
       -> Val Ix
       -> Term Ix
       -> m (VTy Ix)
-    buildFType ps env vg c = buildFType' [] ps
-      where
-        buildFType'
-          :: MonadEvaluator m => [Val Ix] -> [(Binder, (Relevance, VTy Ix))] -> m (VTy Ix)
-        buildFType' vps [] = do
-          xty <- foldrM (flip ($$)) vg (map VApp vps)
-          VPi Relevant x xty <$> makeFnClosure' (\vx -> eval (env ++:> map (Bound,) vps :> (Bound, vx)) c)
-        buildFType' vps ((p, (s, a)) : ps) =
-          VPi s p a <$> makeFnClosure' (\vp -> buildFType' (vps :> vp) ps)
+    buildFType p a env vg c = do
+      let vc vp vx = eval (env :> (Bound, vg) :> (Bound, vp) :> (Bound, vx)) c
+          vpi_x_c vp = do
+            vg_p <- vg $$ VApp vp
+            VPi Relevant x vg_p <$> makeFnClosure' (vc vp)
+      VPi Relevant p a <$> makeFnClosure' vpi_x_c
 
-    sub :: Val Ix -> (Name, Closure ('S n) Ix) -> (Name, Closure ('S n) Ix)
-    sub g (c, b) = (c, LiftClosure (appOne b g))
-infer gamma (R _ (MuF f fty@(R pos _) xs cs)) = do
+    sub
+      :: Val Ix
+      -> (Name, (Relevance, Binder, Closure (A 2) Ix, Closure (A 3) Ix))
+      -> (Name, (Relevance, Binder, Closure (A 2) Ix, Closure (A 3) Ix))
+    sub g (ci, (si, xi, bi, fci)) = (ci, (si, xi, LiftClosure (appOne bi g), LiftClosure (appOne fci g)))
+infer gamma (R muPos (MuF () f fty@(R pos _) x cs)) = do
   (fty, _) <- checkType gamma fty
   vfty <- eval (env gamma) fty
-  argTypes <- checkTypeFamily gamma pos vfty
-  unless (length argTypes == length xs) (throw (InductiveTypeIncorrectArgumentCount pos))
-  let gamma' = gamma & bindR f vfty & bindAll (zip xs (reverse argTypes))
-  cs <- mapM (\(c, b) -> (c,) <$> check gamma' b (VU Relevant)) cs
-  pure (Mu f fty xs cs, vfty, Relevant)
+  a <- checkTypeFamily vfty
+  let gamma' = gamma & bindR (Name f) vfty & bindR x a
+  cs <- mapM (checkConstructor gamma' a) cs
+  -- A fresh tag is associated to each syntactic inductive type definition.
+  tag <- freshTag
+  pure (Mu tag f fty x cs, vfty, Relevant)
+  where
+    checkTypeFamily :: VTy Ix -> Checker (Variant e) (VTy Ix)
+    checkTypeFamily t@(VPi Relevant _ a b) = do
+      let vx = VVar (lvl gamma)
+      b_x <- app' b vx
+      case b_x of
+        VU Relevant -> pure a
+        _ -> do
+          tTS <- ppVal gamma t
+          throw (InductiveTypeFamily tTS pos)
+    checkTypeFamily t = do
+      tTS <- ppVal gamma t
+      throw (InductiveTypeFamily tTS pos)
+
+    checkConstructor
+      :: Context
+      -> VTy Ix
+      -> (Name, RelevanceF (), Binder, Raw, Name, Raw)
+      -> Checker (Variant e) (Name, Relevance, Binder, Type Ix, Name, Type Ix)
+    checkConstructor gamma' ixTy (ci, si, xi, bi, fi, ix)
+      | f == fi = do
+          si <- checkSort si
+          bi <- check gamma' bi (VU si)
+          vbi <- eval (env gamma') bi
+          ix <- check (gamma' & bind xi si vbi) ix ixTy
+          pure (ci, si, xi, bi, f, ix)
+      | otherwise = throw (InductiveTypeConstructor f fi muPos)
 infer gamma (R _ (LetF x a t u)) = do
   (a, s) <- checkType gamma a
   va <- eval (env gamma) a
@@ -1816,42 +1867,6 @@ checkType gamma t@(R pos _) = do
     _ -> do
       tTS <- ppVal gamma tty
       throw (CheckType tTS pos)
-
-checkTypeFamily
-  :: forall e
-   . e `CouldBe` InferenceError
-  => Context
-  -> Position
-  -> VTy Ix
-  -> Checker (Variant e) [(Relevance, Val Ix)]
-checkTypeFamily gamma pos t = check' [] (lvl gamma) t
-  where
-    check' :: [(Relevance, Val Ix)] -> Lvl -> VTy Ix -> Checker (Variant e) [(Relevance, Val Ix)]
-    check' as _ (VU Relevant) = pure as
-    check' as lvl (VPi s _ a b) = do
-      let vx = VVar lvl
-      b_x <- app' b vx
-      check' (as :> (s, a)) (lvl + 1) b_x
-    check' _ _ _ = do
-      tTS <- ppVal gamma t
-      throw (InductiveTypeFamily tTS pos)
-
-checkBranch
-  :: ( e `CouldBe` CheckError
-     , e `CouldBe` InferenceError
-     , e `CouldBe` ConversionError
-     , e `CouldBe` UnificationError
-     )
-  => Context
-  -> (Name, Binder, Raw)
-  -> VTy Ix
-  -> Term Ix
-  -> Checker (Variant e) (Name, Binder, Term Ix)
-checkBranch gamma (c, x, t) bty p = do
-  let vx = VVar (lvl gamma)
-  pCx <- eval (env gamma :> (Bound, VCons c vx)) p
-  t <- check (gamma & bindR x bty) t pCx
-  pure (c, x, t)
 
 check
   :: ( e `CouldBe` CheckError
@@ -1902,20 +1917,22 @@ check gamma (R _ (IdPathF e)) (VId a t u) = do
 check gamma (R pos (IdPathF {})) tty = do
   tTS <- ppVal gamma tty
   throw (CheckIdPath tTS pos)
-check gamma (R pos (ConsF c t)) (VMu @_ @n @m f fty xs cs as) = do
-  let muF = VMu @Ix @_ @'Z f fty xs cs V.Nil
-  case (lookup c cs, eqNat @n @m) of
-    (Nothing, _) -> do
+check gamma (R pos (ConsF c t e)) (VMu tag f fty@(VPi _ _ aTy _) xs cs (Just a)) = do
+  let muF = VMu tag f fty xs cs Nothing
+  case lookup c cs of
+    Nothing -> do
       muFTS <- ppVal gamma muF
       throw (ConstructorNotInTypeCons c muFTS pos)
-    (_, Nothing) -> error "BUG: Impossible! (this implies checking against not a type)"
-    (Just b, Just E.Refl) -> do
-      -- Apply to inductive type with *no* parameters
-      let b_muF = appOne b muF
-      b_muF_as <- appVectorFull' b_muF as
-      t <- check gamma t b_muF_as
-      pure (Cons c t)
-check gamma (R pos (ConsF c _)) tty = do
+    Just (_, _, bi, ixi) -> do
+      -- Apply to inductive type without parameters
+      bi_muF_a <- app' bi muF a
+      t <- check gamma t bi_muF_a
+      vt <- eval (env gamma) t
+      ixi_muF_a_x <- app' ixi muF a vt
+      ixi_eq_a <- eqReduce (env gamma) ixi_muF_a_x aTy a
+      e <- check gamma e ixi_eq_a
+      pure (Cons c t e)
+check gamma (R pos (ConsF c _ _)) tty = do
   tTS <- ppVal gamma tty
   throw (CheckCons tTS c pos)
 check gamma (R _ (BoxProofF e)) (VBox a) = do
