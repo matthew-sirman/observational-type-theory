@@ -25,12 +25,21 @@ source-repository head
 
 library
   exposed-modules:
+      Context
+      Conversion
       Error
+      Eval
+      EvalProp
+      MonadChecker
+      MonadEvaluator
       NaiveTypeChecker
       Parser.Lexer
       Parser.Parser
+      PatternUnification
+      PrettyPrinter
       Syntax
       TypeChecker
+      Value
       Vector
   other-modules:
       Paths_ott

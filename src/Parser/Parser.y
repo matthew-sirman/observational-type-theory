@@ -98,8 +98,8 @@ exp :: { Raw }
   : '\\' binder '.' exp                                             { rloc (LambdaF $2 $4) $1 $> }
   | let binder ':' exp '=' exp in exp                               { rloc (LetF $2 $4 $6 $8) $1 $> }
   | match exp as binder return exp with branches                    { rloc (MatchF $2 $4 $6 $8) $1 $7 }
-  | fix '[' exp as binder ']' binder fixArgs ':' exp '=' exp        { rloc (mkFixedPoint $3 $5 $7 $8 $10 $12) $1 $> }
-  | mu binder ':' term '.' '\\' vars '.' '[' constructors ']'       { rloc (MuF $2 $4 $7 $10) $1 $> }
+  | fix '[' exp as binder ']' binder binder binder ':' exp '=' exp  { rloc (FixedPointF $3 $5 $7 $8 $9 $11 $13) $1 $> }
+  | mu var ':' term '.' '\\' binder '.' '[' constructors ']'        { rloc (MuF () (syntax $2) $4 $7 $10) $1 $> }
   | term                                                            { $1 }
 
 term :: { Raw }
@@ -152,7 +152,7 @@ apps :: { Raw }
   | J '(' exp',' exp',' binder binder '.' exp','
           exp',' exp',' exp ')'                                     { rloc (JF $3 $5 $7 $8 $10 $12 $14 $16) $1 $> }
   | Id '(' exp ',' exp ',' exp ')'                                  { rloc (IdF $3 $5 $7) $1 $> }
-  | cons atom                                                       { rloc (ConsF (syntax $1) $2) $1 $> }
+  | cons '(' exp ',' exp ')'                                        { rloc (ConsF (syntax $1) $3 $5) $1 $> }
   | Box atom                                                        { rloc (BoxF $2) $1 $> }
   | Diamond atom                                                    { rloc (BoxProofF $2) $1 $> }
   | Boxelim '(' exp ')'                                             { rloc (BoxElimF $3) $1 $> }
@@ -180,23 +180,18 @@ atom :: { Raw }
   | '<' exp '>'                                                     { rloc (BoxProofF $2) $1 $> }
   | '(' exp ')'                                                     { uloc $2 $1 $> }
 
-branches :: { [(Name, Binder, Raw)] }
+branches :: { [(Name, Binder, Binder, Raw)] }
   : {-# empty #-}                                                   { [] }
-  | '|' cons binder '->' exp branches                               { (syntax $2, $3, $5) : $6 }
+  | '|' cons '(' binder ',' binder ')' '->' exp branches            { (syntax $2, $4, $6, $9) : $10 }
 
-vars :: { [Binder] }
+constructors :: { [(Name, RelevanceF (), Binder, Raw, Name, Raw)] }
   : {-# empty #-}                                                   { [] }
-  | binder                                                          { [$1] }
-  | binder vars                                                     { $1 : $2 }
+  | constructor                                                     { [$1] }
+  | constructor ';' constructors                                    { $1 : $3 }
 
-fixArgs :: { ([Binder], Binder) }
-  : binder                                                          { ([], $1) }
-  | binder fixArgs                                                  { ($1 : fst $2, snd $2) }
-
-constructors :: { [(Name, Raw)] }
-  : {-# empty #-}                                                   { [] }
-  | cons ':' exp                                                    { [(syntax $1, $3)] }
-  | cons ':' exp ';' constructors                                   { (syntax $1, $3) : $5 }
+constructor :: { (Name, RelevanceF (), Binder, Raw, Name, Raw) }
+  : cons ':' '(' binder ':' rel exp ')' '->' var atom               { (syntax $1, syntax $6, $4, $7, syntax $10, $11) }
+  | cons ':' apps '->' var atom                                     { (syntax $1, SortHole, Hole, $3, syntax $5, $6) }
 
 binder :: { Binder }
   : var                                                             {% addComposite (syntax $1) >>
@@ -238,14 +233,11 @@ loc element start end =
          location = Err.Position (Err.begin s) (Err.end e) (Err.file s)
        }
 
-rloc :: (Located start, Located end) => TermF () () Name Raw -> start -> end -> Raw
+rloc :: (Located start, Located end) => TermF () () () Name Raw -> start -> end -> Raw
 rloc e start end = Fix (RawF (loc e start end))
 
 uloc :: (Located start, Located end) => Raw -> start -> end -> Raw
 uloc (R _ e) = rloc e
-
-mkFixedPoint :: Raw -> Binder -> Binder -> ([Binder], Binder) -> Raw -> Raw -> TermF () () Name Raw
-mkFixedPoint i g f (ps, x) c t = FixedPointF i g f ps x c t
 
 addComposite :: Name -> Parser ()
 addComposite x = do
