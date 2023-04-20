@@ -32,7 +32,6 @@ library
       EvalProp
       MonadChecker
       MonadEvaluator
-      NaiveTypeChecker
       Parser.Lexer
       Parser.Parser
       PatternUnification
@@ -40,7 +39,6 @@ library
       Syntax
       TypeChecker
       Value
-      Vector
   other-modules:
       Paths_ott
   hs-source-dirs:
