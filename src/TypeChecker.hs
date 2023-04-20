@@ -19,24 +19,22 @@ import Control.Monad.Oops (throw)
 import Control.Monad.Reader
 import Control.Monad.State
 
-import Data.Fix (Fix (..))
 import Data.HashMap.Strict qualified as M
 import Data.IntMap qualified as IM
-import Data.Type.Nat
+import Data.Maybe (fromMaybe)
 import Data.Variant hiding (throw)
 import Error.Diagnose
 
 import Error
 import Syntax
-import Vector qualified as V
 
 newtype Checker e a = Checker {runChecker :: ExceptT e (State CheckState) a}
   deriving (Functor, Applicative, Monad, MonadState CheckState, MonadError e)
 
-type Types = [(Binder, (Relevance, VTy Ix))]
+type Types = [(Binder, (Relevance, VTy))]
 
 data Context = Context
-  { env :: Env Ix
+  { env :: Env
   , types :: Types
   , lvl :: Lvl
   }
@@ -180,14 +178,14 @@ instance PushArgument Evaluator where
     ctx <- ask
     pure (\a -> runEvaluator (f a) ctx)
 
-makeFnClosure' :: (MonadEvaluator m, ClosureApply Evaluator n cl v) => cl -> m (Closure n v)
+makeFnClosure' :: (MonadEvaluator m, ClosureApply Evaluator n cl val) => cl -> m (Closure n val)
 makeFnClosure' c = evaluate (makeFnClosure c)
 
-eqReduce :: forall m. MonadEvaluator m => Env Ix -> Val Ix -> VTy Ix -> Val Ix -> m (Val Ix)
+eqReduce :: forall m. MonadEvaluator m => Env -> Val -> VTy -> Val -> m Val
 eqReduce env vt va vu = eqReduceType va
   where
     -- Initially driven just by the type
-    eqReduceType :: VTy Ix -> m (Val Ix)
+    eqReduceType :: VTy -> m Val
     -- Rule Eq-Fun
     eqReduceType (VPi s x a b) = do
       -- Γ ⊢ f ~[Π(x : A). B] g => Π(x : A). f x ~[B] g x
@@ -207,7 +205,7 @@ eqReduce env vt va vu = eqReduceType va
     eqReduceType va = eqReduceAll vt va vu
 
     -- Then driven by terms and type
-    eqReduceAll :: Val Ix -> VTy Ix -> Val Ix -> m (Val Ix)
+    eqReduceAll :: Val -> VTy -> Val -> m Val
     -- Rules Eq-Univ and Eq-Univ-≠
     eqReduceAll vt (VU Relevant) vu
       | headNeq vt vu = pure VEmpty
@@ -221,8 +219,8 @@ eqReduce env vt va vu = eqReduceType va
           a'_eq_a <- eqReduce env a' (VU s) a
           let b_eq_b' ve va' = do
                 let env'' = env :> (Bound, ve) :> (Bound, va')
-                e <- quoteToProp env'' ve
-                va <- cast a' a e va'
+                e_prop <- valToVProp ve
+                va <- cast a' a e_prop va'
                 bindM3 (eqReduce env'') (app' b va) (pure (VU Relevant)) (app' b' va')
               forall_x'_b_eq_b' ve = VPi s x' a' <$> makeFnClosure' (b_eq_b' ve)
           VExists (Name "$e") a'_eq_a <$> makeFnClosure' forall_x'_b_eq_b'
@@ -231,8 +229,8 @@ eqReduce env vt va vu = eqReduceType va
       a_eq_a' <- eqReduce env a (VU Relevant) a'
       let b_eq_b' ve va = do
             let env'' = env :> (Bound, ve) :> (Bound, va)
-            e <- quoteToProp env'' ve
-            va' <- cast a a' e va
+            e_prop <- valToVProp ve
+            va' <- cast a a' e_prop va
             bindM3 (eqReduce env'') (app' b va) (pure (VU Relevant)) (app' b' va')
           forall_x_b_eq_b' ve = VPi Relevant x a <$> makeFnClosure' (b_eq_b' ve)
       VExists (Name "$e") a_eq_a' <$> makeFnClosure' forall_x_b_eq_b'
@@ -241,9 +239,9 @@ eqReduce env vt va vu = eqReduceType va
       a_eq_a' <- eqReduce env a (VU Relevant) a'
       let rxy_eq_rx'y' ve vx vy = do
             let env''' = env :> (Bound, ve) :> (Bound, vx) :> (Bound, vy)
-            e <- quoteToProp env''' ve
-            vx' <- cast a a' e vx
-            vy' <- cast a a' e vy
+            e_prop <- valToVProp ve
+            vx' <- cast a a' e_prop vx
+            vy' <- cast a a' e_prop vy
             bindM3 (eqReduce env''') (app' r vx vy) (pure (VU Irrelevant)) (app' r' vx' vy')
           forall_y_rxy_eq_rx'y' ve vx = VPi Relevant y a <$> makeFnClosure' (rxy_eq_rx'y' ve vx)
           forall_x_y_rxy_eq_rx'y' ve = VPi Relevant x a <$> makeFnClosure' (forall_y_rxy_eq_rx'y' ve)
@@ -263,13 +261,14 @@ eqReduce env vt va vu = eqReduceType va
       t' <- p' $$ VFst
       u' <- p' $$ VSnd
       t_eq_t' <- eqReduce env t a t'
-      tm_b <- quote (level env + 2) =<< app' b (VVar (level env))
+      -- tm_b <- quote (level env + 2) =<< app' b (VVar (level env))
       let u_eq_u' ve = do
             let env' = env :> (Bound, ve)
-            e <- quoteToProp env' ve
-            tm_t <- quote (level env') t
-            tm_t' <- quote (level env') t'
-            let ap_B_e = Ap (U Relevant) x tm_b tm_t tm_t' $$$ e
+            e_prop <- valToVProp ve
+            b_prop <- closureToVProp b
+            t_prop <- valToVProp t
+            t'_prop <- valToVProp t'
+            let ap_B_e = PAp (PU Relevant) x b_prop t_prop t'_prop e_prop
             let cast_b_t_b_t'_u = bindM4 cast (app' b t) (app' b t') (pure ap_B_e) (pure u)
             bindM3 (eqReduce env') cast_b_t_b_t'_u (app' b t') (pure u')
       VExists (Name "$e") t_eq_t' <$> makeFnClosure' u_eq_u'
@@ -280,11 +279,11 @@ eqReduce env vt va vu = eqReduceType va
       a_eq_a' <- eqReduce env a (VU Relevant) a'
       let t_eq_t' ve = do
             let env' = env :> (Bound, ve)
-            e <- quoteToProp env' ve
+            e <- valToVProp ve
             bindM3 (eqReduce env') (cast a a' e t) (pure a') (pure t')
           u_eq_u' ve = do
             let env'' = env :> (Bound, ve) :> (Bound, VVar (level env + 1))
-            e <- quoteToProp env'' ve
+            e <- valToVProp ve
             bindM3 (eqReduce env'') (cast a a' e u) (pure a') (pure u')
           t_eq_t'_and_u_eq_u' ve = VAnd <$> t_eq_t' ve <*> u_eq_u' ve
       VExists (Name "$e") a_eq_a' <$> makeFnClosure' t_eq_t'_and_u_eq_u'
@@ -309,7 +308,7 @@ eqReduce env vt va vu = eqReduceType va
     eqReduceAll t a u = pure (VEq t a u)
 
     -- Test if type has reduced to know its head constructor
-    hasTypeHead :: VTy Ix -> Bool
+    hasTypeHead :: VTy -> Bool
     hasTypeHead VNat = True
     hasTypeHead (VPi {}) = True
     hasTypeHead (VU {}) = True
@@ -319,7 +318,7 @@ eqReduce env vt va vu = eqReduceType va
     hasTypeHead _ = False
 
     -- Test if two known head constructors are different
-    headNeq :: VTy Ix -> VTy Ix -> Bool
+    headNeq :: VTy -> VTy -> Bool
     headNeq VNat VNat = False
     headNeq (VPi {}) (VPi {}) = False
     headNeq (VU {}) (VU {}) = False
@@ -328,7 +327,7 @@ eqReduce env vt va vu = eqReduceType va
     headNeq (VId {}) (VId {}) = False
     headNeq t u = hasTypeHead t && hasTypeHead u
 
-cast :: MonadEvaluator m => VTy Ix -> VTy Ix -> VProp Ix -> Val Ix -> m (Val Ix)
+cast :: MonadEvaluator m => VTy -> VTy -> VProp -> Val -> m Val
 -- Rule Cast-Zero
 cast VNat VNat _ VZero = pure VZero
 -- Rule Cast-Succ
@@ -339,26 +338,27 @@ cast (VU s) (VU s') _ a
 -- Rule Cast-Pi
 cast (VPi _ _ a b) (VPi _ x' a' b') e f = do
   let cast_b_b' va' = do
-        va <- cast a' a (PropFst $$$ e) va'
-        bindM4 cast (app' b va) (app' b' va') (pure ((\e -> App (PropSnd e) (Var 0)) $$$ e)) (f $$ VApp va)
+        va <- cast a' a (PPropFst e) va'
+        a'_prop <- valToVProp va'
+        bindM4 cast (app' b va) (app' b' va') (pure (PApp (PPropSnd e) a'_prop)) (f $$ VApp va)
   VLambda x' <$> makeFnClosure' cast_b_b'
 cast (VSigma _ a b) (VSigma _ a' b') e (VPair t u) = do
-  t' <- cast a a' (PropFst $$$ e) t
-  -- TODO: this proof should actually be [snd e t] but as of now there is no way to quote [t]
-  u' <- bindM4 cast (app' b t) (app' b' t') (pure (PropSnd $$$ e)) (pure u)
+  t' <- cast a a' (PPropFst e) t
+  t_prop <- valToVProp t
+  u' <- bindM4 cast (app' b t) (app' b' t') (pure (PApp (PPropSnd e) t_prop)) (pure u)
   pure (VPair t' u')
 cast a@(VSigma {}) b@(VSigma {}) e p = do
   t <- p $$ VFst
   u <- p $$ VSnd
   cast a b e (VPair t u)
 cast (VQuotient a _ _ _ _ _ _ _ _ _ _ _ _ _ _ _) (VQuotient a' _ _ _ _ _ _ _ _ _ _ _ _ _ _ _) e (VQProj t) =
-  VQProj <$> cast a a' (PropFst $$$ e) t
+  VQProj <$> cast a a' (PPropFst e) t
 -- TODO: This is currently horrible, possibly try to come up with a better system for
 -- proof manipulation
 cast (VId {}) (VId {}) _ (VIdRefl _) = undefined
 -- cast (VId {}) (VId {}) e (VIdRefl _) =
 --   pure (VIdPath ((\e -> Trans (Sym (Fst (Snd e))) (Snd (Snd e))) $$$ e))
-cast (VId {}) (VId {}) _ (VIdPath (VProp _ _)) = undefined
+cast (VId {}) (VId {}) _ (VIdPath _) = undefined
 -- cast (VId va _ _) (VId va' _ _) (VProp pEnv e') (VIdPath (VProp _ e)) =
 -- let a = quote lvl va
 --     a' = quote lvl va'
@@ -367,34 +367,260 @@ cast (VId {}) (VId {}) _ (VIdPath (VProp _ _)) = undefined
 --     u_eq_u' = Snd (Snd e')
 --     t'_eq_u' = Trans t'_eq_t (Trans t_eq_u u_eq_u')
 -- pure (VIdPath (VProp env t'_eq_u'))
-cast (VMu tag f fty x cs (Just a)) (VMu _ _ _ _ _ (Just a')) e (VCons ci t (VProp env e')) = do
-  let (_, _, _, ixi) = maybe (error "BUG: Impossible") id (lookup ci cs)
+cast (VMu tag f fty x cs (Just a)) (VMu _ _ _ _ _ (Just a')) e (VCons ci t e') = do
+  let (_, _, _, ixi) = fromMaybe (error "BUG: Impossible") (lookup ci cs)
       muF = VMu tag f fty x cs Nothing
   ixi_muF_a_t <- app' ixi muF a t
-  -- TODO: Do this properly (hopefully) with semantic propositions
-  ixi_tm <- quote (level env) ixi_muF_a_t
-  a_tm <- quote (level env) a
-  a'_tm <- quote (level env) a'
-  pure (VCons ci t (Trans ixi_tm a_tm a'_tm e' $$$ e))
-cast (VBox a) (VBox b) e (VBoxProof t@(VProp env _)) = do
-  t' <- cast a b e (VOne t)
-  VBoxProof <$> quoteToProp env t'
+  ixi_prop <- valToVProp ixi_muF_a_t
+  a_prop <- valToVProp a
+  a'_prop <- valToVProp a'
+  pure (VCons ci t (PTrans ixi_prop a_prop a'_prop e' e))
+cast (VBox a) (VBox b) e (VBoxProof t) = do
+  t' <- cast a b e (VProp t)
+  VBoxProof <$> valToVProp t'
 cast a b e t = pure (VCast a b e t)
 
-quoteToProp :: MonadEvaluator m => Env Ix -> Val Ix -> m (VProp Ix)
-quoteToProp env t = VProp env <$> quote (level env) t
+envToPropEnv :: MonadEvaluator m => Env -> m PropEnv
+envToPropEnv = mapM (\(bd, v) -> (bd,) <$> valToVProp v)
 
-prop :: MonadEvaluator m => Env Ix -> Term Ix -> m (VProp Ix)
-prop env t = pure (VProp env t)
+spineToVProp :: forall m. MonadEvaluator m => VProp -> VSpine -> m VProp
+spineToVProp base [] = pure base
+spineToVProp base (sp :> VApp v) = do
+  sp <- spineToVProp base sp
+  v <- valToVProp v
+  pure (PApp sp v)
+spineToVProp base (sp :> VNElim z a t0 x ih ts) = do
+  sp <- spineToVProp base sp
+  a <- closureToVProp a
+  t0 <- valToVProp t0
+  ts <- closureToVProp ts
+  pure (PNElim z a t0 x ih ts sp)
+spineToVProp base (sp :> VFst) = PFst <$> spineToVProp base sp
+spineToVProp base (sp :> VSnd) = PSnd <$> spineToVProp base sp
+spineToVProp base (sp :> VQElim z b x tpi px py pe p) = do
+  sp <- spineToVProp base sp
+  b <- closureToVProp b
+  tpi <- closureToVProp tpi
+  pure (PQElim z b x tpi px py pe p sp)
+spineToVProp base (sp :> VJ a t x pf b u t') = do
+  sp <- spineToVProp base sp
+  a <- valToVProp a
+  t <- valToVProp t
+  b <- closureToVProp b
+  u <- valToVProp u
+  t' <- valToVProp t'
+  pure (PJ a t x pf b u t' sp)
+spineToVProp base (sp :> VBoxElim) = PBoxElim <$> spineToVProp base sp
+spineToVProp base (sp :> VMatch x p bs) = do
+  sp <- spineToVProp base sp
+  p <- closureToVProp p
+  bs <- mapM branchToVProp bs
+  pure (PMatch sp x p bs)
+  where
+    branchToVProp
+      :: (Name, Binder, Binder, Closure (A 2) Val)
+      -> m (Name, Binder, Binder, Closure (A 2) VProp)
+    branchToVProp (c, x, e, t) = (c,x,e,) <$> closureToVProp t
 
-closure :: forall n m. MonadEvaluator m => Env Ix -> Term Ix -> m (Closure n Ix)
+valToVProp :: forall m. MonadEvaluator m => Val -> m VProp
+valToVProp (VRigid x sp) = spineToVProp (PVar x) sp
+valToVProp (VFlex mv env sp) = do
+  env' <- envToPropEnv env
+  spineToVProp (PMeta mv env') sp
+valToVProp (VU s) = pure (PU s)
+valToVProp (VLambda x t) = PLambda x <$> closureToVProp t
+valToVProp (VPi s x a b) = PPi s x <$> valToVProp a <*> closureToVProp b
+valToVProp VZero = pure PZero
+valToVProp (VSucc n) = PSucc <$> valToVProp n
+valToVProp VNat = pure PNat
+valToVProp (VExists x a b) = PExists x <$> valToVProp a <*> closureToVProp b
+valToVProp (VAbort a t) = PAbort <$> valToVProp a <*> pure t
+valToVProp VEmpty = pure PEmpty
+valToVProp (VProp p) = pure p
+valToVProp VUnit = pure PUnit
+valToVProp (VEq t a u) = PEq <$> valToVProp t <*> valToVProp a <*> valToVProp u
+valToVProp (VCast a b e t) = PCast <$> valToVProp a <*> valToVProp b <*> pure e <*> valToVProp t
+valToVProp (VPair t u) = PPair <$> valToVProp t <*> valToVProp u
+valToVProp (VSigma x a b) = PSigma x <$> valToVProp a <*> closureToVProp b
+valToVProp (VQuotient a x y r rx rr sx sy sxy rs tx ty tz txy tyz rt) = do
+  a <- valToVProp a
+  r <- closureToVProp r
+  pure (PQuotient a x y r rx rr sx sy sxy rs tx ty tz txy tyz rt)
+valToVProp (VQProj t) = PQProj <$> valToVProp t
+valToVProp (VIdRefl t) = PIdRefl <$> valToVProp t
+valToVProp (VIdPath e) = pure (PIdPath e)
+valToVProp (VId a t u) = PId <$> valToVProp a <*> valToVProp t <*> valToVProp u
+valToVProp (VCons c t e) = PCons c <$> valToVProp t <*> pure e
+valToVProp (VFixedPoint i g f p x c t a sp) = do
+  i <- valToVProp i
+  c <- closureToVProp c
+  t <- closureToVProp t
+  a <- mapM valToVProp a
+  let fp = PFixedPoint i g f p x c t
+  case a of
+    Just a -> spineToVProp (PApp fp a) sp
+    Nothing -> pure fp
+valToVProp (VMu tag f t x cs a) = do
+  t <- valToVProp t
+  cs <- mapM consToVProp cs
+  a <- mapM valToVProp a
+  let muF = PMu tag f t x cs
+  case a of
+    Just a -> pure (PApp muF a)
+    Nothing -> pure muF
+  where
+    consToVProp
+      :: (Name, (Relevance, Binder, Closure (A 2) Val, Closure (A 3) Val))
+      -> m (Name, Relevance, Binder, Closure (A 2) VProp, Closure (A 3) VProp)
+    consToVProp (ci, (si, xi, bi, ixi)) = do
+      bi <- closureToVProp bi
+      ixi <- closureToVProp ixi
+      pure (ci, si, xi, bi, ixi)
+valToVProp (VBoxProof p) = pure (PBoxProof p)
+valToVProp (VBox a) = PBox <$> valToVProp a
+
+closureToVProp :: forall m n. MonadEvaluator m => Closure n Val -> m (Closure n VProp)
+closureToVProp (Closure env t) = Closure <$> mapM (\(bd, v) -> (bd,) <$> valToVProp v) env <*> pure t
+closureToVProp (Lift v) = Lift <$> valToVProp v
+closureToVProp (LiftClosure cl) = LiftClosure <$> closureToVProp cl
+closureToVProp (Function f) = do
+  let f' = closureToVProp @Evaluator . f . VProp
+  Function <$> evaluate (push f')
+
+-- quoteToProp :: MonadEvaluator m => Env Ix -> Val Ix -> m (VProp Ix)
+-- quoteToProp env t = VProp env <$> quote (level env) t
+
+evalProp :: MonadEvaluator m => Env -> Term Ix -> m VProp
+evalProp env t = do
+  env' <- envToPropEnv env
+  evalProp' env' t
+
+evalProp' :: forall m. MonadEvaluator m => PropEnv -> Term Ix -> m VProp
+evalProp' env (Var (Ix x)) = pure (snd (env !! x))
+evalProp' _ (U s) = pure (PU s)
+evalProp' env (Lambda x t) = PLambda x <$> propClosure' env t
+evalProp' env (App t u) = PApp <$> evalProp' env t <*> evalProp' env u
+evalProp' env (Pi s x a b) = PPi s x <$> evalProp' env a <*> propClosure' env b
+evalProp' _ Zero = pure PZero
+evalProp' env (Succ n) = PSucc <$> evalProp' env n
+evalProp' env (NElim z a t0 x ih ts n) = do
+  a <- propClosure' env a
+  t0 <- evalProp' env t0
+  ts <- propClosure' env ts
+  n <- evalProp' env n
+  pure (PNElim z a t0 x ih ts n)
+evalProp' _ Nat = pure PNat
+evalProp' env (PropPair t u) = PPropPair <$> evalProp' env t <*> evalProp' env u
+evalProp' env (PropFst t) = PPropFst <$> evalProp' env t
+evalProp' env (PropSnd t) = PPropSnd <$> evalProp' env t
+evalProp' env (Exists x a b) = PExists x <$> evalProp' env a <*> propClosure' env b
+evalProp' env (Abort a t) = PAbort <$> evalProp' env a <*> evalProp' env t
+evalProp' _ Empty = pure PEmpty
+evalProp' _ One = pure POne
+evalProp' _ Unit = pure PUnit
+evalProp' env (Eq t a u) = PEq <$> evalProp' env t <*> evalProp' env a <*> evalProp' env u
+evalProp' env (Refl t) = PRefl <$> evalProp' env t
+evalProp' env (Sym t u e) = PSym <$> evalProp' env t <*> evalProp' env u <*> evalProp' env e
+evalProp' env (Trans t u v e e') =
+  PTrans <$> evalProp' env t <*> evalProp' env u <*> evalProp' env v <*> evalProp' env e <*> evalProp' env e'
+evalProp' env (Ap b x t u v e) = do
+  b <- evalProp' env b
+  t <- propClosure' env t
+  u <- evalProp' env u
+  v <- evalProp' env v
+  e <- evalProp' env e
+  pure (PAp b x t u v e)
+evalProp' env (Transp t x pf b u t' e) = do
+  t <- evalProp' env t
+  b <- propClosure' env b
+  u <- evalProp' env u
+  t' <- evalProp' env t'
+  e <- evalProp' env e
+  pure (PTransp t x pf b u t' e)
+evalProp' env (Cast a b e t) =
+  PCast <$> evalProp' env a <*> evalProp' env b <*> evalProp' env e <*> evalProp' env t
+evalProp' env (Pair t u) = PPair <$> evalProp' env t <*> evalProp' env u
+evalProp' env (Fst t) = PFst <$> evalProp' env t
+evalProp' env (Snd t) = PSnd <$> evalProp' env t
+evalProp' env (Sigma x a b) = PSigma x <$> evalProp' env a <*> propClosure' env b
+evalProp' env (Quotient a x y r rx rr sx sy sxy rs tx ty tz txy tyz rt) = do
+  a <- evalProp' env a
+  r <- propClosure' env r
+  rr <- propClosure' env rr
+  rs <- propClosure' env rs
+  rt <- propClosure' env rt
+  pure (PQuotient a x y r rx rr sx sy sxy rs tx ty tz txy tyz rt)
+evalProp' env (QProj t) = PQProj <$> evalProp' env t
+evalProp' env (QElim z b x tpi px py pe p u) = do
+  b <- propClosure' env b
+  tpi <- propClosure' env tpi
+  p <- propClosure' env p
+  u <- evalProp' env u
+  pure (PQElim z b x tpi px py pe p u)
+evalProp' env (IdRefl t) = PIdRefl <$> evalProp' env t
+evalProp' env (IdPath e) = PIdPath <$> evalProp' env e
+evalProp' env (J a t x pf b u t' e) = do
+  a <- evalProp' env a
+  t <- evalProp' env t
+  b <- propClosure' env b
+  u <- evalProp' env u
+  t' <- evalProp' env t'
+  e <- evalProp' env e
+  pure (PJ a t x pf b u t' e)
+evalProp' env (Id a t u) = PId <$> evalProp' env a <*> evalProp' env t <*> evalProp' env u
+evalProp' env (BoxProof t) = PBoxProof <$> evalProp' env t
+evalProp' env (BoxElim t) = PBoxElim <$> evalProp' env t
+evalProp' env (Box a) = PBox <$> evalProp' env a
+evalProp' env (Cons c t e) = PCons c <$> evalProp' env t <*> evalProp' env e
+evalProp' env (Match t x p bs) = do
+  t <- evalProp' env t
+  p <- propClosure' env p
+  bs <- mapM evalBranch bs
+  pure (PMatch t x p bs)
+  where
+    evalBranch :: (Name, Binder, Binder, Term Ix) -> m (Name, Binder, Binder, Closure (A 2) VProp)
+    evalBranch (c, x, e, t) = (c,x,e,) <$> propClosure' env t
+evalProp' env (FixedPoint i g f p x c t) = do
+  i <- evalProp' env i
+  c <- propClosure' env c
+  t <- propClosure' env t
+  pure (PFixedPoint i g f p x c t)
+evalProp' env (Mu tag f t x cs) = do
+  t <- evalProp' env t
+  cs <- mapM evalCons cs
+  pure (PMu tag f t x cs)
+  where
+    evalCons
+      :: (Name, Relevance, Binder, Term Ix, Name, Term Ix)
+      -> m (Name, Relevance, Binder, Closure (A 2) VProp, Closure (A 3) VProp)
+    evalCons (ci, si, xi, bi, _, ixi) = do
+      bi <- propClosure' env bi
+      ixi <- propClosure' env ixi
+      pure (ci, si, xi, bi, ixi)
+evalProp' env (Let x a t u) = do
+  a <- evalProp' env a
+  t <- evalProp' env t
+  u <- propClosure' env u
+  pure (PLet x a t u)
+evalProp' env (Annotation t a) = PAnnotation <$> evalProp' env t <*> evalProp' env a
+evalProp' env (Meta m) = pure (PMeta m env)
+
+closure :: forall n m. MonadEvaluator m => Env -> Term Ix -> m (Closure n Val)
 closure env t = pure (Closure env t)
+
+propClosure :: forall n m. MonadEvaluator m => Env -> Term Ix -> m (Closure n VProp)
+propClosure env t = do
+  env' <- envToPropEnv env
+  propClosure' env' t
+
+propClosure' :: forall n m. MonadEvaluator m => PropEnv -> Term Ix -> m (Closure n VProp)
+propClosure' env t = pure (Closure env t)
 
 branch
   :: MonadEvaluator m
-  => Env Ix
+  => Env
   -> (Name, Binder, Binder, Term Ix)
-  -> m (Name, Binder, Binder, Closure (A 2) Ix)
+  -> m (Name, Binder, Binder, Closure (A 2) Val)
 branch env (c, x, e, t) = (c,x,e,) <$> closure env t
 
 evalSort :: MonadEvaluator m => Relevance -> m Relevance
@@ -406,7 +632,7 @@ evalSort (SortMeta m) = do
     Just s -> pure s
     Nothing -> pure (SortMeta m)
 
-eval :: forall m. MonadEvaluator m => Env Ix -> Term Ix -> m (Val Ix)
+eval :: forall m. MonadEvaluator m => Env -> Term Ix -> m Val
 eval env (Var (Ix x)) = pure (snd (env !! x))
 eval _ (U s) = VU <$> evalSort s
 eval env (Lambda x e) = pure (VLambda x (Closure env e))
@@ -422,21 +648,21 @@ eval env (NElim z a t0 x ih ts n) = do
       elim = VNElim z va vt0 x ih vts
   n $$ elim
 eval _ Nat = pure VNat
-eval env p@(PropPair {}) = VOne <$> prop env p
-eval env p@(PropFst _) = VOne <$> prop env p
-eval env p@(PropSnd _) = VOne <$> prop env p
+eval env p@(PropPair {}) = VProp <$> evalProp env p
+eval env p@(PropFst _) = VProp <$> evalProp env p
+eval env p@(PropSnd _) = VProp <$> evalProp env p
 eval env (Exists x a b) = VExists x <$> eval env a <*> closure env b
-eval env (Abort a t) = VAbort <$> eval env a <*> prop env t
+eval env (Abort a t) = VAbort <$> eval env a <*> evalProp env t
 eval _ Empty = pure VEmpty
-eval env p@One = VOne <$> prop env p
+eval env p@One = VProp <$> evalProp env p
 eval _ Unit = pure VUnit
 eval env (Eq t a u) = bindM3 (eqReduce env) (eval env t) (eval env a) (eval env u)
-eval env p@(Refl _) = VOne <$> prop env p
-eval env p@(Sym {}) = VOne <$> prop env p
-eval env p@(Trans {}) = VOne <$> prop env p
-eval env p@(Ap {}) = VOne <$> prop env p
-eval env p@(Transp {}) = VOne <$> prop env p
-eval env (Cast a b e t) = bindM4 cast (eval env a) (eval env b) (prop env e) (eval env t)
+eval env p@(Refl _) = VProp <$> evalProp env p
+eval env p@(Sym {}) = VProp <$> evalProp env p
+eval env p@(Trans {}) = VProp <$> evalProp env p
+eval env p@(Ap {}) = VProp <$> evalProp env p
+eval env p@(Transp {}) = VProp <$> evalProp env p
+eval env (Cast a b e t) = bindM4 cast (eval env a) (eval env b) (evalProp env e) (eval env t)
 eval env (Pair t u) = VPair <$> eval env t <*> eval env u
 eval env (Fst p) = elimM (eval env p) (pure VFst)
 eval env (Snd p) = elimM (eval env p) (pure VSnd)
@@ -444,19 +670,19 @@ eval env (Sigma x a b) = VSigma x <$> eval env a <*> closure env b
 eval env (Quotient a x y r rx rr sx sy sxy rs tx ty tz txy tyz rt) = do
   a <- eval env a
   r <- closure env r
-  rr <- prop env rr
-  rs <- prop env rs
-  rt <- prop env rt
+  rr <- propClosure env rr
+  rs <- propClosure env rs
+  rt <- propClosure env rt
   pure (VQuotient a x y r rx rr sx sy sxy rs tx ty tz txy tyz rt)
 eval env (QProj t) = VQProj <$> eval env t
 eval env (QElim z b x tpi px py pe p u) = do
   u <- eval env u
   b <- closure env b
   tpi <- closure env tpi
-  p <- prop env p
+  p <- propClosure env p
   u $$ VQElim z b x tpi px py pe p
 eval env (IdRefl t) = VIdRefl <$> eval env t
-eval env (IdPath e) = VIdPath <$> prop env e
+eval env (IdPath e) = VIdPath <$> evalProp env e
 eval env (J a t x pf b u t' e) = do
   a <- eval env a
   t <- eval env t
@@ -466,12 +692,12 @@ eval env (J a t x pf b u t' e) = do
   e <- eval env e
   e $$ VJ a t x pf b u t'
 eval env (Id a t u) = VId <$> eval env a <*> eval env t <*> eval env u
-eval env (BoxProof e) = VBoxProof <$> prop env e
+eval env (BoxProof e) = VBoxProof <$> evalProp env e
 eval env (BoxElim t) = do
   t <- eval env t
   t $$ VBoxElim
 eval env (Box a) = VBox <$> eval env a
-eval env (Cons c t e) = VCons c <$> eval env t <*> prop env e
+eval env (Cons c t e) = VCons c <$> eval env t <*> evalProp env e
 eval env (Match t x p bs) = do
   t <- eval env t
   p <- closure env p
@@ -498,13 +724,13 @@ eval env (Meta mv) = do
 
 match
   :: MonadEvaluator m
-  => Val Ix
+  => Val
   -> Binder
-  -> Closure (A 1) Ix
-  -> [(Name, Binder, Binder, Closure (A 2) Ix)]
-  -> m (Val Ix)
+  -> Closure (A 1) Val
+  -> [(Name, Binder, Binder, Closure (A 2) Val)]
+  -> m Val
 match (VCons c u e) _ _ ((c', _, _, t) : _)
-  | c == c' = app' t u (VOne e)
+  | c == c' = app' t u (VProp e)
 match (VRigid x sp) x' p bs = pure (VRigid x (sp :> VMatch x' p bs))
 match (VFlex m env sp) x p bs = pure (VFlex m env (sp :> VMatch x p bs))
 match t x p (_ : bs) = match t x p bs
@@ -516,7 +742,35 @@ match v _ _ [] = do
 
 infixl 8 $$
 
-($$) :: MonadEvaluator m => Val Ix -> VElim Ix -> m (Val Ix)
+($$) :: MonadEvaluator m => Val -> VElim -> m Val
+-- Eliminators applied to propositions get pushed under the proposition and
+-- never compute
+(VProp prop) $$ VApp t = do
+  t_prop <- valToVProp t
+  pure (VProp (PApp prop t_prop))
+(VProp prop) $$ (VNElim z a t0 x ih ts) = do
+  a <- closureToVProp a
+  t0 <- valToVProp t0
+  ts <- closureToVProp ts
+  pure (VProp (PNElim z a t0 x ih ts prop))
+(VProp prop) $$ VFst = pure (VProp (PFst prop))
+(VProp prop) $$ VSnd = pure (VProp (PSnd prop))
+(VProp prop) $$ (VQElim z b x tpi px py pe p) = do
+  b <- closureToVProp b
+  tpi <- closureToVProp tpi
+  pure (VProp (PQElim z b x tpi px py pe p prop))
+(VProp prop) $$ (VJ a t x pf b u v) = do
+  a <- valToVProp a
+  t <- valToVProp t
+  b <- closureToVProp b
+  u <- valToVProp u
+  v <- valToVProp v
+  pure (VProp (PJ a t x pf b u v prop))
+(VProp prop) $$ VBoxElim = pure (VProp (PBoxElim prop))
+(VProp prop) $$ (VMatch x p bs) = do
+  p <- closureToVProp p
+  bs <- mapM (\(c, x, e, t) -> (c,x,e,) <$> closureToVProp t) bs
+  pure (VProp (PMatch prop x p bs))
 (VLambda _ c) $$ (VApp u) = app' c u
 -- Only reduce a fixed point [(fix f) ps a => f (fix f) ps a] when
 -- [a] is a normal form; i.e. a constructor. This avoids the risk of
@@ -547,26 +801,25 @@ VZero $$ (VNElim _ _ t0 _ _ _) = pure t0
 --       tm_t' = quote lvl t'
 --       eqJ = Transp tm_t (Name "x") Hole (quote (lvl + 2) (app'))
 --   cast b_t_idrefl_t b_t'_idpath_e (VProp env eqJ) u
-(VBoxProof e) $$ VBoxElim = pure (VOne e)
+(VBoxProof e) $$ VBoxElim = pure (VProp e)
 t $$ (VMatch x p bs) = match t x p bs
-(VOne prop@(VProp env _)) $$ t = do
-  -- TODO: level here almost certainly wrong
-  let prop' = ($$$ prop) <$> evaluate (push (\p -> quoteSp (level env) p [t]))
-  VOne <$> prop'
 (VRigid x sp) $$ u = pure (VRigid x (sp :> u))
 (VFlex m env sp) $$ u = pure (VFlex m env (sp :> u))
 _ $$ _ = error "BUG: IMPOSSIBLE (ill-typed evaluation)!"
 
-elimM :: MonadEvaluator m => m (Val Ix) -> m (VElim Ix) -> m (Val Ix)
+elimM :: MonadEvaluator m => m Val -> m VElim -> m Val
 elimM = bindM2 ($$)
 
-app' :: MonadEvaluator m => ClosureApply m n cl Ix => Closure n Ix -> cl
+app' :: MonadEvaluator m => ClosureApply m n cl Val => Closure n Val -> cl
 app' = app eval
 
-appVectorFull' :: (MonadEvaluator m, SNatI n) => Closure n Ix -> V.Vec n (Val Ix) -> m (Val Ix)
-appVectorFull' = appVectorFull eval
+appProp' :: MonadEvaluator m => ClosureApply m n cl VProp => Closure n VProp -> cl
+appProp' = app evalProp'
 
-quoteSp :: forall m. MonadEvaluator m => Lvl -> Term Ix -> VSpine Ix -> m (Term Ix)
+-- appVectorFull' :: (MonadEvaluator m, SNatI n) => Closure n Ix -> V.Vec n Val -> m (Val Ix)
+-- appVectorFull' = appVectorFull eval
+
+quoteSp :: forall m. MonadEvaluator m => Lvl -> Term Ix -> VSpine -> m (Term Ix)
 quoteSp _ base [] = pure base
 quoteSp l base (sp :> VApp u) = App <$> quoteSp l base sp <*> quote l u
 quoteSp l base (sp :> VNElim z a t0 x ih ts) =
@@ -580,7 +833,7 @@ quoteSp l base (sp :> VSnd) = Snd <$> quoteSp l base sp
 quoteSp l base (sp :> VQElim z b x tpi px py pe p) = do
   b <- quote (l + 1) =<< app' b (VVar l)
   tpi <- quote (l + 1) =<< app' tpi (VVar l)
-  p <- quoteProp l p
+  p <- quoteProp (l + 3) =<< appProp' p (PVar l) (PVar (l + 1)) (PVar (l + 2))
   QElim z b x tpi px py pe p <$> quoteSp l base sp
 quoteSp l base (sp :> VJ a t x pf b u v) = do
   a <- quote l a
@@ -596,91 +849,126 @@ quoteSp l base (sp :> VMatch x p bs) = do
   sp <- quoteSp l base sp
   pure (Match sp x p bs)
   where
-    quoteBranch :: (Name, Binder, Binder, Closure (A 2) Ix) -> m (Name, Binder, Binder, Term Ix)
+    quoteBranch :: (Name, Binder, Binder, Closure (A 2) Val) -> m (Name, Binder, Binder, Term Ix)
     quoteBranch (c, x, e, t) = (c,x,e,) <$> (quote (l + 2) =<< app' t (VVar l) (VVar (l + 1)))
 
-quoteProp' :: MonadEvaluator m => Lvl -> Lvl -> VProp Ix -> m (Term Ix)
-quoteProp' lvl by (VProp env t) = quoteProp (lvl + by) (VProp (liftEnv by env) t)
+quoteProp :: forall m. MonadEvaluator m => Lvl -> VProp -> m (Term Ix)
+quoteProp lvl (PVar x) = pure (Var (lvl2ix lvl x))
+quoteProp _ (PMeta mv _) = pure (Meta mv)
+quoteProp _ (PU s) = pure (U s)
+quoteProp lvl (PLambda x t) = Lambda x <$> (quoteProp (lvl + 1) =<< appProp' t (PVar lvl))
+quoteProp lvl (PApp t u) = App <$> quoteProp lvl t <*> quoteProp lvl u
+quoteProp lvl (PPi s x a b) = Pi s x <$> quoteProp lvl a <*> (quoteProp (lvl + 1) =<< appProp' b (PVar lvl))
+quoteProp _ PZero = pure Zero
+quoteProp lvl (PSucc n) = Succ <$> quoteProp lvl n
+quoteProp lvl (PNElim z a t0 x ih ts n) = do
+  a <- quoteProp (lvl + 1) =<< appProp' a (PVar lvl)
+  t0 <- quoteProp lvl t0
+  ts <- quoteProp (lvl + 2) =<< appProp' ts (PVar lvl) (PVar (lvl + 1))
+  n <- quoteProp lvl n
+  pure (NElim z a t0 x ih ts n)
+quoteProp _ PNat = pure Nat
+quoteProp lvl (PPropPair t u) = PropPair <$> quoteProp lvl t <*> quoteProp lvl u
+quoteProp lvl (PPropFst t) = PropFst <$> quoteProp lvl t
+quoteProp lvl (PPropSnd t) = PropSnd <$> quoteProp lvl t
+quoteProp lvl (PExists x a b) = Exists x <$> quoteProp lvl a <*> (quoteProp (lvl + 1) =<< appProp' b (PVar lvl))
+quoteProp lvl (PAbort a t) = Abort <$> quoteProp lvl a <*> quoteProp lvl t
+quoteProp _ PEmpty = pure Empty
+quoteProp _ POne = pure One
+quoteProp _ PUnit = pure Unit
+quoteProp lvl (PEq t a u) = Eq <$> quoteProp lvl t <*> quoteProp lvl a <*> quoteProp lvl u
+quoteProp lvl (PRefl t) = Refl <$> quoteProp lvl t
+quoteProp lvl (PSym t u e) = Sym <$> quoteProp lvl t <*> quoteProp lvl u <*> quoteProp lvl e
+quoteProp lvl (PTrans t u v e e') =
+  Trans <$> quoteProp lvl t <*> quoteProp lvl u <*> quoteProp lvl v <*> quoteProp lvl e <*> quoteProp lvl e'
+quoteProp lvl (PAp b x t u v e) = do
+  b <- quoteProp lvl b
+  t <- quoteProp (lvl + 1) =<< appProp' t (PVar lvl)
+  u <- quoteProp lvl u
+  v <- quoteProp lvl v
+  e <- quoteProp lvl e
+  pure (Ap b x t u v e)
+quoteProp lvl (PTransp t x pf b u t' e) = do
+  t <- quoteProp lvl t
+  b <- quoteProp (lvl + 2) =<< appProp' b (PVar lvl) (PVar (lvl + 1))
+  u <- quoteProp lvl u
+  t' <- quoteProp lvl t'
+  e <- quoteProp lvl e
+  pure (Transp t x pf b u t' e)
+quoteProp lvl (PCast a b e t) = do
+  a <- quoteProp lvl a
+  b <- quoteProp lvl b
+  e <- quoteProp lvl e
+  t <- quoteProp lvl t
+  pure (Cast a b e t)
+quoteProp lvl (PPair t u) = Pair <$> quoteProp lvl t <*> quoteProp lvl u
+quoteProp lvl (PFst t) = Fst <$> quoteProp lvl t
+quoteProp lvl (PSnd t) = Snd <$> quoteProp lvl t
+quoteProp lvl (PSigma x a b) = Sigma x <$> quoteProp lvl a <*> (quoteProp (lvl + 1) =<< appProp' b (PVar lvl))
+quoteProp lvl (PQuotient a x y r rx rr sx sy sxy rs tx ty tz txy tyz rt) = do
+  a <- quoteProp lvl a
+  r <- quoteProp (lvl + 2) =<< appProp' r (PVar lvl) (PVar (lvl + 1))
+  rr <- quoteProp (lvl + 1) =<< appProp' rr (PVar lvl)
+  rs <- quoteProp (lvl + 3) =<< appProp' rs (PVar lvl) (PVar (lvl + 1)) (PVar (lvl + 2))
+  rt <- quoteProp (lvl + 5) =<< appProp' rt (PVar lvl) (PVar (lvl + 1)) (PVar (lvl + 2)) (PVar (lvl + 3)) (PVar (lvl + 4))
+  pure (Quotient a x y r rx rr sx sy sxy rs tx ty tz txy tyz rt)
+quoteProp lvl (PQProj t) = QProj <$> quoteProp lvl t
+quoteProp lvl (PQElim z b x tpi px py pe p u) = do
+  b <- quoteProp (lvl + 1) =<< appProp' b (PVar lvl)
+  tpi <- quoteProp (lvl + 1) =<< appProp' tpi (PVar lvl)
+  p <- quoteProp (lvl + 3) =<< appProp' p (PVar lvl) (PVar (lvl + 1)) (PVar (lvl + 2))
+  u <- quoteProp lvl u
+  pure (QElim z b x tpi px py pe p u)
+quoteProp lvl (PIdRefl t) = IdRefl <$> quoteProp lvl t
+quoteProp lvl (PIdPath e) = IdPath <$> quoteProp lvl e
+quoteProp lvl (PJ a t x pf b u v e) = do
+  a <- quoteProp lvl a
+  t <- quoteProp lvl t
+  b <- quoteProp (lvl + 2) =<< appProp' b (PVar lvl) (PVar (lvl + 1))
+  u <- quoteProp lvl u
+  v <- quoteProp lvl v
+  e <- quoteProp lvl e
+  pure (J a t x pf b u v e)
+quoteProp lvl (PId a t u) = Id <$> quoteProp lvl a <*> quoteProp lvl t <*> quoteProp lvl u
+quoteProp lvl (PBoxProof e) = BoxProof <$> quoteProp lvl e
+quoteProp lvl (PBoxElim t) = BoxElim <$> quoteProp lvl t
+quoteProp lvl (PBox a) = Box <$> quoteProp lvl a
+quoteProp lvl (PCons c t e) = Cons c <$> quoteProp lvl t <*> quoteProp lvl e
+quoteProp lvl (PMatch t x p bs) = do
+  t <- quoteProp lvl t
+  p <- quoteProp (lvl + 1) =<< appProp' p (PVar lvl)
+  bs <- mapM quoteBranch bs
+  pure (Match t x p bs)
   where
-    liftEnv :: Lvl -> Env Ix -> Env Ix
-    liftEnv 0 env = env
-    liftEnv by env = liftEnv (by - 1) env :> (Bound, VVar (lvl + by - 1))
-
-quoteProp :: forall m. MonadEvaluator m => Lvl -> VProp Ix -> m (Term Ix)
-quoteProp lvl (VProp env t) = q env t
+    quoteBranch
+      :: (Name, Binder, Binder, Closure (A 2) VProp)
+      -> m (Name, Binder, Binder, Term Ix)
+    quoteBranch (c, x, e, t) = (c,x,e,) <$> (quoteProp (lvl + 2) =<< appProp' t (PVar lvl) (PVar (lvl + 1)))
+quoteProp lvl (PFixedPoint i g f p x c t) = do
+  i <- quoteProp lvl i
+  c <- quoteProp (lvl + 3) =<< appProp' c (PVar lvl) (PVar (lvl + 1)) (PVar (lvl + 2))
+  t <- quoteProp (lvl + 4) =<< appProp' t (PVar lvl) (PVar (lvl + 1)) (PVar (lvl + 2)) (PVar (lvl + 3))
+  pure (FixedPoint i g f p x c t)
+quoteProp lvl (PMu tag f t x cs) = do
+  t <- quoteProp lvl t
+  cs <- mapM quoteCons cs
+  pure (Mu tag f t x cs)
   where
-    q :: Env Ix -> Term Ix -> m (Term Ix)
-    q env (Var (Ix x)) = quote lvl (snd (env !! x))
-    q env (Lambda x t) =
-      Lambda x <$> q' 1 env t
-    q env (Pi s x a b) =
-      Pi s x <$> q env a <*> q' 1 env b
-    q env (NElim z a t0 x ih ts n) = do
-      a <- q env a
-      t0 <- q env t0
-      ts <- q' 2 env ts
-      n <- q env n
-      pure (NElim z a t0 x ih ts n)
-    q env (Exists x a b) =
-      Exists x <$> q env a <*> q' 1 env b
-    q env (Transp t x pf b u v e) = do
-      t <- q env t
-      b <- q' 2 env b
-      u <- q env u
-      v <- q env v
-      e <- q env e
-      pure (Transp t x pf b u v e)
-    q env (Sigma x a b) =
-      Sigma x <$> q env a <*> q' 1 env b
-    q env (Quotient a x y r rx rr sx sy sxy rs tx ty tz txy tyz rt) = do
-      a <- q env a
-      r <- q' 2 env r
-      rr <- q' 1 env rr
-      rs <- q' 3 env rs
-      rt <- q' 5 env rt
-      pure (Quotient a x y r rx rr sx sy sxy rs tx ty tz txy tyz rt)
-    q env (QElim z b x tpi px py pe p u) = do
-      b <- q' 1 env b
-      tpi <- q' 1 env tpi
-      p <- q' 3 env p
-      u <- q env u
-      pure (QElim z b x tpi px py pe p u)
-    q env (J a t x pf b u v e) = do
-      a <- q env a
-      t <- q env t
-      b <- q' 2 env b
-      u <- q env u
-      v <- q env v
-      e <- q env e
-      pure (J a t x pf b u v e)
-    q env (Match t x p bs) = do
-      t <- q env t
-      p <- q' 1 env p
-      bs <- mapM qBranch bs
-      pure (Match t x p bs)
-      where
-        qBranch :: (Name, Binder, Binder, Term Ix) -> m (Name, Binder, Binder, Term Ix)
-        qBranch (c, x, e, t) = (c,x,e,) <$> q' 2 env t
-    q env (FixedPoint i g f p x c t) = do
-      i <- q env i
-      c <- q' 3 env c
-      t <- q' 4 env t
-      pure (FixedPoint i g f p x c t)
-    q env (Mu tag f fty xs cs) = do
-      fty <- q env fty
-      cs <- mapM qCons cs
-      pure (Mu tag f fty xs cs)
-      where
-        qCons :: (Name, Relevance, Binder, Type Ix, Name, Type Ix) -> m (Name, Relevance, Binder, Type Ix, Name, Type Ix)
-        qCons (ci, si, xi, bi, fi, ixi) = (ci,si,xi,,fi,) <$> q' 2 env bi <*> q' 3 env ixi
-    q env (Let x a t u) =
-      Let x <$> q env a <*> q env t <*> q' 1 env u
-    q env (Fix t) = Fix <$> traverse (q env) t
+    quoteCons
+      :: (Name, Relevance, Binder, Closure (A 2) VProp, Closure (A 3) VProp)
+      -> m (Name, Relevance, Binder, Term Ix, Name, Term Ix)
+    quoteCons (ci, si, xi, bi, ixi) = do
+      bi <- quoteProp (lvl + 2) =<< appProp' bi (PVar lvl) (PVar (lvl + 1))
+      ixi <- quoteProp (lvl + 3) =<< appProp' ixi (PVar lvl) (PVar (lvl + 1)) (PVar (lvl + 2))
+      pure (ci, si, xi, bi, f, ixi)
+quoteProp lvl (PLet x a t u) = do
+  a <- quoteProp lvl a
+  t <- quoteProp lvl t
+  u <- quoteProp (lvl + 1) =<< appProp' u (PVar lvl)
+  pure (Let x a t u)
+quoteProp lvl (PAnnotation t a) = Annotation <$> quoteProp lvl t <*> quoteProp lvl a
 
-    q' :: Lvl -> Env Ix -> Term Ix -> m (Term Ix)
-    q' by env t = quoteProp' lvl by (VProp env t)
-
-quote :: forall m. MonadEvaluator m => Lvl -> Val Ix -> m (Term Ix)
+quote :: forall m. MonadEvaluator m => Lvl -> Val -> m (Term Ix)
 quote lvl (VRigid x sp) = quoteSp lvl (Var (lvl2ix lvl x)) sp
 quote lvl (VFlex mv _ sp) = quoteSp lvl (Meta mv) sp
 quote _ (VU s) = pure (U s)
@@ -693,7 +981,7 @@ quote lvl (VExists x a b) =
   Exists x <$> quote lvl a <*> (quote (lvl + 1) =<< app' b (VVar lvl))
 quote lvl (VAbort a t) = Abort <$> quote lvl a <*> quoteProp lvl t
 quote _ VEmpty = pure Empty
-quote lvl (VOne t) = quoteProp lvl t
+quote lvl (VProp t) = quoteProp lvl t
 quote _ VUnit = pure Unit
 quote lvl (VEq t a u) = Eq <$> quote lvl t <*> quote lvl a <*> quote lvl u
 quote lvl (VCast a b e t) = Cast <$> quote lvl a <*> quote lvl b <*> quoteProp lvl e <*> quote lvl t
@@ -703,9 +991,9 @@ quote lvl (VSigma x a b) =
 quote lvl (VQuotient a x y r rx rr sx sy sxy rs tx ty tz txy tyz rt) = do
   a <- quote lvl a
   r <- quote (lvl + 2) =<< app' r (VVar lvl) (VVar (lvl + 1))
-  rr <- quoteProp' lvl 1 rr
-  rs <- quoteProp' lvl 3 rs
-  rt <- quoteProp' lvl 5 rt
+  rr <- quoteProp (lvl + 1) =<< appProp' rr (PVar lvl)
+  rs <- quoteProp (lvl + 3) =<< appProp' rs (PVar lvl) (PVar (lvl + 1)) (PVar (lvl + 2))
+  rt <- quoteProp (lvl + 5) =<< appProp' rt (PVar lvl) (PVar (lvl + 1)) (PVar (lvl + 2)) (PVar (lvl + 3)) (PVar (lvl + 4))
   pure (Quotient a x y r rx rr sx sy sxy rs tx ty tz txy tyz rt)
 quote lvl (VQProj t) = QProj <$> quote lvl t
 quote lvl (VIdRefl t) = IdRefl <$> quote lvl t
@@ -726,7 +1014,7 @@ quote lvl (VMu tag f fty x cs a) = do
   let vf = VVar lvl
       vx = VVar (lvl + 1)
       quoteCons
-        :: (Name, (Relevance, Binder, Closure (A 2) Ix, Closure (A 3) Ix))
+        :: (Name, (Relevance, Binder, Closure (A 2) Val, Closure (A 3) Val))
         -> m (Name, Relevance, Binder, Type Ix, Name, Type Ix)
       quoteCons (ci, (si, xi, bi, ixi)) = do
         let vxi = VVar (lvl + 2)
@@ -742,10 +1030,10 @@ quote lvl (VMu tag f fty x cs a) = do
 quote lvl (VBoxProof e) = BoxProof <$> quoteProp lvl e
 quote lvl (VBox a) = Box <$> quote lvl a
 
-normalForm :: MonadEvaluator m => Env Ix -> Term Ix -> m (Term Ix)
+normalForm :: MonadEvaluator m => Env -> Term Ix -> m (Term Ix)
 normalForm env t = eval env t >>= quote (level env)
 
-bind :: Binder -> Relevance -> VTy Ix -> Context -> Context
+bind :: Binder -> Relevance -> VTy -> Context -> Context
 bind x s tty ctx =
   ctx
     { types = types ctx :> (x, (s, tty))
@@ -753,15 +1041,15 @@ bind x s tty ctx =
     , env = env ctx :> (Bound, VVar (lvl ctx))
     }
 
-bindR, bindP :: Binder -> VTy Ix -> Context -> Context
+bindR, bindP :: Binder -> VTy -> Context -> Context
 bindR x = bind x Relevant
 bindP x = bind x Irrelevant
 
-bindAll :: [(Binder, (Relevance, VTy Ix))] -> Context -> Context
+bindAll :: [(Binder, (Relevance, VTy))] -> Context -> Context
 bindAll [] gamma = gamma
 bindAll (xs :> (x, (s, t))) gamma = bindAll xs gamma & bind x s t
 
-define :: Binder -> Val Ix -> Relevance -> VTy Ix -> Context -> Context
+define :: Binder -> Val -> Relevance -> VTy -> Context -> Context
 define x t s tty ctx =
   ctx
     { types = types ctx :> (x, (s, tty))
@@ -789,13 +1077,13 @@ invert
   => Position
   -> [Binder]
   -> Lvl
-  -> Env Ix
+  -> Env
   -> Checker (Variant e) PartialRenaming
 invert pos names gamma sub = do
   (dom, renaming) <- inv sub
   pure (PRen {renaming = renaming, dom = dom, cod = gamma})
   where
-    inv :: e `CouldBe` UnificationError => Env Ix -> Checker (Variant e) (Lvl, IM.IntMap Lvl)
+    inv :: e `CouldBe` UnificationError => Env -> Checker (Variant e) (Lvl, IM.IntMap Lvl)
     inv [] = pure (0, IM.empty)
     inv (sub :> (Defined, _)) = do
       (dom, renaming) <- inv sub
@@ -815,89 +1103,140 @@ renameProp
   -> [Binder]
   -> MetaVar
   -> PartialRenaming
-  -> VProp Ix
+  -> VProp
   -> Checker (Variant e) (Term Ix)
-renameProp pos ns m sub (VProp env t) = r (level env) ns sub env t
+renameProp pos ns _ sub (PVar (Lvl x)) =
+  case IM.lookup x (renaming sub) of
+    Nothing -> throw (EscapingVariable (show (ns !! x)) pos)
+    Just x' -> pure (Var (lvl2ix (dom sub) x'))
+renameProp pos _ m _ (PMeta m' _)
+  | m == m' = throw (OccursCheck m pos)
+  | otherwise = pure (Meta m')
+renameProp _ _ _ _ (PU s) = pure (U s)
+renameProp pos ns m sub (PLambda x t) = do
+  t <- renameProp pos (ns :> x) m (liftRenaming 1 sub) =<< appProp' t (PVar (cod sub))
+  pure (Lambda x t)
+renameProp pos ns m sub (PApp t u) = App <$> renameProp pos ns m sub t <*> renameProp pos ns m sub u
+renameProp pos ns m sub (PPi s x a b) = do
+  a <- renameProp pos ns m sub a
+  b <- renameProp pos (ns :> x) m (liftRenaming 1 sub) =<< appProp' b (PVar (cod sub))
+  pure (Pi s x a b)
+renameProp _ _ _ _ PZero = pure Zero
+renameProp pos ns m sub (PSucc n) = Succ <$> renameProp pos ns m sub n
+renameProp pos ns m sub (PNElim z a t0 x ih ts n) = do
+  a <- renameProp pos (ns :> z) m (liftRenaming 1 sub) =<< appProp' a (PVar (cod sub))
+  t0 <- renameProp pos ns m sub t0
+  ts <- renameProp pos (ns :> x :> ih) m (liftRenaming 2 sub) =<< appProp' ts (PVar (cod sub)) (PVar (cod sub + 1))
+  n <- renameProp pos ns m sub n
+  pure (NElim z a t0 x ih ts n)
+renameProp _ _ _ _ PNat = pure Nat
+renameProp pos ns m sub (PPropPair t u) = PropPair <$> renameProp pos ns m sub t <*> renameProp pos ns m sub u
+renameProp pos ns m sub (PPropFst t) = PropFst <$> renameProp pos ns m sub t
+renameProp pos ns m sub (PPropSnd t) = PropSnd <$> renameProp pos ns m sub t
+renameProp pos ns m sub (PExists x a b) = do
+  a <- renameProp pos ns m sub a
+  b <- renameProp pos (ns :> x) m (liftRenaming 1 sub) =<< appProp' b (PVar (cod sub))
+  pure (Exists x a b)
+renameProp pos ns m sub (PAbort a t) = Abort <$> renameProp pos ns m sub a <*> renameProp pos ns m sub t
+renameProp _ _ _ _ PEmpty = pure Empty
+renameProp _ _ _ _ POne = pure One
+renameProp _ _ _ _ PUnit = pure Unit
+renameProp pos ns m sub (PEq t a u) = Eq <$> renameProp pos ns m sub t <*> renameProp pos ns m sub a <*> renameProp pos ns m sub u
+renameProp pos ns m sub (PRefl t) = Refl <$> renameProp pos ns m sub t
+renameProp pos ns m sub (PSym t u e) = Sym <$> renameProp pos ns m sub t <*> renameProp pos ns m sub u <*> renameProp pos ns m sub e
+renameProp pos ns m sub (PTrans t u v e e') =
+  Trans <$> renameProp pos ns m sub t <*> renameProp pos ns m sub u <*> renameProp pos ns m sub v <*> renameProp pos ns m sub e <*> renameProp pos ns m sub e'
+renameProp pos ns m sub (PAp b x t u v e) = do
+  b <- renameProp pos ns m sub b
+  t <- renameProp pos (ns :> x) m (liftRenaming 1 sub) =<< appProp' t (PVar (cod sub))
+  u <- renameProp pos ns m sub u
+  v <- renameProp pos ns m sub v
+  e <- renameProp pos ns m sub e
+  pure (Ap b x t u v e)
+renameProp pos ns m sub (PTransp t x pf b u t' e) = do
+  t <- renameProp pos ns m sub t
+  b <- renameProp pos (ns :> x :> pf) m (liftRenaming 2 sub) =<< appProp' b (PVar (cod sub)) (PVar (cod sub + 1))
+  u <- renameProp pos ns m sub u
+  t' <- renameProp pos ns m sub t'
+  e <- renameProp pos ns m sub e
+  pure (Transp t x pf b u t' e)
+renameProp pos ns m sub (PCast a b e t) = do
+  a <- renameProp pos ns m sub a
+  b <- renameProp pos ns m sub b
+  e <- renameProp pos ns m sub e
+  t <- renameProp pos ns m sub t
+  pure (Cast a b e t)
+renameProp pos ns m sub (PPair t u) = Pair <$> renameProp pos ns m sub t <*> renameProp pos ns m sub u
+renameProp pos ns m sub (PFst t) = Fst <$> renameProp pos ns m sub t
+renameProp pos ns m sub (PSnd t) = Snd <$> renameProp pos ns m sub t
+renameProp pos ns m sub (PSigma x a b) = do
+  a <- renameProp pos ns m sub a
+  b <- renameProp pos (ns :> x) m (liftRenaming 1 sub) =<< appProp' b (PVar (cod sub))
+  pure (Sigma x a b)
+renameProp pos ns m sub (PQuotient a x y r rx rr sx sy sxy rs tx ty tz txy tyz rt) = do
+  a <- renameProp pos ns m sub a
+  r <- renameProp pos (ns :> x :> y) m (liftRenaming 2 sub) =<< appProp' r (PVar (cod sub)) (PVar (cod sub + 1))
+  rr <- renameProp pos (ns :> rx) m (liftRenaming 1 sub) =<< appProp' rr (PVar (cod sub))
+  rs <- renameProp pos (ns :> sx :> sy :> sxy) m (liftRenaming 3 sub) =<< appProp' rs (PVar (cod sub)) (PVar (cod sub + 1)) (PVar (cod sub + 2))
+  rt <- renameProp pos (ns :> tx :> ty :> tz :> txy :> tyz) m (liftRenaming 5 sub) =<< appProp' rt (PVar (cod sub)) (PVar (cod sub + 1)) (PVar (cod sub + 2)) (PVar (cod sub + 3)) (PVar (cod sub + 4))
+  pure (Quotient a x y r rx rr sx sy sxy rs tx ty tz txy tyz rt)
+renameProp pos ns m sub (PQProj t) = QProj <$> renameProp pos ns m sub t
+renameProp pos ns m sub (PQElim z b x tpi px py pe p u) = do
+  b <- renameProp pos (ns :> z) m (liftRenaming 1 sub) =<< appProp' b (PVar (cod sub))
+  tpi <- renameProp pos (ns :> x) m (liftRenaming 1 sub) =<< appProp' tpi (PVar (cod sub))
+  p <- renameProp pos (ns :> px :> py :> pe) m (liftRenaming 3 sub) =<< appProp' p (PVar (cod sub)) (PVar (cod sub + 1)) (PVar (cod sub + 2))
+  u <- renameProp pos ns m sub u
+  pure (QElim z b x tpi px py pe p u)
+renameProp pos ns m sub (PIdRefl t) = IdRefl <$> renameProp pos ns m sub t
+renameProp pos ns m sub (PIdPath e) = IdPath <$> renameProp pos ns m sub e
+renameProp pos ns m sub (PJ a t x pf b u v e) = do
+  a <- renameProp pos ns m sub a
+  t <- renameProp pos ns m sub t
+  b <- renameProp pos (ns :> x :> pf) m (liftRenaming 2 sub) =<< appProp' b (PVar (cod sub)) (PVar (cod sub + 1))
+  u <- renameProp pos ns m sub u
+  v <- renameProp pos ns m sub v
+  e <- renameProp pos ns m sub e
+  pure (J a t x pf b u v e)
+renameProp pos ns m sub (PId a t u) = Id <$> renameProp pos ns m sub a <*> renameProp pos ns m sub t <*> renameProp pos ns m sub u
+renameProp pos ns m sub (PBoxProof e) = BoxProof <$> renameProp pos ns m sub e
+renameProp pos ns m sub (PBoxElim t) = BoxElim <$> renameProp pos ns m sub t
+renameProp pos ns m sub (PBox a) = Box <$> renameProp pos ns m sub a
+renameProp pos ns m sub (PCons c t e) = Cons c <$> renameProp pos ns m sub t <*> renameProp pos ns m sub e
+renameProp pos ns m sub (PMatch t x p bs) = do
+  t <- renameProp pos ns m sub t
+  p <- renameProp pos (ns :> x) m (liftRenaming 1 sub) =<< appProp' p (PVar (cod sub))
+  bs <- mapM quoteBranch bs
+  pure (Match t x p bs)
   where
-    r :: Lvl -> [Binder] -> PartialRenaming -> Env Ix -> Term Ix -> Checker (Variant e) (Term Ix)
-    r _ ns sub env (Var (Ix x)) = rename pos ns m sub (snd (env !! x))
-    r l ns sub env (Lambda x t) =
-      Lambda x <$> r l (ns :> x) (lift 1 sub) (extend l 1 env) t
-    r l ns sub env (Pi s x a b) =
-      Pi s x <$> r l ns sub env a <*> r (l + 1) (ns :> x) (lift 1 sub) (extend l 1 env) b
-    r l ns sub env (NElim z a t0 x ih ts n) = do
-      a <- r l ns sub env a
-      t0 <- r l ns sub env t0
-      ts <- r (l + 2) (ns :> x :> ih) (lift 2 sub) (extend l 2 env) ts
-      n <- r l ns sub env n
-      pure (NElim z a t0 x ih ts n)
-    r l ns sub env (Exists x a b) =
-      Exists x <$> r l ns sub env a <*> r (l + 1) (ns :> x) (lift 1 sub) (extend l 1 env) b
-    r l ns sub env (Transp t x pf b u v e) = do
-      t <- r l ns sub env t
-      b <- r (l + 2) (ns :> x :> pf) (lift 2 sub) (extend l 2 env) b
-      u <- r l ns sub env u
-      v <- r l ns sub env v
-      e <- r l ns sub env e
-      pure (Transp t x pf b u v e)
-    r l ns sub env (Sigma x a b) =
-      Sigma x <$> r l ns sub env a <*> r (l + 1) (ns :> x) (lift 1 sub) (extend l 1 env) b
-    r l ns sub env (Quotient a x y r' rx rr sx sy sxy rs tx ty tz txy tyz rt) = do
-      a <- r l ns sub env a
-      r' <- r (l + 2) (ns :> x :> y) (lift 2 sub) (extend l 2 env) r'
-      rr <- r (l + 1) (ns :> rx) (lift 1 sub) (extend l 1 env) rr
-      rs <- r (l + 3) (ns :> sx :> sy :> sxy) (lift 3 sub) (extend l 3 env) rs
-      rt <- r (l + 5) (ns :> tx :> ty :> tz :> txy :> tyz) (lift 5 sub) (extend l 5 env) rt
-      pure (Quotient a x y r' rx rr sx sy sxy rs tx ty tz txy tyz rt)
-    r l ns sub env (QElim z b x tpi px py pe p u) = do
-      b <- r (l + 1) (ns :> z) (lift 1 sub) (extend l 1 env) b
-      tpi <- r (l + 1) (ns :> x) (lift 1 sub) (extend l 1 env) tpi
-      p <- r (l + 3) (ns :> px :> py :> pe) (lift 3 sub) (extend l 3 env) p
-      u <- r l ns sub env u
-      pure (QElim z b x tpi px py pe p u)
-    r l ns sub env (J a t x pf b u v e) = do
-      a <- r l ns sub env a
-      t <- r l ns sub env t
-      b <- r (l + 2) (ns :> x :> pf) (lift 2 sub) (extend l 2 env) b
-      u <- r l ns sub env u
-      v <- r l ns sub env v
-      e <- r l ns sub env e
-      pure (J a t x pf b u v e)
-    r l ns sub env (Match t x p bs) = do
-      t <- r l ns sub env t
-      p <- r (l + 1) (ns :> x) (lift 1 sub) (extend l 1 env) p
-      bs <- mapM rBranch bs
-      pure (Match t x p bs)
-      where
-        rBranch :: (Name, Binder, Binder, Term Ix) -> Checker (Variant e) (Name, Binder, Binder, Term Ix)
-        rBranch (c, x, e, t) = (c,x,e,) <$> r (l + 2) (ns :> x) (lift 2 sub) (extend l 2 env) t
-    r l ns sub env (FixedPoint i g f p x c t) = do
-      i <- r l ns sub env i
-      c <- r (l + 3) (ns :> g :> p :> x) (lift 3 sub) (extend l 3 env) c
-      t <- r (l + 4) (ns :> g :> f :> p :> x) (lift 4 sub) (extend l 4 env) t
-      pure (FixedPoint i g f p x c t)
-    r l ns sub env (Mu tag f fty x cs) = do
-      fty <- r l ns sub env fty
-      cs <- mapM rCons cs
-      pure (Mu tag f fty x cs)
-      where
-        rCons
-          :: (Name, Relevance, Binder, Type Ix, Name, Type Ix)
-          -> Checker (Variant e) (Name, Relevance, Binder, Type Ix, Name, Type Ix)
-        rCons (ci, si, xi, bi, fi, ixi) = do
-          bi <- r (l + 2) (ns :> Name f :> x) (lift 2 sub) (extend l 2 env) bi
-          ixi <- r (l + 3) (ns :> Name f :> x :> xi) (lift 3 sub) (extend l 3 env) ixi
-          pure (ci, si, xi, bi, fi, ixi)
-    r l ns sub env (Let x a t u) =
-      Let x <$> r l ns sub env a <*> r l ns sub env t <*> r (l + 1) (ns :> x) (lift 1 sub) (extend l 1 env) u
-    r l ns sub env (Fix t) = Fix <$> traverse (r l ns sub env) t
-
-    lift :: Lvl -> PartialRenaming -> PartialRenaming
-    lift = liftRenaming
-
-    extend :: Lvl -> Lvl -> Env Ix -> Env Ix
-    extend _ 0 env = env
-    extend lvl by env = extend lvl (by - 1) env :> (Bound, VVar (lvl + by - 1))
+    quoteBranch
+      :: (Name, Binder, Binder, Closure (A 2) VProp)
+      -> Checker (Variant e) (Name, Binder, Binder, Term Ix)
+    quoteBranch (c, x, e, t) = do
+      t <- renameProp pos (ns :> x :> e) m (liftRenaming 2 sub) =<< appProp' t (PVar (cod sub)) (PVar (cod sub + 1))
+      pure (c, x, e, t)
+renameProp pos ns m sub (PFixedPoint i g f p x c t) = do
+  i <- renameProp pos ns m sub i
+  c <- renameProp pos (ns :> g :> p :> x) m (liftRenaming 3 sub) =<< appProp' c (PVar (cod sub)) (PVar (cod sub + 1)) (PVar (cod sub + 2))
+  t <- renameProp pos (ns :> g :> f :> p :> x) m (liftRenaming 4 sub) =<< appProp' t (PVar (cod sub)) (PVar (cod sub + 1)) (PVar (cod sub + 2)) (PVar (cod sub + 3))
+  pure (FixedPoint i g f p x c t)
+renameProp pos ns m sub (PMu tag f t x cs) = do
+  t <- renameProp pos ns m sub t
+  cs <- mapM quoteCons cs
+  pure (Mu tag f t x cs)
+  where
+    quoteCons
+      :: (Name, Relevance, Binder, Closure (A 2) VProp, Closure (A 3) VProp)
+      -> Checker (Variant e) (Name, Relevance, Binder, Term Ix, Name, Term Ix)
+    quoteCons (ci, si, xi, bi, ixi) = do
+      bi <- renameProp pos (ns :> Name f :> x) m (liftRenaming 2 sub) =<< appProp' bi (PVar (cod sub)) (PVar (cod sub + 1))
+      ixi <- renameProp pos (ns :> Name f :> x :> xi) m (liftRenaming 3 sub) =<< appProp' ixi (PVar (cod sub)) (PVar (cod sub + 1)) (PVar (cod sub + 2))
+      pure (ci, si, xi, bi, f, ixi)
+renameProp pos ns m sub (PLet x a t u) = do
+  a <- renameProp pos ns m sub a
+  t <- renameProp pos ns m sub t
+  u <- renameProp pos (ns :> x) m (liftRenaming 1 sub) =<< appProp' u (PVar (cod sub))
+  pure (Let x a t u)
+renameProp pos ns m sub (PAnnotation t a) = Annotation <$> renameProp pos ns m sub t <*> renameProp pos ns m sub a
 
 renameSp
   :: forall e
@@ -907,7 +1246,7 @@ renameSp
   -> MetaVar
   -> PartialRenaming
   -> Term Ix
-  -> VSpine Ix
+  -> VSpine
   -> Checker (Variant e) (Term Ix)
 renameSp _ _ _ _ base [] = pure base
 renameSp pos ns m sub base (sp :> VApp u) = do
@@ -930,7 +1269,7 @@ renameSp pos ns m sub base (sp :> VQElim z b x tpi px py pe p) = do
   sp <- renameSp pos ns m sub base sp
   b <- rename pos (ns :> z) m (liftRenaming 1 sub) =<< app' b (VVar (cod sub))
   tpi <- rename pos (ns :> x) m (liftRenaming 1 sub) =<< app' tpi (VVar (cod sub))
-  p <- renameProp pos ns m sub p
+  p <- renameProp pos ns m sub =<< appProp' p (PVar (cod sub)) (PVar (cod sub + 1)) (PVar (cod sub + 2))
   pure (QElim z b x tpi px py pe p sp)
 renameSp pos ns m sub base (sp :> VJ a t x pf b u v) = do
   sp <- renameSp pos ns m sub base sp
@@ -949,7 +1288,7 @@ renameSp pos ns m sub base (sp :> VMatch x p bs) = do
   bs <- mapM renameBranch bs
   pure (Match sp x p bs)
   where
-    renameBranch :: (Name, Binder, Binder, Closure (A 2) Ix) -> Checker (Variant e) (Name, Binder, Binder, Term Ix)
+    renameBranch :: (Name, Binder, Binder, Closure (A 2) Val) -> Checker (Variant e) (Name, Binder, Binder, Term Ix)
     renameBranch (c, x, e, t) =
       (c,x,e,) <$> (rename pos ns m (liftRenaming 2 sub) =<< app' t (VVar (cod sub)) (VVar (cod sub + 1)))
 
@@ -960,7 +1299,7 @@ rename
   -> [Binder]
   -> MetaVar
   -> PartialRenaming
-  -> Val Ix
+  -> Val
   -> Checker (Variant e) (Term Ix)
 rename pos ns m sub (VRigid (Lvl x) sp) =
   case IM.lookup x (renaming sub) of
@@ -994,7 +1333,7 @@ rename pos ns m sub (VAbort a t) = do
   t <- renameProp pos ns m sub t
   pure (Abort a t)
 rename _ _ _ _ VEmpty = pure Empty
-rename pos ns m sub (VOne p) = renameProp pos ns m sub p
+rename pos ns m sub (VProp p) = renameProp pos ns m sub p
 rename _ _ _ _ VUnit = pure Unit
 rename pos ns m sub (VEq t a u) = do
   t <- rename pos ns m sub t
@@ -1023,9 +1362,9 @@ rename pos ns m sub (VSigma x a b) = do
 rename pos ns m sub (VQuotient a x y r rx rr sx sy sxy rs tx ty tz txy tyz rt) = do
   a <- rename pos ns m sub a
   r <- rename pos (ns :> x :> y) m (liftRenaming 2 sub) =<< app' r (VVar (cod sub)) (VVar (cod sub + 1))
-  rr <- renameProp pos ns m sub rr
-  rs <- renameProp pos ns m sub rs
-  rt <- renameProp pos ns m sub rt
+  rr <- renameProp pos ns m sub =<< appProp' rr (PVar (cod sub))
+  rs <- renameProp pos ns m sub =<< appProp' rs (PVar (cod sub)) (PVar (cod sub + 1)) (PVar (cod sub + 3))
+  rt <- renameProp pos ns m sub =<< appProp' rt (PVar (cod sub)) (PVar (cod sub + 1)) (PVar (cod sub + 3)) (PVar (cod sub + 3)) (PVar (cod sub + 4))
   pure (Quotient a x y r rx rr sx sy sxy rs tx ty tz txy tyz rt)
 rename pos ns m sub (VQProj t) = QProj <$> rename pos ns m sub t
 rename pos ns m sub (VIdRefl t) = IdRefl <$> rename pos ns m sub t
@@ -1055,7 +1394,7 @@ rename pos ns m sub (VMu tag f fty x cs a) = do
   let vf = VVar (cod sub)
       vx = VVar (cod sub + 1)
       renameCons
-        :: (Name, (Relevance, Binder, Closure (A 2) Ix, Closure (A 3) Ix))
+        :: (Name, (Relevance, Binder, Closure (A 2) Val, Closure (A 3) Val))
         -> Checker (Variant e) (Name, Relevance, Binder, Type Ix, Name, Type Ix)
       renameCons (ci, (si, xi, bi, ixi)) = do
         let vxi = VVar (cod sub + 2)
@@ -1080,9 +1419,9 @@ solve
   -> [Binder]
   -> Lvl
   -> MetaVar
-  -> Env Ix
-  -> VSpine Ix
-  -> Val Ix
+  -> Env
+  -> VSpine
+  -> Val
   -> Checker (Variant e) ()
 solve pos names lvl mv sub [] t = do
   inv <- invert pos names lvl sub
@@ -1149,8 +1488,8 @@ conv
   => Position
   -> [Binder]
   -> Lvl
-  -> Val Ix
-  -> Val Ix
+  -> Val
+  -> Val
   -> Checker (Variant e) ()
 conv pos names = conv' names names
   where
@@ -1158,8 +1497,8 @@ conv pos names = conv' names names
       :: [Binder]
       -> [Binder]
       -> Lvl
-      -> VSpine Ix
-      -> VSpine Ix
+      -> VSpine
+      -> VSpine
       -> Checker (Variant e) ()
     convSp _ _ _ [] [] = pure ()
     convSp ns ns' lvl (sp :> VApp u) (sp' :> VApp u') = do
@@ -1211,8 +1550,8 @@ conv pos names = conv' names names
       where
         -- TODO: don't assume same ordering
         convBranch
-          :: (Name, Binder, Binder, Closure (A 2) Ix)
-          -> (Name, Binder, Binder, Closure (A 2) Ix)
+          :: (Name, Binder, Binder, Closure (A 2) Val)
+          -> (Name, Binder, Binder, Closure (A 2) Val)
           -> Checker (Variant e) ()
         convBranch (c, x, e, t) (c', x', e', t')
           | c == c' = do
@@ -1231,7 +1570,7 @@ conv pos names = conv' names names
 
     -- Conversion checking
     conv'
-      :: [Binder] -> [Binder] -> Lvl -> Val Ix -> Val Ix -> Checker (Variant e) ()
+      :: [Binder] -> [Binder] -> Lvl -> Val -> Val -> Checker (Variant e) ()
     -- Rigid-rigid conversion: heads must be equal and spines convertible
     conv' ns ns' lvl (VRigid x sp) (VRigid x' sp')
       | x == x' = convSp ns ns' lvl sp sp'
@@ -1273,8 +1612,8 @@ conv pos names = conv' names names
     conv' _ _ _ (VAbort {}) (VAbort {}) = pure ()
     conv' _ _ _ VEmpty VEmpty = pure ()
     -- Proof irrelevant, so always convertible
-    conv' _ _ _ (VOne {}) _ = pure ()
-    conv' _ _ _ _ (VOne {}) = pure ()
+    conv' _ _ _ (VProp {}) _ = pure ()
+    conv' _ _ _ _ (VProp {}) = pure ()
     conv' _ _ _ VUnit VUnit = pure ()
     conv' ns ns' lvl (VEq t a u) (VEq t' a' u') = do
       conv' ns ns' lvl t t'
@@ -1348,8 +1687,8 @@ conv pos names = conv' names names
       sequence_ (liftM2 (conv' ns ns' lvl) a a')
       where
         convCons
-          :: (Name, (Relevance, Binder, Closure (A 2) Ix, Closure (A 3) Ix))
-          -> (Name, (Relevance, Binder, Closure (A 2) Ix, Closure (A 3) Ix))
+          :: (Name, (Relevance, Binder, Closure (A 2) Val, Closure (A 3) Val))
+          -> (Name, (Relevance, Binder, Closure (A 2) Val, Closure (A 3) Val))
           -> Checker (Variant e) ()
         convCons (ci, (si, xi, bi, ixi)) (ci', (si', xi', bi', ixi'))
           | ci == ci' = do
@@ -1373,7 +1712,7 @@ conv pos names = conv' names names
       bTS <- TS . prettyPrintTerm ns' <$> quote lvl b
       throw (ConversionFailure aTS bTS pos)
 
-ppVal :: MonadEvaluator m => Context -> Val Ix -> m TermString
+ppVal :: MonadEvaluator m => Context -> Val -> m TermString
 ppVal gamma v = TS . prettyPrintTerm (names gamma) <$> quote (lvl gamma) v
 
 -- ppCtx (Context [] [] _) = pure []
@@ -1397,12 +1736,12 @@ inferVar
   => Position
   -> Types
   -> Name
-  -> Checker (Variant e) (Term Ix, VTy Ix, Relevance)
+  -> Checker (Variant e) (Term Ix, VTy, Relevance)
 inferVar pos types name = do
   (i, ty, s) <- find types name
   pure (Var i, ty, s)
   where
-    find :: Types -> Name -> Checker (Variant e) (Ix, VTy Ix, Relevance)
+    find :: Types -> Name -> Checker (Variant e) (Ix, VTy, Relevance)
     find [] name = throw (VariableOutOfScope name pos)
     find (types :> (Name x, (s, a))) x'
       | x == x' = pure (0, a, s)
@@ -1422,7 +1761,7 @@ infer
      )
   => Context
   -> Raw
-  -> Checker (Variant e) (Term Ix, VTy Ix, Relevance)
+  -> Checker (Variant e) (Term Ix, VTy, Relevance)
 infer gamma (R pos (VarF x)) = inferVar pos (types gamma) x
 infer _ (R _ (UF s)) = do
   s <- checkSort s
@@ -1489,7 +1828,8 @@ infer gamma (R _ (SndF () t@(R pos _))) = do
   (t, tty, _) <- infer gamma t
   case tty of
     VExists _ _ b -> do
-      b_fst_t <- app' b (VOne (VProp (env gamma) (PropFst t)))
+      t_prop <- evalProp (env gamma) t
+      b_fst_t <- app' b (VProp (PPropFst t_prop))
       pure (PropSnd t, b_fst_t, Irrelevant)
     VSigma _ _ b -> do
       vt <- eval (env gamma) t
@@ -1581,12 +1921,14 @@ infer gamma (R _ (TranspF t@(R pos _) x pf b u t' e)) = do
   let vx = VVar (lvl gamma)
   t_eq_x <- eqReduce (env gamma) vt va vx
   b <- check (gamma & bindR x va & bindP pf t_eq_x) b (VU Irrelevant)
-  let refl_t = VOne (VProp (env gamma) (Refl t))
+  t_prop <- valToVProp vt
+  let refl_t = VProp (PRefl t_prop)
   b_t_refl <- eval (env gamma :> (Bound, vt) :> (Bound, refl_t)) b
   u <- check gamma u b_t_refl
   vt_eq_vt' <- eqReduce (env gamma) vt va vt'
   e <- check gamma e vt_eq_vt'
-  b_t'_e <- eval (env gamma :> (Bound, vt') :> (Bound, VOne (VProp (env gamma) e))) b
+  e_prop <- evalProp (env gamma) e
+  b_t'_e <- eval (env gamma :> (Bound, vt') :> (Bound, VProp e_prop)) b
   pure (Transp t x pf b u t' e, b_t'_e, Irrelevant)
 infer gamma (R _ (CastF a@(R aPos _) b@(R bPos _) e t)) = do
   (a, s) <- checkType gamma a
@@ -1636,7 +1978,7 @@ infer gamma (R _ (QuotientF a x y r rx rr sx sy sxy rs tx ty tz txy tyz rt)) = d
 infer gamma (R pos (QElimF z b x tpi px py pe p u)) = do
   (u, uty, _) <- infer gamma u
   case uty of
-    VQuotient a _ _ r _ _ _ _ _ (VProp rs_env rs) _ _ _ _ _ _ -> do
+    VQuotient a _ _ r _ _ _ _ _ rs _ _ _ _ _ _ -> do
       (b, s) <- checkType (gamma & bindR z uty) b
       let vx = VVar (lvl gamma)
           vy = VVar (lvl gamma + 1)
@@ -1647,12 +1989,18 @@ infer gamma (R pos (QElimF z b x tpi px py pe p u)) = do
       tpi_x <- eval (env gamma :> (Bound, vx)) tpi
       tpi_y <- eval (env gamma :> (Bound, vy)) tpi
 
-      let ve_inv = VProp (rs_env :> (Bound, vx) :> (Bound, vy) :> (Bound, ve)) rs
-      tm_tpi_x <- quote (lvl gamma + 3) tpi_x
-      tm_tpi_y <- quote (lvl gamma + 3) tpi_y
-      let vz = VVar (lvl gamma)
-      tm_b <- quote (lvl gamma + 3) =<< eval (env gamma :> (Bound, vz)) b
-      let ap_B_e_inv = Ap (U s) z tm_b tm_tpi_x tm_tpi_y $$$ ve_inv
+      x_prop <- valToVProp vx
+      y_prop <- valToVProp vy
+      e_prop <- valToVProp ve
+      e_inv_prop <- appProp' rs x_prop y_prop e_prop
+
+      tpi_x_prop <- valToVProp tpi_x
+      tpi_y_prop <- valToVProp tpi_y
+
+      b_prop <- propClosure (env gamma) b
+
+      let ap_B_e_inv = PAp (PU s) z b_prop tpi_x_prop tpi_y_prop e_inv_prop
+
       cast_b_piy_b_pix <- cast b_piy b_pix ap_B_e_inv tpi_y
       tpi_x_eq_tpi_y <- eqReduce (env gamma) tpi_x b_pix cast_b_piy_b_pix
 
@@ -1733,7 +2081,7 @@ infer gamma (R pos (MatchF t@(R argPos _) x p bs)) = do
               ixi_eq_a <- eqReduce (env gamma) ixi_muF_a_x aTy a
 
               let gamma'' = gamma' & bindP e ixi_eq_a
-              e_prop <- quoteToProp (env gamma'') ve
+              e_prop <- valToVProp ve
 
               pCx <- eval (env gamma :> (Bound, VCons c vx e_prop)) p
               t <- check gamma'' t pCx
@@ -1778,11 +2126,11 @@ infer gamma (R _ (FixedPointF i@(R pos _) g f p x c t)) = do
     buildFType
       :: MonadEvaluator m
       => Binder
-      -> VTy Ix
-      -> Env Ix
-      -> Val Ix
+      -> VTy
+      -> Env
+      -> Val
       -> Term Ix
-      -> m (VTy Ix)
+      -> m VTy
     buildFType p a env vg c = do
       let vc vp vx = eval (env :> (Bound, vg) :> (Bound, vp) :> (Bound, vx)) c
           vpi_x_c vp = do
@@ -1791,9 +2139,9 @@ infer gamma (R _ (FixedPointF i@(R pos _) g f p x c t)) = do
       VPi Relevant p a <$> makeFnClosure' vpi_x_c
 
     sub
-      :: Val Ix
-      -> (Name, (Relevance, Binder, Closure (A 2) Ix, Closure (A 3) Ix))
-      -> (Name, (Relevance, Binder, Closure (A 2) Ix, Closure (A 3) Ix))
+      :: Val
+      -> (Name, (Relevance, Binder, Closure (A 2) Val, Closure (A 3) Val))
+      -> (Name, (Relevance, Binder, Closure (A 2) Val, Closure (A 3) Val))
     sub g (ci, (si, xi, bi, fci)) = (ci, (si, xi, LiftClosure (appOne bi g), LiftClosure (appOne fci g)))
 infer gamma (R muPos (MuF () f fty@(R pos _) x cs)) = do
   (fty, _) <- checkType gamma fty
@@ -1805,7 +2153,7 @@ infer gamma (R muPos (MuF () f fty@(R pos _) x cs)) = do
   tag <- freshTag
   pure (Mu tag f fty x cs, vfty, Relevant)
   where
-    checkTypeFamily :: VTy Ix -> Checker (Variant e) (VTy Ix)
+    checkTypeFamily :: VTy -> Checker (Variant e) VTy
     checkTypeFamily t@(VPi Relevant _ a b) = do
       let vx = VVar (lvl gamma)
       b_x <- app' b vx
@@ -1820,7 +2168,7 @@ infer gamma (R muPos (MuF () f fty@(R pos _) x cs)) = do
 
     checkConstructor
       :: Context
-      -> VTy Ix
+      -> VTy
       -> (Name, RelevanceF (), Binder, Raw, Name, Raw)
       -> Checker (Variant e) (Name, Relevance, Binder, Type Ix, Name, Type Ix)
     checkConstructor gamma' ixTy (ci, si, xi, bi, fi, ix)
@@ -1876,7 +2224,7 @@ check
      )
   => Context
   -> Raw
-  -> VTy Ix
+  -> VTy
   -> Checker (Variant e) (Term Ix)
 check gamma (R _ (LambdaF x t)) (VPi s _ a b) = do
   b' <- app' b (VVar (lvl gamma))
@@ -1887,7 +2235,8 @@ check gamma (R pos (LambdaF {})) tty = do
   throw (CheckLambda tTS pos)
 check gamma (R _ (PropPairF t u)) (VExists _ a b) = do
   t <- check gamma t a
-  b_t <- app' b (VOne (VProp (env gamma) t))
+  t_prop <- evalProp (env gamma) t
+  b_t <- app' b (VProp t_prop)
   u <- check gamma u b_t
   pure (PropPair t u)
 check gamma (R pos (PropPairF {})) tty = do

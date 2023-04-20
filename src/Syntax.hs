@@ -6,7 +6,7 @@
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE GADTSyntax #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE ImportQualifiedPost #-}
+-- {-# LANGUAGE ImportQualifiedPost #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -84,23 +84,24 @@ module Syntax (
   pattern Meta,
   VElim (..),
   VSpine,
-  VProp (..),
-  ($$$),
+  -- ($$$),
   Val (..),
   pattern VVar,
   pattern VMeta,
   pattern VFun,
   pattern VAnd,
   VTy,
+  VProp (..),
   PushArgument (..),
   Closure (..),
   ClosureApply (..),
-  appVector,
-  appVectorFull,
+  -- appVector,
+  -- appVectorFull,
   appOne,
   A,
   BD (..),
   Env,
+  PropEnv,
   level,
   -- varMap,
   VarShowable (..),
@@ -111,10 +112,11 @@ module Syntax (
 )
 where
 
-import Vector qualified as V
+-- import Vector qualified as V
 
 import Data.Fix hiding (Mu)
-import Data.Type.Equality qualified as E
+
+-- import Data.Type.Equality qualified as E
 import Data.Type.Nat
 import Data.Void
 import Error.Diagnose.Position (Position (..))
@@ -911,86 +913,88 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
 data BD = Bound | Defined
   deriving (Show)
 
-type Env v = [(BD, Val v)]
+type Env = [(BD, Val)]
 
-level :: Env v -> Lvl
+type PropEnv = [(BD, VProp)]
+
+level :: Env -> Lvl
 level env = Lvl (length env)
 
 class Applicative f => PushArgument f where
   push :: (a -> f b) -> f (a -> b)
 
-data Closure (n :: Nat) v where
-  Closure :: forall n v. Env v -> Term v -> Closure n v
-  Lift :: forall n v. Val v -> Closure n v
-  LiftClosure :: forall n v. Closure n v -> Closure ('S n) v
-  Function :: forall n v. (Val v -> Closure n v) -> Closure ('S n) v
+data Closure (n :: Nat) val where
+  Closure :: forall n val. [(BD, val)] -> Term Ix -> Closure n val
+  Lift :: forall n val. val -> Closure n val
+  LiftClosure :: forall n val. Closure n val -> Closure ('S n) val
+  Function :: forall n val. (val -> Closure n val) -> Closure ('S n) val
 
-class Applicative f => ClosureApply f (n :: Nat) cl v | cl -> v, cl -> f where
-  app :: (Env v -> Term v -> f (Val v)) -> Closure n v -> cl
-  makeFnClosure :: PushArgument f => cl -> f (Closure n v)
+class Applicative f => ClosureApply f (n :: Nat) cl val | val cl -> f where
+  app :: ([(BD, val)] -> Term Ix -> f val) -> Closure n val -> cl
+  makeFnClosure :: PushArgument f => cl -> f (Closure n val)
 
-instance Applicative f => ClosureApply f 'Z (f (Val v)) v where
+instance Applicative f => ClosureApply f 'Z (f val) val where
   app eval (Closure env t) = eval env t
   app _ (Lift v) = pure v
 
   makeFnClosure v = Lift <$> v
 
-instance ClosureApply f n res v => ClosureApply f ('S n) (Val v -> res) v where
-  app eval (Closure env t) u = app eval (Closure @n @v (env :> (Bound, u)) t)
-  app eval (Lift v) _ = app eval (Lift @n @v v)
+instance ClosureApply f n res val => ClosureApply f ('S n) (val -> res) val where
+  app eval (Closure env t) u = app eval (Closure @n (env :> (Bound, u)) t)
+  app eval (Lift v) _ = app eval (Lift @n v)
   app eval (LiftClosure cl) _ = app eval cl
   app eval (Function f) u = app eval (f u)
 
   makeFnClosure f = Function <$> push (makeFnClosure . f)
 
-newtype VectorApp f v (n :: Nat) (m :: Nat) = VectorApp
-  { runVectorApp :: Closure (Plus n m) v -> V.Vec m (Val v) -> f (Closure n v)
-  }
+-- newtype VectorApp f val (n :: Nat) (m :: Nat) = VectorApp
+--   { runVectorApp :: Closure (Plus n m) val -> V.Vec m val -> f (Closure n val)
+--   }
 
-appVectorBase :: forall f n v. (Applicative f, SNatI n) => VectorApp f v n 'Z
-appVectorBase =
-  case proofPlusNZero @n of
-    E.Refl -> VectorApp app'
-  where
-    app' :: Closure n v -> V.Vec 'Z (Val v) -> f (Closure n v)
-    app' cl V.Nil = pure cl
+-- appVectorBase :: forall f n val. (Applicative f, SNatI n) => VectorApp f val n 'Z
+-- appVectorBase =
+--   case proofPlusNZero @n of
+--     E.Refl -> VectorApp app'
+--   where
+--     app' :: Closure n val -> V.Vec 'Z val -> f (Closure n val)
+--     app' cl V.Nil = pure cl
 
-appVectorInd
-  :: forall m k f v
-   . (SNatI m, SNatI k)
-  => (VectorApp f v k m -> VectorApp f v k ('S m))
-appVectorInd (VectorApp recurse) =
-  case V.proofSuccDistributes (snat @k) (snat @m) of
-    E.Refl -> VectorApp app'
-  where
-    app' :: Closure ('S (Plus k m)) v -> V.Vec ('S m) (Val v) -> f (Closure k v)
-    app' cl (a V.:<| as) = recurse (appOne cl a) as
+-- appVectorInd
+--   :: forall m k f val
+--    . (SNatI m, SNatI k)
+--   => (VectorApp f val k m -> VectorApp f val k ('S m))
+-- appVectorInd (VectorApp recurse) =
+--   case V.proofSuccDistributes (snat @k) (snat @m) of
+--     E.Refl -> VectorApp app'
+--   where
+--     app' :: Closure ('S (Plus k m)) val -> V.Vec ('S m) val -> f (Closure k val)
+--     app' cl (a V.:<| as) = recurse (appOne cl a) as
 
--- app' (Closure env t) (a V.:<| as) = -- recurse (Closure (env :> (Bound, a)) t) as
--- app' (Lift v) (_ V.:<| as) = recurse (Lift v) as
--- app' (LiftClosure cl) (_ V.:<| as) = recurse cl as
--- app' (Function f) (a V.:<| as) = recurse (f a) as
+-- -- app' (Closure env t) (a V.:<| as) = -- recurse (Closure (env :> (Bound, a)) t) as
+-- -- app' (Lift v) (_ V.:<| as) = recurse (Lift v) as
+-- -- app' (LiftClosure cl) (_ V.:<| as) = recurse cl as
+-- -- app' (Function f) (a V.:<| as) = recurse (f a) as
 
-appVector
-  :: forall n m f v
-   . (Applicative f, SNatI n, SNatI m)
-  => Closure (Plus n m) v
-  -> V.Vec m (Val v)
-  -> f (Closure n v)
-appVector = runVectorApp @f @v @n @m (induction appVectorBase appVectorInd)
+-- appVector
+--   :: forall n m f val
+--    . (Applicative f, SNatI n, SNatI m)
+--   => Closure (Plus n m) val
+--   -> V.Vec m val
+--   -> f (Closure n val)
+-- appVector = runVectorApp @f @val @n @m (induction appVectorBase appVectorInd)
 
-appVectorFull
-  :: forall n f v
-   . (Monad f, SNatI n)
-  => (Env v -> Term v -> f (Val v))
-  -> Closure n v
-  -> V.Vec n (Val v)
-  -> f (Val v)
-appVectorFull eval cl v = do
-  cl0 <- appVector @'Z @n cl v
-  app eval cl0
+-- appVectorFull
+--   :: forall n f val
+--    . (Monad f, SNatI n)
+--   => ([(BD, val)] -> Term Ix -> f val)
+--   -> Closure n val
+--   -> V.Vec n val
+--   -> f val
+-- appVectorFull eval cl v = do
+--   cl0 <- appVector @'Z @n cl v
+--   app eval cl0
 
-appOne :: Closure ('S n) v -> Val v -> Closure n v
+appOne :: Closure ('S n) val -> val -> Closure n val
 appOne (Closure env t) u = Closure (env :> (Bound, u)) t
 appOne (Lift v) _ = Lift v
 appOne (LiftClosure cl) _ = cl
@@ -1004,17 +1008,17 @@ type VTy = Val
 -- Note that [~] is an eliminator for the universe, however it does not
 -- have a single point on which it might block. Therefore, it cannot be an
 -- eliminator in a spine
-data VElim v
-  = VApp (Val v)
-  | VNElim Binder (Closure (A 1) v) (Val v) Binder Binder (Closure (A 2) v)
+data VElim
+  = VApp Val
+  | VNElim Binder (Closure (A 1) Val) Val Binder Binder (Closure (A 2) Val)
   | VFst
   | VSnd
-  | VQElim Binder (Closure (A 1) v) Binder (Closure (A 1) v) Binder Binder Binder (VProp v)
-  | VJ (VTy v) (Val v) Binder Binder (Closure (A 2) v) (Val v) (Val v)
+  | VQElim Binder (Closure (A 1) Val) Binder (Closure (A 1) Val) Binder Binder Binder (Closure (A 3) VProp)
+  | VJ VTy Val Binder Binder (Closure (A 2) Val) Val Val
   | VBoxElim
-  | VMatch Binder (Closure (A 1) v) [(Name, Binder, Binder, Closure (A 2) v)]
+  | VMatch Binder (Closure (A 1) Val) [(Name, Binder, Binder, Closure (A 2) Val)]
 
-showElimHead :: VElim v -> String
+showElimHead :: VElim -> String
 showElimHead (VApp {}) = "<application>"
 showElimHead (VNElim {}) = "<ℕ-elim>"
 showElimHead VFst = "<fst>"
@@ -1024,68 +1028,113 @@ showElimHead (VJ {}) = "<J>"
 showElimHead VBoxElim = "<▢-elim>"
 showElimHead (VMatch {}) = "<match>"
 
-type VSpine v = [VElim v]
+type VSpine = [VElim]
 
-data VProp v = VProp (Env v) (Term v)
+-- infixl 8 $$$
+-- ($$$) :: (Term v -> Term v) -> VProp v -> VProp v
+-- f $$$ VProp env t = VProp env (f t)
 
-infixl 8 $$$
-($$$) :: (Term v -> Term v) -> VProp v -> VProp v
-f $$$ VProp env t = VProp env (f t)
-
-data Val v
-  = VRigid Lvl (VSpine v)
-  | VFlex MetaVar (Env v) (VSpine v)
+data Val
+  = VRigid Lvl VSpine
+  | VFlex MetaVar Env VSpine
   | VU Relevance
-  | VLambda Binder (Closure (A 1) v)
-  | VPi Relevance Binder (VTy v) (Closure (A 1) v)
+  | VLambda Binder (Closure (A 1) Val)
+  | VPi Relevance Binder VTy (Closure (A 1) Val)
   | VZero
-  | VSucc (Val v)
+  | VSucc Val
   | VNat
-  | VExists Binder (VTy v) (Closure (A 1) v)
-  | VAbort (VTy v) (VProp v)
+  | VExists Binder VTy (Closure (A 1) Val)
+  | VAbort VTy VProp
   | VEmpty
-  | VOne (VProp v)
+  | VProp VProp
   | VUnit
-  | VEq (Val v) (VTy v) (Val v)
-  | VCast (VTy v) (VTy v) (VProp v) (Val v)
-  | VPair (Val v) (Val v)
-  | VSigma Binder (VTy v) (Closure (A 1) v)
+  | VEq Val VTy Val
+  | VCast VTy VTy VProp Val
+  | VPair Val Val
+  | VSigma Binder VTy (Closure (A 1) Val)
   | VQuotient
-      (VTy v)
+      VTy
       Binder
       Binder
-      (Closure (A 2) v)
+      (Closure (A 2) Val)
       Binder
-      (VProp v)
-      Binder
-      Binder
-      Binder
-      (VProp v)
+      (Closure (A 1) VProp)
       Binder
       Binder
       Binder
+      (Closure (A 3) VProp)
       Binder
       Binder
-      (VProp v)
-  | VQProj (Val v)
-  | VIdRefl (Val v)
-  | VIdPath (VProp v)
-  | VId (VTy v) (Val v) (Val v)
-  | VCons Name (Val v) (VProp v)
+      Binder
+      Binder
+      Binder
+      (Closure (A 5) VProp)
+  | VQProj Val
+  | VIdRefl Val
+  | VIdPath VProp
+  | VId VTy Val Val
+  | VCons Name Val VProp
   | -- A fixed point will not reduce unless applied to a constructor, so it needs a spine
-    VFixedPoint (VTy v) Binder Binder Binder Binder (Closure (A 3) v) (Closure (A 4) v) (Maybe (Val v)) (VSpine v)
-  | VMu Tag Name (VTy v) Binder [(Name, (Relevance, Binder, Closure (A 2) v, Closure (A 3) v))] (Maybe (Val v))
-  | VBoxProof (VProp v)
-  | VBox (Val v)
+    VFixedPoint VTy Binder Binder Binder Binder (Closure (A 3) Val) (Closure (A 4) Val) (Maybe Val) VSpine
+  | VMu Tag Name VTy Binder [(Name, (Relevance, Binder, Closure (A 2) Val, Closure (A 3) Val))] (Maybe Val)
+  | VBoxProof VProp
+  | VBox Val
 
-pattern VVar :: Lvl -> Val v
+pattern VVar :: Lvl -> Val
 pattern VVar x = VRigid x []
 
-pattern VMeta :: MetaVar -> Env v -> Val v
+pattern VMeta :: MetaVar -> Env -> Val
 pattern VMeta mv e = VFlex mv e []
 
-pattern VFun :: Relevance -> VTy v -> VTy v -> VTy v
+pattern VFun :: Relevance -> VTy -> VTy -> VTy
 pattern VFun s a b = VPi s Hole a (Lift b)
 
-pattern VAnd :: VTy v -> VTy v -> VTy v
+pattern VAnd :: VTy -> VTy -> VTy
 pattern VAnd a b = VExists Hole a (Lift b)
+
+data VProp
+  = PVar Lvl
+  | PMeta MetaVar PropEnv
+  | PU Relevance
+  | PLambda Binder (Closure (A 1) VProp)
+  | PApp VProp VProp
+  | PPi Relevance Binder VProp (Closure (A 1) VProp)
+  | PZero
+  | PSucc VProp
+  | PNElim Binder (Closure (A 1) VProp) VProp Binder Binder (Closure (A 2) VProp) VProp
+  | PNat
+  | PPropPair VProp VProp
+  | PPropFst VProp
+  | PPropSnd VProp
+  | PExists Binder VProp (Closure (A 1) VProp)
+  | PAbort VProp VProp
+  | PEmpty
+  | POne
+  | PUnit
+  | PEq VProp VProp VProp
+  | PRefl VProp
+  | PSym VProp VProp VProp
+  | PTrans VProp VProp VProp VProp VProp
+  | PAp VProp Binder (Closure (A 1) VProp) VProp VProp VProp
+  | PTransp VProp Binder Binder (Closure (A 2) VProp) VProp VProp VProp
+  | PCast VProp VProp VProp VProp
+  | PPair VProp VProp
+  | PFst VProp
+  | PSnd VProp
+  | PSigma Binder VProp (Closure (A 1) VProp)
+  | PQuotient VProp Binder Binder (Closure (A 2) VProp) Binder (Closure (A 1) VProp) Binder Binder Binder (Closure (A 3) VProp) Binder Binder Binder Binder Binder (Closure (A 5) VProp)
+  | PQProj VProp
+  | PQElim Binder (Closure (A 1) VProp) Binder (Closure (A 1) VProp) Binder Binder Binder (Closure (A 3) VProp) VProp
+  | PIdRefl VProp
+  | PIdPath VProp
+  | PJ VProp VProp Binder Binder (Closure (A 2) VProp) VProp VProp VProp
+  | PId VProp VProp VProp
+  | PBoxProof VProp
+  | PBoxElim VProp
+  | PBox VProp
+  | PCons Name VProp VProp
+  | PMatch VProp Binder (Closure (A 1) VProp) [(Name, Binder, Binder, Closure (A 2) VProp)]
+  | PFixedPoint VProp Binder Binder Binder Binder (Closure (A 3) VProp) (Closure (A 4) VProp)
+  | PMu Tag Name VProp Binder [(Name, Relevance, Binder, Closure (A 2) VProp, Closure (A 3) VProp)]
+  | PLet Binder VProp VProp (Closure (A 1) VProp)
+  | PAnnotation VProp VProp
