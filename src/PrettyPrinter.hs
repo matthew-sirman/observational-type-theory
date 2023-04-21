@@ -183,7 +183,7 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
         branch :: (Name, Binder, Binder, Term v) -> ShowS
         branch (cons, x, e, t) =
           let cons' = str cons . str " " . showParen True (binder x . comma . binder e)
-           in str "| " . cons' . str " -> " . go precLet (ns :> x) t
+           in str "| " . cons' . str " -> " . go precLet (ns :> x :> e) t
     go prec ns (FixedPoint i g f p x c t) =
       let i' = go precLet ns i . str " as " . binder g
           -- args = sep space (fmap binder (f : ps ++ [x]))
