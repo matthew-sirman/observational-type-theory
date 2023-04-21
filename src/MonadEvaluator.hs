@@ -72,5 +72,5 @@ instance PushArgument Evaluator where
     ctx <- ask
     pure (\a -> runEvaluator (f a) ctx)
 
-makeFnClosure' :: (MonadEvaluator m, ClosureApply Evaluator n cl val) => cl -> m (Closure n val)
+makeFnClosure' :: (MonadEvaluator m, ClosureApply Evaluator n cl val cod) => cl -> m (Closure n val cod)
 makeFnClosure' c = evaluate (makeFnClosure c)

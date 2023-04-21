@@ -1,9 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE ImportQualifiedPost #-}
 {-# LANGUAGE MonoLocalBinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeOperators #-}
 
 module Conversion (
@@ -64,13 +62,13 @@ conv pos names = conv' names names
       conv' ns ns' lvl u u'
     convSp ns ns' lvl (sp :> VNElim z a t0 x ih ts) (sp' :> VNElim z' a' t0' x' ih' ts') = do
       convSp ns ns' lvl sp sp'
-      let vz = VVar lvl
+      let vz = var lvl
       a_z <- app' a vz
       a'_z <- app' a' vz
       conv' (ns :> z) (ns' :> z') (lvl + 1) a_z a'_z
       conv' ns ns' lvl t0 t0'
-      let vx = VVar lvl
-          vih = VVar (lvl + 1)
+      let vx = var lvl
+          vih = var (lvl + 1)
       ts_x_ih <- app' ts vx vih
       ts'_x_ih <- app' ts' vx vih
       conv' (ns :> x :> ih) (ns' :> x' :> ih') (lvl + 2) ts_x_ih ts'_x_ih
@@ -78,10 +76,10 @@ conv pos names = conv' names names
     convSp ns ns' lvl (sp :> VSnd) (sp' :> VSnd) = convSp ns ns' lvl sp sp'
     convSp ns ns' lvl (sp :> VQElim z b x tpi _ _ _ _) (sp' :> VQElim z' b' x' tpi' _ _ _ _) = do
       convSp ns ns' lvl sp sp'
-      let vz = VVar lvl
+      let vz = var lvl
       b_z <- app' b vz
       b'_z <- app' b' vz
-      let vx = VVar lvl
+      let vx = var lvl
       tpi_x <- app' tpi vx
       tpi'_x <- app' tpi' vx
       conv' (ns :> z) (ns' :> z') (lvl + 1) b_z b'_z
@@ -90,8 +88,8 @@ conv pos names = conv' names names
       convSp ns ns' lvl sp sp'
       conv' ns ns' lvl a a'
       conv' ns ns' lvl t t'
-      let vx = VVar lvl
-          vpf = VVar (lvl + 1)
+      let vx = var lvl
+          vpf = var (lvl + 1)
       b_x_pf <- app' b vx vpf
       b'_x_pf <- app' b' vx vpf
       conv' (ns :> x :> pf) (ns' :> x' :> pf') (lvl + 2) b_x_pf b'_x_pf
@@ -100,7 +98,7 @@ conv pos names = conv' names names
     convSp ns ns' lvl (sp :> VBoxElim) (sp' :> VBoxElim) = convSp ns ns' lvl sp sp'
     convSp ns ns' lvl (sp :> VMatch x p bs) (sp' :> VMatch x' p' bs') = do
       convSp ns ns' lvl sp sp'
-      let vx = VVar lvl
+      let vx = var lvl
       p_x <- app' p vx
       p'_x <- app' p' vx
       conv' (ns :> x) (ns' :> x') (lvl + 1) p_x p'_x
@@ -108,13 +106,13 @@ conv pos names = conv' names names
       where
         -- TODO: don't assume same ordering
         convBranch
-          :: (Name, Binder, Binder, Closure (A 2) Val)
-          -> (Name, Binder, Binder, Closure (A 2) Val)
+          :: (Name, Binder, Binder, ValClosure (A 2))
+          -> (Name, Binder, Binder, ValClosure (A 2))
           -> Checker (Variant e) ()
         convBranch (c, x, e, t) (c', x', e', t')
           | c == c' = do
-              let vx = VVar lvl
-                  ve = VVar (lvl + 1)
+              let vx = var lvl
+                  ve = var (lvl + 1)
               t <- app' t vx ve
               t' <- app' t' vx ve
               conv' (ns :> x :> e) (ns' :> x' :> e') (lvl + 2) t t'
@@ -137,22 +135,22 @@ conv pos names = conv' names names
     conv' _ ns lvl t (VFlex m env sp) = solve pos ns lvl m env sp t
     conv' _ _ _ (VU s) (VU s') = convSort pos s s'
     conv' ns ns' lvl (VLambda x t) (VLambda x' t') = do
-      let vx = VVar lvl
+      let vx = var lvl
       t_x <- app' t vx
       t'_x <- app' t' vx
       conv' (ns :> x) (ns' :> x') (lvl + 1) t_x t'_x
     conv' ns ns' lvl (VLambda x t) t' = do
-      t_x <- app' t (VVar lvl)
+      t_x <- app' t (var lvl)
       t'_x <- t' $$ VApp (VVar lvl)
       conv' (ns :> x) (ns' :> x) (lvl + 1) t_x t'_x
     conv' ns ns' lvl t (VLambda x' t') = do
       t_x <- t $$ VApp (VVar lvl)
-      t'_x <- app' t' (VVar lvl)
+      t'_x <- app' t' (var lvl)
       conv' (ns :> x') (ns' :> x') (lvl + 1) t_x t'_x
     conv' ns ns' lvl (VPi s x a b) (VPi s' x' a' b') = do
       convSort pos s s'
       conv' ns ns' lvl a a'
-      let vx = VVar lvl
+      let vx = var lvl
       b_x <- app' b vx
       b'_x <- app' b' vx
       conv' (ns :> x) (ns' :> x') (lvl + 1) b_x b'_x
@@ -161,7 +159,7 @@ conv pos names = conv' names names
     conv' _ _ _ VNat VNat = pure ()
     conv' ns ns' lvl (VExists x a b) (VExists x' a' b') = do
       conv' ns ns' lvl a a'
-      let vx = VVar lvl
+      let vx = var lvl
       b_x <- app' b vx
       b'_x <- app' b' vx
       conv' (ns :> x) (ns' :> x') (lvl + 1) b_x b'_x
@@ -207,14 +205,14 @@ conv pos names = conv' names names
       conv' ns ns' lvl snd_p u'
     conv' ns ns' lvl (VSigma x a b) (VSigma x' a' b') = do
       conv' ns ns' lvl a a'
-      let vx = VVar lvl
+      let vx = var lvl
       b_x <- app' b vx
       b'_x <- app' b' vx
       conv' (ns :> x) (ns' :> x') (lvl + 1) b_x b'_x
     conv' ns ns' lvl (VQuotient a x y r _ _ _ _ _ _ _ _ _ _ _ _) (VQuotient a' x' y' r' _ _ _ _ _ _ _ _ _ _ _ _) = do
       conv' ns ns' lvl a a'
-      let vx = VVar lvl
-          vy = VVar (lvl + 1)
+      let vx = var lvl
+          vy = var (lvl + 1)
       r_x_y <- app' r vx vy
       r'_x_y <- app' r' vx vy
       conv' (ns :> x :> y) (ns' :> x' :> y') (lvl + 2) r_x_y r'_x_y
@@ -229,12 +227,12 @@ conv pos names = conv' names names
       | c == c' = do
           conv' ns ns' lvl t t'
     conv' ns ns' lvl (VFixedPoint i g f p x c t a sp) (VFixedPoint i' g' f' p' x' c' t' a' sp') = do
-      c_g_p_x <- app' c (VVar lvl) (VVar (lvl + 1)) (VVar (lvl + 2))
-      c'_g_p_x <- app' c' (VVar lvl) (VVar (lvl + 1)) (VVar (lvl + 2))
+      c_g_p_x <- app' c (var lvl) (var (lvl + 1)) (var (lvl + 2))
+      c'_g_p_x <- app' c' (var lvl) (var (lvl + 1)) (var (lvl + 2))
       conv' (ns :> g :> p :> x) (ns' :> g' :> p' :> x') (lvl + 3) c_g_p_x c'_g_p_x
       conv' ns ns' lvl i i'
-      t_g_f_p_x <- app' t (VVar lvl) (VVar (lvl + 1)) (VVar (lvl + 2)) (VVar (lvl + 3))
-      t'_g_f_p_x <- app' t' (VVar lvl) (VVar (lvl + 1)) (VVar (lvl + 2)) (VVar (lvl + 3))
+      t_g_f_p_x <- app' t (var lvl) (var (lvl + 1)) (var (lvl + 2)) (var (lvl + 3))
+      t'_g_f_p_x <- app' t' (var lvl) (var (lvl + 1)) (var (lvl + 2)) (var (lvl + 3))
       conv' (ns :> g :> f :> p :> x) (ns' :> g' :> f' :> p' :> x') (lvl + 4) t_g_f_p_x t'_g_f_p_x
       -- TODO: this *might* be problematic in the case that exactly one of [a], [a'] is Nothing
       sequence_ (liftM2 (conv' ns ns' lvl) a a')
@@ -245,15 +243,15 @@ conv pos names = conv' names names
       sequence_ (liftM2 (conv' ns ns' lvl) a a')
       where
         convCons
-          :: (Name, (Relevance, Binder, Closure (A 2) Val, Closure (A 3) Val))
-          -> (Name, (Relevance, Binder, Closure (A 2) Val, Closure (A 3) Val))
+          :: (Name, (Relevance, Binder, ValClosure (A 2), ValClosure (A 3)))
+          -> (Name, (Relevance, Binder, ValClosure (A 2), ValClosure (A 3)))
           -> Checker (Variant e) ()
         convCons (ci, (si, xi, bi, ixi)) (ci', (si', xi', bi', ixi'))
           | ci == ci' = do
               convSort pos si si'
-              let vf = VVar lvl
-                  vx = VVar (lvl + 1)
-                  vxi = VVar (lvl + 2)
+              let vf = var lvl
+                  vx = var (lvl + 1)
+                  vxi = var (lvl + 2)
               bi_muF_x <- app' bi vf vx
               bi'_muF_x <- app' bi' vf vx
               conv' (ns :> Name f :> x) (ns' :> Name f' :> x') (lvl + 2) bi_muF_x bi'_muF_x

@@ -43,23 +43,23 @@ invert
   => Position
   -> [Binder]
   -> Lvl
-  -> Env
+  -> Env ValProp
   -> Checker (Variant e) PartialRenaming
 invert pos names gamma sub = do
   (dom, renaming) <- inv sub
   pure (PRen {renaming = renaming, dom = dom, cod = gamma})
   where
-    inv :: e `CouldBe` UnificationError => Env -> Checker (Variant e) (Lvl, IM.IntMap Lvl)
+    inv :: e `CouldBe` UnificationError => Env ValProp -> Checker (Variant e) (Lvl, IM.IntMap Lvl)
     inv [] = pure (0, IM.empty)
     inv (sub :> (Defined, _)) = do
       (dom, renaming) <- inv sub
       pure (dom + 1, renaming)
-    inv (sub :> (Bound, VVar (Lvl x))) = do
+    inv (sub :> (Bound, ValProp (VVar (Lvl x)) _)) = do
       (dom, renaming) <- inv sub
       when (IM.member x renaming) (throw (NonLinearSpineDuplicate (show (names !! x)) pos))
       pure (dom + 1, IM.insert x dom renaming)
     inv (_ :> (Bound, t)) = do
-      tm <- quote gamma t
+      tm <- quote gamma (val t)
       throw (NonLinearSpineNonVariable (TS (prettyPrintTerm names tm)) pos)
 
 renameProp
@@ -175,7 +175,7 @@ renameProp pos ns m sub (PMatch t x p bs) = do
   pure (Match t x p bs)
   where
     quoteBranch
-      :: (Name, Binder, Binder, Closure (A 2) VProp)
+      :: (Name, Binder, Binder, PropClosure (A 2))
       -> Checker (Variant e) (Name, Binder, Binder, Term Ix)
     quoteBranch (c, x, e, t) = do
       t <- renameProp pos (ns :> x :> e) m (liftRenaming 2 sub) =<< appProp t (PVar (cod sub)) (PVar (cod sub + 1))
@@ -191,7 +191,7 @@ renameProp pos ns m sub (PMu tag f t x cs) = do
   pure (Mu tag f t x cs)
   where
     quoteCons
-      :: (Name, Relevance, Binder, Closure (A 2) VProp, Closure (A 3) VProp)
+      :: (Name, Relevance, Binder, PropClosure (A 2), PropClosure (A 3))
       -> Checker (Variant e) (Name, Relevance, Binder, Term Ix, Name, Term Ix)
     quoteCons (ci, si, xi, bi, ixi) = do
       bi <- renameProp pos (ns :> Name f :> x) m (liftRenaming 2 sub) =<< appProp bi (PVar (cod sub)) (PVar (cod sub + 1))
@@ -221,9 +221,9 @@ renameSp pos ns m sub base (sp :> VApp u) = do
   pure (App sp u)
 renameSp pos ns m sub base (sp :> VNElim z a t0 x ih ts) = do
   sp <- renameSp pos ns m sub base sp
-  a <- rename pos (ns :> z) m (liftRenaming 1 sub) =<< app' a (VVar (cod sub))
+  a <- rename pos (ns :> z) m (liftRenaming 1 sub) =<< app' a (var (cod sub))
   t0 <- rename pos ns m sub t0
-  ts <- rename pos (ns :> x :> ih) m (liftRenaming 2 sub) =<< app' ts (VVar (cod sub)) (VVar (cod sub + 1))
+  ts <- rename pos (ns :> x :> ih) m (liftRenaming 2 sub) =<< app' ts (var (cod sub)) (var (cod sub + 1))
   pure (NElim z a t0 x ih ts sp)
 renameSp pos ns m sub base (sp :> VFst) = do
   sp <- renameSp pos ns m sub base sp
@@ -233,15 +233,15 @@ renameSp pos ns m sub base (sp :> VSnd) = do
   pure (Snd sp)
 renameSp pos ns m sub base (sp :> VQElim z b x tpi px py pe p) = do
   sp <- renameSp pos ns m sub base sp
-  b <- rename pos (ns :> z) m (liftRenaming 1 sub) =<< app' b (VVar (cod sub))
-  tpi <- rename pos (ns :> x) m (liftRenaming 1 sub) =<< app' tpi (VVar (cod sub))
+  b <- rename pos (ns :> z) m (liftRenaming 1 sub) =<< app' b (var (cod sub))
+  tpi <- rename pos (ns :> x) m (liftRenaming 1 sub) =<< app' tpi (var (cod sub))
   p <- renameProp pos ns m sub =<< appProp p (PVar (cod sub)) (PVar (cod sub + 1)) (PVar (cod sub + 2))
   pure (QElim z b x tpi px py pe p sp)
 renameSp pos ns m sub base (sp :> VJ a t x pf b u v) = do
   sp <- renameSp pos ns m sub base sp
   a <- rename pos ns m sub a
   t <- rename pos ns m sub t
-  b <- rename pos ns m (liftRenaming 2 sub) =<< app' b (VVar (cod sub)) (VVar (cod sub + 1))
+  b <- rename pos ns m (liftRenaming 2 sub) =<< app' b (var (cod sub)) (var (cod sub + 1))
   u <- rename pos ns m sub u
   v <- rename pos ns m sub v
   pure (J a t x pf b u v sp)
@@ -250,13 +250,15 @@ renameSp pos ns m sub base (sp :> VBoxElim) = do
   pure (BoxElim sp)
 renameSp pos ns m sub base (sp :> VMatch x p bs) = do
   sp <- renameSp pos ns m sub base sp
-  p <- rename pos ns m (liftRenaming 1 sub) =<< app' p (VVar (cod sub))
+  p <- rename pos ns m (liftRenaming 1 sub) =<< app' p (var (cod sub))
   bs <- mapM renameBranch bs
   pure (Match sp x p bs)
   where
-    renameBranch :: (Name, Binder, Binder, Closure (A 2) Val) -> Checker (Variant e) (Name, Binder, Binder, Term Ix)
+    renameBranch
+      :: (Name, Binder, Binder, ValClosure (A 2))
+      -> Checker (Variant e) (Name, Binder, Binder, Term Ix)
     renameBranch (c, x, e, t) =
-      (c,x,e,) <$> (rename pos ns m (liftRenaming 2 sub) =<< app' t (VVar (cod sub)) (VVar (cod sub + 1)))
+      (c,x,e,) <$> (rename pos ns m (liftRenaming 2 sub) =<< app' t (var (cod sub)) (var (cod sub + 1)))
 
 rename
   :: forall e
@@ -282,17 +284,17 @@ rename pos ns m sub (VFlex m' _ sp)
   | otherwise = renameSp pos ns m sub (Meta m') sp
 rename _ _ _ _ (VU s) = pure (U s)
 rename pos ns m sub (VLambda x t) =
-  Lambda x <$> (rename pos (ns :> x) m (liftRenaming 1 sub) =<< app' t (VVar (cod sub)))
+  Lambda x <$> (rename pos (ns :> x) m (liftRenaming 1 sub) =<< app' t (var (cod sub)))
 rename pos ns m sub (VPi s x a b) = do
   a <- rename pos ns m sub a
-  b <- rename pos (ns :> x) m (liftRenaming 1 sub) =<< app' b (VVar (cod sub))
+  b <- rename pos (ns :> x) m (liftRenaming 1 sub) =<< app' b (var (cod sub))
   pure (Pi s x a b)
 rename _ _ _ _ VZero = pure Zero
 rename pos ns m sub (VSucc n) = Succ <$> rename pos ns m sub n
 rename _ _ _ _ VNat = pure Nat
 rename pos ns m sub (VExists x a b) = do
   a <- rename pos ns m sub a
-  b <- rename pos (ns :> x) m (liftRenaming 1 sub) =<< app' b (VVar (cod sub))
+  b <- rename pos (ns :> x) m (liftRenaming 1 sub) =<< app' b (var (cod sub))
   pure (Exists x a b)
 rename pos ns m sub (VAbort a t) = do
   a <- rename pos ns m sub a
@@ -323,11 +325,11 @@ rename pos ns m sub (VPair t u) = do
   pure (Pair t u)
 rename pos ns m sub (VSigma x a b) = do
   a <- rename pos ns m sub a
-  b <- rename pos (ns :> x) m (liftRenaming 1 sub) =<< app' b (VVar (cod sub))
+  b <- rename pos (ns :> x) m (liftRenaming 1 sub) =<< app' b (var (cod sub))
   pure (Sigma x a b)
 rename pos ns m sub (VQuotient a x y r rx rr sx sy sxy rs tx ty tz txy tyz rt) = do
   a <- rename pos ns m sub a
-  r <- rename pos (ns :> x :> y) m (liftRenaming 2 sub) =<< app' r (VVar (cod sub)) (VVar (cod sub + 1))
+  r <- rename pos (ns :> x :> y) m (liftRenaming 2 sub) =<< app' r (var (cod sub)) (var (cod sub + 1))
   rr <- renameProp pos ns m sub =<< appProp rr (PVar (cod sub))
   rs <- renameProp pos ns m sub =<< appProp rs (PVar (cod sub)) (PVar (cod sub + 1)) (PVar (cod sub + 3))
   rt <- renameProp pos ns m sub =<< appProp rt (PVar (cod sub)) (PVar (cod sub + 1)) (PVar (cod sub + 3)) (PVar (cod sub + 3)) (PVar (cod sub + 4))
@@ -346,8 +348,8 @@ rename pos ns m sub (VCons c t e) = do
   pure (Cons c t e)
 rename pos ns m sub (VFixedPoint i g f p x c t a sp) = do
   i <- rename pos ns m sub i
-  c_g_p_x <- app' c (VVar (cod sub)) (VVar (cod sub + 1)) (VVar (cod sub + 2))
-  t_g_f_p_x <- app' t (VVar (cod sub)) (VVar (cod sub + 1)) (VVar (cod sub + 2)) (VVar (cod sub + 3))
+  c_g_p_x <- app' c (var (cod sub)) (var (cod sub + 1)) (var (cod sub + 2))
+  t_g_f_p_x <- app' t (var (cod sub)) (var (cod sub + 1)) (var (cod sub + 2)) (var (cod sub + 3))
   c <- rename pos (ns :> g :> p :> x) m (liftRenaming 3 sub) c_g_p_x
   t <- rename pos (ns :> g :> f :> p :> x) m (liftRenaming 4 sub) t_g_f_p_x
   a <- mapM (rename pos ns m sub) a
@@ -357,13 +359,13 @@ rename pos ns m sub (VFixedPoint i g f p x c t a sp) = do
     Nothing -> pure fix_f
 rename pos ns m sub (VMu tag f fty x cs a) = do
   fty <- rename pos ns m sub fty
-  let vf = VVar (cod sub)
-      vx = VVar (cod sub + 1)
+  let vf = var (cod sub)
+      vx = var (cod sub + 1)
       renameCons
-        :: (Name, (Relevance, Binder, Closure (A 2) Val, Closure (A 3) Val))
+        :: (Name, (Relevance, Binder, ValClosure (A 2), ValClosure (A 3)))
         -> Checker (Variant e) (Name, Relevance, Binder, Type Ix, Name, Type Ix)
       renameCons (ci, (si, xi, bi, ixi)) = do
-        let vxi = VVar (cod sub + 2)
+        let vxi = var (cod sub + 2)
         bi_f_x <- app' bi vf vx
         bi <- rename pos (ns :> Name f :> x) m (liftRenaming 2 sub) bi_f_x
         ixi_f_x_xi <- app' ixi vf vx vxi
@@ -385,7 +387,7 @@ solve
   -> [Binder]
   -> Lvl
   -> MetaVar
-  -> Env
+  -> Env ValProp
   -> VSpine
   -> Val
   -> Checker (Variant e) ()
@@ -404,6 +406,7 @@ solve pos names lvl mv sub (sp :> VApp u@(VVar (Lvl x))) t = do
   --  Γ ⊢ β[σ, x] ≡ t
   -- In particular, we solve for β in the same context; the level does not change
   body <- freshMeta names
+  u <- embedVal u
   solve pos names lvl body (sub :> (Bound, u)) sp t
   addSolution mv (Lambda (names !! x) (Meta body))
 solve pos names lvl _ _ (_ :> VApp u) _ = do

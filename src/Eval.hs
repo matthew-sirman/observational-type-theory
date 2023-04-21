@@ -5,6 +5,7 @@
 {-# LANGUAGE TupleSections #-}
 
 module Eval (
+  embedVal,
   eqReduce,
   cast,
   eval,
@@ -21,6 +22,7 @@ import Syntax
 import Value
 
 import Control.Monad
+import Data.Function ((&))
 import Data.Maybe (fromMaybe)
 
 bindM2 :: Monad m => (a -> b -> m r) -> m a -> m b -> m r
@@ -32,7 +34,12 @@ bindM3 f a b c = join (liftM3 f a b c)
 bindM4 :: Monad m => (a -> b -> c -> d -> m r) -> m a -> m b -> m c -> m d -> m r
 bindM4 f a b c d = join (liftM4 f a b c d)
 
-eqReduce :: forall m. MonadEvaluator m => Env -> Val -> VTy -> Val -> m Val
+embedVal :: MonadEvaluator m => Val -> m ValProp
+embedVal v = do
+  v_prop <- valToVProp v
+  pure (ValProp {val = v, prop = v_prop})
+
+eqReduce :: forall m. MonadEvaluator m => Env ValProp -> Val -> VTy -> Val -> m Val
 eqReduce env vt va vu = eqReduceType va
   where
     -- Initially driven just by the type
@@ -41,7 +48,7 @@ eqReduce env vt va vu = eqReduceType va
     eqReduceType (VPi s x a b) = do
       -- Γ ⊢ f ~[Π(x : A). B] g => Π(x : A). f x ~[B] g x
       -- Γ, x : A ⊢ f x ~[B] g x
-      let fx_eq_gx vx = bindM3 (eqReduce (env :> (Bound, vx))) (vt $$ VApp vx) (app' b vx) (vu $$ VApp vx)
+      let fx_eq_gx vx = bindM3 (eqReduce (env :> (Bound, vx))) (vt $$ VApp (val vx)) (app' b vx) (vu $$ VApp (val vx))
       VPi s x a <$> makeFnClosure' fx_eq_gx
     -- Rule Eq-Ω
     eqReduceType (VU Irrelevant) =
@@ -70,8 +77,8 @@ eqReduce env vt va vu = eqReduceType va
           a'_eq_a <- eqReduce env a' (VU s) a
           let b_eq_b' ve va' = do
                 let env'' = env :> (Bound, ve) :> (Bound, va')
-                e_prop <- valToVProp ve
-                va <- cast a' a e_prop va'
+                va_val <- cast a' a (prop ve) (val va')
+                va <- embedVal va_val
                 bindM3 (eqReduce env'') (app' b va) (pure (VU Relevant)) (app' b' va')
               forall_x'_b_eq_b' ve = VPi s x' a' <$> makeFnClosure' (b_eq_b' ve)
           VExists (Name "$e") a'_eq_a <$> makeFnClosure' forall_x'_b_eq_b'
@@ -80,8 +87,8 @@ eqReduce env vt va vu = eqReduceType va
       a_eq_a' <- eqReduce env a (VU Relevant) a'
       let b_eq_b' ve va = do
             let env'' = env :> (Bound, ve) :> (Bound, va)
-            e_prop <- valToVProp ve
-            va' <- cast a a' e_prop va
+            va'_val <- cast a a' (prop ve) (val va)
+            va' <- embedVal va'_val
             bindM3 (eqReduce env'') (app' b va) (pure (VU Relevant)) (app' b' va')
           forall_x_b_eq_b' ve = VPi Relevant x a <$> makeFnClosure' (b_eq_b' ve)
       VExists (Name "$e") a_eq_a' <$> makeFnClosure' forall_x_b_eq_b'
@@ -90,9 +97,10 @@ eqReduce env vt va vu = eqReduceType va
       a_eq_a' <- eqReduce env a (VU Relevant) a'
       let rxy_eq_rx'y' ve vx vy = do
             let env''' = env :> (Bound, ve) :> (Bound, vx) :> (Bound, vy)
-            e_prop <- valToVProp ve
-            vx' <- cast a a' e_prop vx
-            vy' <- cast a a' e_prop vy
+            vx'_val <- cast a a' (prop ve) (val vx)
+            vx' <- embedVal vx'_val
+            vy'_val <- cast a a' (prop ve) (val vy)
+            vy' <- embedVal vy'_val
             bindM3 (eqReduce env''') (app' r vx vy) (pure (VU Irrelevant)) (app' r' vx' vy')
           forall_y_rxy_eq_rx'y' ve vx = VPi Relevant y a <$> makeFnClosure' (rxy_eq_rx'y' ve vx)
           forall_x_y_rxy_eq_rx'y' ve = VPi Relevant x a <$> makeFnClosure' (forall_y_rxy_eq_rx'y' ve)
@@ -107,35 +115,35 @@ eqReduce env vt va vu = eqReduceType va
     eqReduceAll (VSucc m) VNat (VSucc n) = eqReduceAll m VNat n
     -- Rule Eq-Pair
     eqReduceAll p (VSigma x a b) p' = do
-      t <- p $$ VFst
+      t_val <- p $$ VFst
+      t <- embedVal t_val
       u <- p $$ VSnd
-      t' <- p' $$ VFst
+      t'_val <- p' $$ VFst
+      t' <- embedVal t'_val
       u' <- p' $$ VSnd
-      t_eq_t' <- eqReduce env t a t'
+      t_eq_t' <- eqReduce env t_val a t'_val
       -- tm_b <- quote (level env + 2) =<< app' b (VVar (level env))
       let u_eq_u' ve = do
             let env' = env :> (Bound, ve)
-            e_prop <- valToVProp ve
             b_prop <- closureToVProp b
-            t_prop <- valToVProp t
-            t'_prop <- valToVProp t'
-            let ap_B_e = PAp (PU Relevant) x b_prop t_prop t'_prop e_prop
+            let ap_B_e = PAp (PU Relevant) x b_prop (prop t) (prop t') (prop ve)
             let cast_b_t_b_t'_u = bindM4 cast (app' b t) (app' b t') (pure ap_B_e) (pure u)
             bindM3 (eqReduce env') cast_b_t_b_t'_u (app' b t') (pure u')
       VExists (Name "$e") t_eq_t' <$> makeFnClosure' u_eq_u'
     -- Rule Quotient-Proj-Eq
-    eqReduceAll (VQProj t) (VQuotient _ _ _ r _ _ _ _ _ _ _ _ _ _ _ _) (VQProj u) = app' r t u
+    eqReduceAll (VQProj t) (VQuotient _ _ _ r _ _ _ _ _ _ _ _ _ _ _ _) (VQProj u) = do
+      t <- embedVal t
+      u <- embedVal u
+      app' r t u
     -- Rule Id-Eq
     eqReduceAll (VId a t u) (VU Relevant) (VId a' t' u') = do
       a_eq_a' <- eqReduce env a (VU Relevant) a'
       let t_eq_t' ve = do
             let env' = env :> (Bound, ve)
-            e <- valToVProp ve
-            bindM3 (eqReduce env') (cast a a' e t) (pure a') (pure t')
+            bindM3 (eqReduce env') (cast a a' (prop ve) t) (pure a') (pure t')
           u_eq_u' ve = do
-            let env'' = env :> (Bound, ve) :> (Bound, VVar (level env + 1))
-            e <- valToVProp ve
-            bindM3 (eqReduce env'') (cast a a' e u) (pure a') (pure u')
+            let env'' = env :> (Bound, ve) & extend (level env + 1)
+            bindM3 (eqReduce env'') (cast a a' (prop ve) u) (pure a') (pure u')
           t_eq_t'_and_u_eq_u' ve = VAnd <$> t_eq_t' ve <*> u_eq_u' ve
       VExists (Name "$e") a_eq_a' <$> makeFnClosure' t_eq_t'_and_u_eq_u'
     -- Rule Cons-Eq
@@ -144,7 +152,9 @@ eqReduce env vt va vu = eqReduceType va
           case lookup c cs of
             Nothing -> error "BUG: Impossible (constructor not well typed in equality)"
             Just (_, _, bi, _) -> do
-              let muF = VMu tag f fty x cs Nothing
+              let muF_val = VMu tag f fty x cs Nothing
+              muF <- embedVal muF_val
+              a <- embedVal a
               b_muF_a <- app' bi muF a
               eqReduce env t b_muF_a t'
       | otherwise = pure VEmpty
@@ -189,15 +199,16 @@ cast (VU s) (VU s') _ a
 -- Rule Cast-Pi
 cast (VPi _ _ a b) (VPi _ x' a' b') e f = do
   let cast_b_b' va' = do
-        va <- cast a' a (PPropFst e) va'
-        a'_prop <- valToVProp va'
-        bindM4 cast (app' b va) (app' b' va') (pure (PApp (PPropSnd e) a'_prop)) (f $$ VApp va)
+        va_val <- cast a' a (PPropFst e) (val va')
+        va <- embedVal va_val
+        bindM4 cast (app' b va) (app' b' va') (pure (PApp (PPropSnd e) (prop va'))) (f $$ VApp va_val)
   VLambda x' <$> makeFnClosure' cast_b_b'
 cast (VSigma _ a b) (VSigma _ a' b') e (VPair t u) = do
-  t' <- cast a a' (PPropFst e) t
-  t_prop <- valToVProp t
-  u' <- bindM4 cast (app' b t) (app' b' t') (pure (PApp (PPropSnd e) t_prop)) (pure u)
-  pure (VPair t' u')
+  t'_val <- cast a a' (PPropFst e) t
+  t' <- embedVal t'_val
+  t <- embedVal t
+  u' <- bindM4 cast (app' b t) (app' b' t') (pure (PApp (PPropSnd e) (prop t))) (pure u)
+  pure (VPair t'_val u')
 cast a@(VSigma {}) b@(VSigma {}) e p = do
   t <- p $$ VFst
   u <- p $$ VSnd
@@ -220,25 +231,27 @@ cast (VId {}) (VId {}) _ (VIdPath _) = undefined
 -- pure (VIdPath (VProp env t'_eq_u'))
 cast (VMu tag f fty x cs (Just a)) (VMu _ _ _ _ _ (Just a')) e (VCons ci t e') = do
   let (_, _, _, ixi) = fromMaybe (error "BUG: Impossible") (lookup ci cs)
-      muF = VMu tag f fty x cs Nothing
+      muF_val = VMu tag f fty x cs Nothing
+  muF <- embedVal muF_val
+  a <- embedVal a
+  a' <- embedVal a'
+  t <- embedVal t
   ixi_muF_a_t <- app' ixi muF a t
   ixi_prop <- valToVProp ixi_muF_a_t
-  a_prop <- valToVProp a
-  a'_prop <- valToVProp a'
-  pure (VCons ci t (PTrans ixi_prop a_prop a'_prop e' e))
+  pure (VCons ci (val t) (PTrans ixi_prop (prop a) (prop a') e' e))
 cast (VBox a) (VBox b) e (VBoxProof t) = do
   t' <- cast a b e (VProp t)
   VBoxProof <$> valToVProp t'
 cast a b e t = pure (VCast a b e t)
 
-closure :: forall n m. MonadEvaluator m => Env -> Term Ix -> m (Closure n Val)
+closure :: forall n m. MonadEvaluator m => Env ValProp -> Term Ix -> m (ValClosure n)
 closure env t = pure (Closure env t)
 
 branch
   :: MonadEvaluator m
-  => Env
+  => Env ValProp
   -> (Name, Binder, Binder, Term Ix)
-  -> m (Name, Binder, Binder, Closure (A 2) Val)
+  -> m (Name, Binder, Binder, ValClosure (A 2))
 branch env (c, x, e, t) = (c,x,e,) <$> closure env t
 
 evalSort :: MonadEvaluator m => Relevance -> m Relevance
@@ -250,8 +263,8 @@ evalSort (SortMeta m) = do
     Just s -> pure s
     Nothing -> pure (SortMeta m)
 
-eval :: forall m. MonadEvaluator m => Env -> Term Ix -> m Val
-eval env (Var (Ix x)) = pure (snd (env !! x))
+eval :: forall m. MonadEvaluator m => Env ValProp -> Term Ix -> m Val
+eval env (Var (Ix x)) = pure (val (snd (env !! x)))
 eval _ (U s) = VU <$> evalSort s
 eval env (Lambda x e) = pure (VLambda x (Closure env e))
 eval env (App t u) = elimM (eval env t) (VApp <$> eval env u)
@@ -332,7 +345,8 @@ eval env (Mu tag f t x cs) = do
   pure (VMu tag f t x cs Nothing)
 eval env (Let _ _ t u) = do
   t <- eval env t
-  eval (env :> (Defined, t)) u
+  t_prop <- valToVProp t
+  eval (env :> (Defined, ValProp t t_prop)) u
 eval env (Annotation t _) = eval env t
 eval env (Meta mv) = do
   val <- lookupMeta mv
@@ -344,11 +358,13 @@ match
   :: MonadEvaluator m
   => Val
   -> Binder
-  -> Closure (A 1) Val
-  -> [(Name, Binder, Binder, Closure (A 2) Val)]
+  -> ValClosure (A 1)
+  -> [(Name, Binder, Binder, ValClosure (A 2))]
   -> m Val
 match (VCons c u e) _ _ ((c', _, _, t) : _)
-  | c == c' = app' t u (VProp e)
+  | c == c' = do
+      u <- embedVal u
+      app' t u (embedProp e)
 match (VRigid x sp) x' p bs = pure (VRigid x (sp :> VMatch x' p bs))
 match (VFlex m env sp) x p bs = pure (VFlex m env (sp :> VMatch x p bs))
 match t x p (_ : bs) = match t x p bs
@@ -385,12 +401,16 @@ infixl 8 $$
   p <- closureToVProp p
   bs <- mapM (\(c, x, e, t) -> (c,x,e,) <$> closureToVProp t) bs
   pure (VProp (PMatch prop x p bs))
-(VLambda _ c) $$ (VApp u) = app' c u
+(VLambda _ c) $$ (VApp u) = app' c =<< embedVal u
 -- Only reduce a fixed point [(fix f) ps a => f (fix f) ps a] when
 -- [a] is a normal form; i.e. a constructor. This avoids the risk of
 -- infinitely looping.
 (VFixedPoint muF g f p x c t (Just a) []) $$ (VApp u@(VCons {})) = do
-  let fix_f = VFixedPoint muF g f p x c t Nothing []
+  let fix_f_val = VFixedPoint muF g f p x c t Nothing []
+  muF <- embedVal muF
+  fix_f <- embedVal fix_f_val
+  a <- embedVal a
+  u <- embedVal u
   app' t muF fix_f a u
 (VFixedPoint muF g f p x c t Nothing []) $$ (VApp u) =
   pure (VFixedPoint muF g f p x c t (Just u) [])
@@ -398,10 +418,14 @@ infixl 8 $$
   pure (VFixedPoint muF g f p x c t a (sp :> u))
 (VMu tag f t xs cs Nothing) $$ (VApp a) = pure (VMu tag f t xs cs (Just a))
 VZero $$ (VNElim _ _ t0 _ _ _) = pure t0
-(VSucc n) $$ elim@(VNElim _ _ _ _ _ ts) = app' ts n =<< n $$ elim
+(VSucc n) $$ elim@(VNElim _ _ _ _ _ ts) = do
+  r_val <- n $$ elim
+  r <- embedVal r_val
+  n <- embedVal n
+  app' ts n r
 (VPair t _) $$ VFst = pure t
 (VPair _ u) $$ VSnd = pure u
-(VQProj t) $$ (VQElim _ _ _ tpi _ _ _ _) = app' tpi t
+(VQProj t) $$ (VQElim _ _ _ tpi _ _ _ _) = app' tpi =<< embedVal t
 (VIdRefl _) $$ (VJ _ _ _ _ _ u _) = pure u
 -- TODO: Currently a mess (as with other inductive equality stuff)
 (VIdPath _) $$ (VJ {}) = undefined
@@ -424,7 +448,7 @@ _ $$ _ = error "BUG: IMPOSSIBLE (ill-typed evaluation)!"
 elimM :: MonadEvaluator m => m Val -> m VElim -> m Val
 elimM = bindM2 ($$)
 
-app' :: MonadEvaluator m => ClosureApply m n cl Val => Closure n Val -> cl
+app' :: MonadEvaluator m => ClosureApply m n cl ValProp Val => ValClosure n -> cl
 app' = app eval
 
 quoteSp :: forall m. MonadEvaluator m => Lvl -> Term Ix -> VSpine -> m (Term Ix)
@@ -434,42 +458,42 @@ quoteSp l base (sp :> VNElim z a t0 x ih ts) =
   NElim z <$> a' <*> quote l t0 <*> pure x <*> pure ih <*> ts' <*> quoteSp l base sp
   where
     a', ts' :: m (Term Ix)
-    a' = quote (l + 1) =<< app' a (VVar l)
-    ts' = quote (l + 2) =<< app' ts (VVar l) (VVar (l + 1))
+    a' = quote (l + 1) =<< app' a (var l)
+    ts' = quote (l + 2) =<< app' ts (var l) (var (l + 1))
 quoteSp l base (sp :> VFst) = Fst <$> quoteSp l base sp
 quoteSp l base (sp :> VSnd) = Snd <$> quoteSp l base sp
 quoteSp l base (sp :> VQElim z b x tpi px py pe p) = do
-  b <- quote (l + 1) =<< app' b (VVar l)
-  tpi <- quote (l + 1) =<< app' tpi (VVar l)
+  b <- quote (l + 1) =<< app' b (var l)
+  tpi <- quote (l + 1) =<< app' tpi (var l)
   p <- quoteProp (l + 3) =<< appProp p (PVar l) (PVar (l + 1)) (PVar (l + 2))
   QElim z b x tpi px py pe p <$> quoteSp l base sp
 quoteSp l base (sp :> VJ a t x pf b u v) = do
   a <- quote l a
   t <- quote l t
-  b <- quote (l + 2) =<< app' b (VVar l) (VVar (l + 1))
+  b <- quote (l + 2) =<< app' b (var l) (var (l + 1))
   u <- quote l u
   v <- quote l v
   J a t x pf b u v <$> quoteSp l base sp
 quoteSp l base (sp :> VBoxElim) = BoxElim <$> quoteSp l base sp
 quoteSp l base (sp :> VMatch x p bs) = do
-  p <- quote (l + 1) =<< app' p (VVar l)
+  p <- quote (l + 1) =<< app' p (var l)
   bs <- mapM quoteBranch bs
   sp <- quoteSp l base sp
   pure (Match sp x p bs)
   where
-    quoteBranch :: (Name, Binder, Binder, Closure (A 2) Val) -> m (Name, Binder, Binder, Term Ix)
-    quoteBranch (c, x, e, t) = (c,x,e,) <$> (quote (l + 2) =<< app' t (VVar l) (VVar (l + 1)))
+    quoteBranch :: (Name, Binder, Binder, ValClosure (A 2)) -> m (Name, Binder, Binder, Term Ix)
+    quoteBranch (c, x, e, t) = (c,x,e,) <$> (quote (l + 2) =<< app' t (var l) (var (l + 1)))
 quote :: forall m. MonadEvaluator m => Lvl -> Val -> m (Term Ix)
 quote lvl (VRigid x sp) = quoteSp lvl (Var (lvl2ix lvl x)) sp
 quote lvl (VFlex mv _ sp) = quoteSp lvl (Meta mv) sp
 quote _ (VU s) = pure (U s)
-quote lvl (VLambda x t) = Lambda x <$> (quote (lvl + 1) =<< app' t (VVar lvl))
-quote lvl (VPi s x a b) = Pi s x <$> quote lvl a <*> (quote (lvl + 1) =<< app' b (VVar lvl))
+quote lvl (VLambda x t) = Lambda x <$> (quote (lvl + 1) =<< app' t (var lvl))
+quote lvl (VPi s x a b) = Pi s x <$> quote lvl a <*> (quote (lvl + 1) =<< app' b (var lvl))
 quote _ VZero = pure Zero
 quote lvl (VSucc t) = Succ <$> quote lvl t
 quote _ VNat = pure Nat
 quote lvl (VExists x a b) =
-  Exists x <$> quote lvl a <*> (quote (lvl + 1) =<< app' b (VVar lvl))
+  Exists x <$> quote lvl a <*> (quote (lvl + 1) =<< app' b (var lvl))
 quote lvl (VAbort a t) = Abort <$> quote lvl a <*> quoteProp lvl t
 quote _ VEmpty = pure Empty
 quote lvl (VProp t) = quoteProp lvl t
@@ -478,10 +502,10 @@ quote lvl (VEq t a u) = Eq <$> quote lvl t <*> quote lvl a <*> quote lvl u
 quote lvl (VCast a b e t) = Cast <$> quote lvl a <*> quote lvl b <*> quoteProp lvl e <*> quote lvl t
 quote lvl (VPair t u) = Pair <$> quote lvl t <*> quote lvl u
 quote lvl (VSigma x a b) =
-  Sigma x <$> quote lvl a <*> (quote (lvl + 1) =<< app' b (VVar lvl))
+  Sigma x <$> quote lvl a <*> (quote (lvl + 1) =<< app' b (var lvl))
 quote lvl (VQuotient a x y r rx rr sx sy sxy rs tx ty tz txy tyz rt) = do
   a <- quote lvl a
-  r <- quote (lvl + 2) =<< app' r (VVar lvl) (VVar (lvl + 1))
+  r <- quote (lvl + 2) =<< app' r (var lvl) (var (lvl + 1))
   rr <- quoteProp (lvl + 1) =<< appProp rr (PVar lvl)
   rs <- quoteProp (lvl + 3) =<< appProp rs (PVar lvl) (PVar (lvl + 1)) (PVar (lvl + 2))
   rt <- quoteProp (lvl + 5) =<< appProp rt (PVar lvl) (PVar (lvl + 1)) (PVar (lvl + 2)) (PVar (lvl + 3)) (PVar (lvl + 4))
@@ -493,8 +517,8 @@ quote lvl (VId a t u) = Id <$> quote lvl a <*> quote lvl t <*> quote lvl u
 quote lvl (VCons c t e) = Cons c <$> quote lvl t <*> quoteProp lvl e
 quote lvl (VFixedPoint i g f p x c t a sp) = do
   i <- quote lvl i
-  c <- quote (lvl + 3) =<< app' c (VVar lvl) (VVar (lvl + 1)) (VVar (lvl + 2))
-  t <- quote (lvl + 4) =<< app' t (VVar lvl) (VVar (lvl + 1)) (VVar (lvl + 2)) (VVar (lvl + 3))
+  c <- quote (lvl + 3) =<< app' c (var lvl) (var (lvl + 1)) (var (lvl + 2))
+  t <- quote (lvl + 4) =<< app' t (var lvl) (var (lvl + 1)) (var (lvl + 2)) (var (lvl + 3))
   let fix_f = FixedPoint i g f p x c t
   a <- mapM (quote lvl) a
   case a of
@@ -502,13 +526,13 @@ quote lvl (VFixedPoint i g f p x c t a sp) = do
     Nothing -> pure fix_f
 quote lvl (VMu tag f fty x cs a) = do
   fty <- quote lvl fty
-  let vf = VVar lvl
-      vx = VVar (lvl + 1)
+  let vf = var lvl
+      vx = var (lvl + 1)
       quoteCons
-        :: (Name, (Relevance, Binder, Closure (A 2) Val, Closure (A 3) Val))
+        :: (Name, (Relevance, Binder, ValClosure (A 2), ValClosure (A 3)))
         -> m (Name, Relevance, Binder, Type Ix, Name, Type Ix)
       quoteCons (ci, (si, xi, bi, ixi)) = do
-        let vxi = VVar (lvl + 2)
+        let vxi = var (lvl + 2)
         bi_f_x <- app' bi vf vx
         ixi_f_x_xi <- app' ixi vf vx vxi
         (ci,si,xi,,f,) <$> quote (lvl + 2) bi_f_x <*> quote (lvl + 3) ixi_f_x_xi
@@ -521,5 +545,5 @@ quote lvl (VMu tag f fty x cs a) = do
 quote lvl (VBoxProof e) = BoxProof <$> quoteProp lvl e
 quote lvl (VBox a) = Box <$> quote lvl a
 
-nbe :: MonadEvaluator m => Env -> Term Ix -> m (Term Ix)
+nbe :: MonadEvaluator m => Env ValProp -> Term Ix -> m (Term Ix)
 nbe env t = eval env t >>= quote (level env)
