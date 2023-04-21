@@ -15,7 +15,7 @@ import Value
 type Types = [(Binder, (Relevance, VTy))]
 
 data Context = Context
-  { env :: Env
+  { env :: Env ValProp
   , types :: Types
   , lvl :: Lvl
   }
@@ -31,14 +31,14 @@ bind x s tty ctx =
   ctx
     { types = types ctx :> (x, (s, tty))
     , lvl = lvl ctx + 1
-    , env = env ctx :> (Bound, VVar (lvl ctx))
+    , env = extend (lvl ctx) (env ctx)
     }
 
 bindR, bindP :: Binder -> VTy -> Context -> Context
 bindR x = bind x Relevant
 bindP x = bind x Irrelevant
 
-define :: Binder -> Val -> Relevance -> VTy -> Context -> Context
+define :: Binder -> ValProp -> Relevance -> VTy -> Context -> Context
 define x t s tty ctx =
   ctx
     { types = types ctx :> (x, (s, tty))

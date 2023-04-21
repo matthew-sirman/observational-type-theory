@@ -20,7 +20,9 @@ import MonadEvaluator
 import Syntax
 import Value
 
-evalProp :: forall m. MonadEvaluator m => PropEnv -> Term Ix -> m VProp
+import Data.Bifunctor (second)
+
+evalProp :: forall m. MonadEvaluator m => Env VProp -> Term Ix -> m VProp
 evalProp env (Var (Ix x)) = pure (snd (env !! x))
 evalProp _ (U s) = pure (PU s)
 evalProp env (Lambda x t) = PLambda x <$> propClosure env t
@@ -103,7 +105,7 @@ evalProp env (Match t x p bs) = do
   bs <- mapM evalBranch bs
   pure (PMatch t x p bs)
   where
-    evalBranch :: (Name, Binder, Binder, Term Ix) -> m (Name, Binder, Binder, Closure (A 2) VProp)
+    evalBranch :: (Name, Binder, Binder, Term Ix) -> m (Name, Binder, Binder, PropClosure (A 2))
     evalBranch (c, x, e, t) = (c,x,e,) <$> propClosure env t
 evalProp env (FixedPoint i g f p x c t) = do
   i <- evalProp env i
@@ -117,7 +119,7 @@ evalProp env (Mu tag f t x cs) = do
   where
     evalCons
       :: (Name, Relevance, Binder, Term Ix, Name, Term Ix)
-      -> m (Name, Relevance, Binder, Closure (A 2) VProp, Closure (A 3) VProp)
+      -> m (Name, Relevance, Binder, PropClosure (A 2), PropClosure (A 3))
     evalCons (ci, si, xi, bi, _, ixi) = do
       bi <- propClosure env bi
       ixi <- propClosure env ixi
@@ -130,21 +132,17 @@ evalProp env (Let x a t u) = do
 evalProp env (Annotation t a) = PAnnotation <$> evalProp env t <*> evalProp env a
 evalProp env (Meta m) = pure (PMeta m env)
 
-evalProp' :: MonadEvaluator m => Env -> Term Ix -> m VProp
-evalProp' env t = do
-  env' <- envToPropEnv env
-  evalProp env' t
+evalProp' :: MonadEvaluator m => Env ValProp -> Term Ix -> m VProp
+evalProp' env = evalProp (envToPropEnv env)
 
-propClosure :: forall n m. MonadEvaluator m => PropEnv -> Term Ix -> m (Closure n VProp)
+propClosure :: forall n m. MonadEvaluator m => Env VProp -> Term Ix -> m (PropClosure n)
 propClosure env t = pure (Closure env t)
 
-propClosure' :: forall n m. MonadEvaluator m => Env -> Term Ix -> m (Closure n VProp)
-propClosure' env t = do
-  env' <- envToPropEnv env
-  propClosure env' t
+propClosure' :: forall n m. MonadEvaluator m => Env ValProp -> Term Ix -> m (PropClosure n)
+propClosure' env = propClosure (envToPropEnv env)
 
-envToPropEnv :: MonadEvaluator m => Env -> m PropEnv
-envToPropEnv = mapM (\(bd, v) -> (bd,) <$> valToVProp v)
+envToPropEnv :: Env ValProp -> Env VProp
+envToPropEnv = map (second prop)
 
 spineToVProp :: forall m. MonadEvaluator m => VProp -> VSpine -> m VProp
 spineToVProp base [] = pure base
@@ -181,15 +179,13 @@ spineToVProp base (sp :> VMatch x p bs) = do
   pure (PMatch sp x p bs)
   where
     branchToVProp
-      :: (Name, Binder, Binder, Closure (A 2) Val)
-      -> m (Name, Binder, Binder, Closure (A 2) VProp)
+      :: (Name, Binder, Binder, ValClosure (A 2))
+      -> m (Name, Binder, Binder, PropClosure (A 2))
     branchToVProp (c, x, e, t) = (c,x,e,) <$> closureToVProp t
 
 valToVProp :: forall m. MonadEvaluator m => Val -> m VProp
 valToVProp (VRigid x sp) = spineToVProp (PVar x) sp
-valToVProp (VFlex mv env sp) = do
-  env' <- envToPropEnv env
-  spineToVProp (PMeta mv env') sp
+valToVProp (VFlex mv env sp) = spineToVProp (PMeta mv (envToPropEnv env)) sp
 valToVProp (VU s) = pure (PU s)
 valToVProp (VLambda x t) = PLambda x <$> closureToVProp t
 valToVProp (VPi s x a b) = PPi s x <$> valToVProp a <*> closureToVProp b
@@ -233,8 +229,8 @@ valToVProp (VMu tag f t x cs a) = do
     Nothing -> pure muF
   where
     consToVProp
-      :: (Name, (Relevance, Binder, Closure (A 2) Val, Closure (A 3) Val))
-      -> m (Name, Relevance, Binder, Closure (A 2) VProp, Closure (A 3) VProp)
+      :: (Name, (Relevance, Binder, ValClosure (A 2), ValClosure (A 3)))
+      -> m (Name, Relevance, Binder, PropClosure (A 2), PropClosure (A 3))
     consToVProp (ci, (si, xi, bi, ixi)) = do
       bi <- closureToVProp bi
       ixi <- closureToVProp ixi
@@ -242,15 +238,15 @@ valToVProp (VMu tag f t x cs a) = do
 valToVProp (VBoxProof p) = pure (PBoxProof p)
 valToVProp (VBox a) = PBox <$> valToVProp a
 
-closureToVProp :: forall m n. MonadEvaluator m => Closure n Val -> m (Closure n VProp)
-closureToVProp (Closure env t) = Closure <$> mapM (\(bd, v) -> (bd,) <$> valToVProp v) env <*> pure t
+closureToVProp :: forall m n. MonadEvaluator m => ValClosure n -> m (PropClosure n)
+closureToVProp (Closure env t) = pure (Closure (map (second prop) env) t)
 closureToVProp (Lift v) = Lift <$> valToVProp v
 closureToVProp (LiftClosure cl) = LiftClosure <$> closureToVProp cl
 closureToVProp (Function f) = do
-  let f' = closureToVProp . f . VProp
+  let f' = closureToVProp . f . embedProp
   Function <$> evaluate (push f')
 
-appProp :: MonadEvaluator m => ClosureApply m n cl VProp => Closure n VProp -> cl
+appProp :: MonadEvaluator m => ClosureApply m n cl VProp VProp => Closure n VProp VProp -> cl
 appProp = app evalProp
 
 quoteProp :: forall m. MonadEvaluator m => Lvl -> VProp -> m (Term Ix)
@@ -342,7 +338,7 @@ quoteProp lvl (PMatch t x p bs) = do
   pure (Match t x p bs)
   where
     quoteBranch
-      :: (Name, Binder, Binder, Closure (A 2) VProp)
+      :: (Name, Binder, Binder, PropClosure (A 2))
       -> m (Name, Binder, Binder, Term Ix)
     quoteBranch (c, x, e, t) = (c,x,e,) <$> (quoteProp (lvl + 2) =<< appProp t (PVar lvl) (PVar (lvl + 1)))
 quoteProp lvl (PFixedPoint i g f p x c t) = do
@@ -356,7 +352,7 @@ quoteProp lvl (PMu tag f t x cs) = do
   pure (Mu tag f t x cs)
   where
     quoteCons
-      :: (Name, Relevance, Binder, Closure (A 2) VProp, Closure (A 3) VProp)
+      :: (Name, Relevance, Binder, PropClosure (A 2), PropClosure (A 3))
       -> m (Name, Relevance, Binder, Term Ix, Name, Term Ix)
     quoteCons (ci, si, xi, bi, ixi) = do
       bi <- quoteProp (lvl + 2) =<< appProp bi (PVar lvl) (PVar (lvl + 1))
