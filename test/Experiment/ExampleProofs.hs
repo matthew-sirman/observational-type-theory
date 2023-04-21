@@ -5,8 +5,12 @@ module Experiment.ExampleProofs where
 
 -- import Experiment.TestExecution
 import Error
+import Eval
+import MonadChecker
+
 import Parser.Parser
-import Syntax
+import PrettyPrinter
+
 import TypeChecker
 
 import Control.Monad.Except
@@ -22,13 +26,16 @@ import Text.RawString.QQ
 boolAsQuotient :: String
 boolAsQuotient =
   [r|
+    let castrefl : (A :U U) -> (t :U A) -> t ~ cast(A, A, refl A, t) =
+      λA. λt. refl t
+    in
     let cast_compose : (A :U U) -> (B :U U) -> (C :U U)
-                    -> (AB :Ω A ~ B) -> (BC :Ω B ~ C) -> (AC :Ω A ~ C)
+                    -> (AB :Ω A ~[U] B) -> (BC :Ω B ~[U] C)
                     -> (x :U A)
-                    -> cast(A, C, AC, x) ~ cast(B, C, BC, cast(A, B, AB, x)) =
-      λA. λB. λC. λAB. λBC. λAC. λx.
-        transp(B, B' BB'. cast(A, B', trans(_, _, _, AB, BB'), x) ~[B'] cast(B, B', BB', cast(A, B, AB, x)),
-               castrefl(B, cast(A, B, AB, x)), C, BC)
+                    -> cast(A, C, trans(A, B, C, AB, BC), x) ~[C] cast(B, C, BC, cast(A, B, AB, x)) =
+      λA. λB. λC. λAB. λBC. λx.
+        transp(B, B' BB'. cast(A, B', trans(A, B, B', AB, BB'), x) ~[B'] cast(B, B', BB', cast(A, B, AB, x)),
+               castrefl B (cast(A, B, AB, x)), C, BC)
     in
 
     let R : ℕ -> ℕ -> Ω =
@@ -89,7 +96,7 @@ boolAsQuotient =
         let pres : (x :U ℕ) -> (y :U ℕ) -> presT x y =
           λx. λy. rec(x'. presT x' y,
                         rec(y'. presT 0 y',
-                            λ_. castrefl(B true, t),
+                            λ_. castrefl (B true) t,
                             l _. λw. ⊥-elim(presTRhs 0 (S l) w, w),
                             y),
                       k _.
@@ -98,7 +105,6 @@ boolAsQuotient =
                             l _. λ_. cast_compose (B false) (B (π (S l))) (B (π (S k)))
                                                         (congB (S 0) (S l) *)
                                                         (congB (S l) (S k) *)
-                                                        (congB (S 0) (S k) *)
                                                         f,
                             y),
                       x)
@@ -114,105 +120,105 @@ boolAsQuotient =
 stlcInterpreter :: String
 stlcInterpreter =
   [r|
-    let Type : U =
-      μTy : U. λ.
-        [ 'Unit : [⊤]
-        ; 'Product : Ty × Ty
-        ; 'Function : Ty × Ty
+    let Type : [⊤] → U =
+      μTy : [⊤] → U. λ_.
+        [ 'Unit : ⊤ → Ty <*>
+        ; 'Product : (Ty <*> × Ty <*>) → Ty <*>
+        ; 'Function : (Ty <*> × Ty <*>) → Ty <*>
         ]
     in
-    let 1 : Type = 'Unit <*> in
-    let _✶_ : Type → Type → Type =
-      λt. λu. 'Product (t; u)
+    let 1 : Type <*> = 'Unit (*, *) in
+    let _✶_ : Type <*> → Type <*> → Type <*> =
+      λt. λu. 'Product ((t; u), *)
     in
-    let _⇒_ : Type → Type → Type =
-      λdom. λcod. 'Function (dom; cod)
+    let _⇒_ : Type <*> → Type <*> → Type <*> =
+      λdom. λcod. 'Function ((dom; cod), *)
     in
-    let 𝔽↓T : U =
-      μCtx : U. λ. ['Empty : [⊤]; 'Extend : (Ctx × Type)]
+    let 𝔽↓T : [⊤] → U =
+      μCtx : [⊤] → U. λ_. ['Empty : ⊤ → Ctx <*>; 'Extend : (Ctx <*> × Type <*>) → Ctx <*>]
     in
-    let · : 𝔽↓T = 'Empty <*> in
-    let _∷_ : 𝔽↓T → Type -> 𝔽↓T =
-      λΓ. λτ. 'Extend (Γ; τ)
+    let · : 𝔽↓T <*> = 'Empty (*, *) in
+    let _∷_ : 𝔽↓T <*> → Type <*> -> 𝔽↓T <*> =
+      λΓ. λτ. 'Extend ((Γ; τ), *)
     in
-    let Ix : Type → 𝔽↓T → U =
-      μIx : Type → 𝔽↓T → U. λτ Γ.
-        [ 'Ix0 : Σ(Γ' : 𝔽↓T). [Γ ~ Γ' ∷ τ]
-        ; 'IxS : Σ(τ' : Type). Σ(Γ' : 𝔽↓T). [Γ ~ Γ' ∷ τ'] × (Ix τ Γ')
+    let Ix : (Type <*> × 𝔽↓T <*>) → U =
+      μIx : (Type <*> × 𝔽↓T <*>) → U. λτ_Γ.
+        [ 'Ix0 : (Γ' :U 𝔽↓T <*>) → Ix (fst τ_Γ; Γ' ∷ (fst τ_Γ))
+        ; 'IxS : (τ'_Γ' :U Type <*> × (Σ(Γ' : 𝔽↓T <*>). Ix (fst τ_Γ; Γ'))) → Ix (fst τ_Γ; (fst (snd τ'_Γ')) ∷ (fst τ'_Γ'))
         ]
     in
-    let 𝔽↓̃T : (𝔽↓T × 𝔽↓T) → U =
+    let 𝔽↓̃τ : (𝔽↓T <*> × 𝔽↓T <*>) → U =
       λCs.
-        let Δ : 𝔽↓T = fst Cs in
-        let Γ : 𝔽↓T = snd Cs in
-        (τ :U Type) → Ix τ Δ → Ix τ Γ
+        let Δ : 𝔽↓T <*> = fst Cs in
+        let Γ : 𝔽↓T <*> = snd Cs in
+        (τ :U Type <*>) → Ix (τ; Δ) → Ix (τ; Γ)
     in
-    let Term : Type → 𝔽↓T → U =
-      μTm : Type → 𝔽↓T → U. λτ Γ.
-        [ 'Var : Ix τ Γ
-        ; 'One : [τ ~ 1]
-        ; 'Pair : Σ(τ₁ : Type). Σ(τ₂ : Type). (Tm τ₁ Γ × Tm τ₂ Γ) × [τ ~ τ₁ ✶ τ₂]
-        ; 'Fst : Σ(τ₂ : Type). Tm (τ ✶ τ₂) Γ
-        ; 'Snd : Σ(τ₁ : Type). Tm (τ₁ ✶ τ) Γ
-        ; 'Lambda : Σ(τ₁ : Type). Σ(τ₂ : Type). Tm τ₂ (Γ ∷ τ₁) × [τ ~ τ₁ ⇒ τ₂]
-        ; 'App : Σ(τ₁ : Type). Tm (τ₁ ⇒ τ) Γ × Tm τ₁ Γ
+    let Term : (Type <*> × 𝔽↓T <*>) → U =
+      μTm : (Type <*> × 𝔽↓T <*>) → U. λτ_Γ.
+        [ 'Var : (Ix τ_Γ) → Tm τ_Γ
+        ; 'One : ⊤ → Tm (1; snd τ_Γ)
+        ; 'Pair : (τ₁_τ₂ :U Σ(τ₁ : Type <*>). Σ(τ₂ : Type <*>). (Tm (τ₁; snd τ_Γ) × Tm (τ₂; snd τ_Γ))) → Tm ((fst τ₁_τ₂) ✶ (fst (snd τ₁_τ₂)); snd τ_Γ)
+        ; 'Fst : (Σ(τ₂ : Type <*>). Tm (((fst τ_Γ) ✶ τ₂); snd τ_Γ)) → Tm τ_Γ
+        ; 'Snd : (Σ(τ₁ : Type <*>). Tm ((τ₁ ✶ (fst τ_Γ)); snd τ_Γ)) → Tm τ_Γ
+        ; 'Lambda : (τ₁_τ₂ :U Σ(τ₁ : Type <*>). Σ(τ₂ : Type <*>). Tm (τ₂; ((snd τ_Γ) ∷ τ₁))) → Tm ((fst τ₁_τ₂) ⇒ (fst (snd τ₁_τ₂)); snd τ_Γ)
+        ; 'App : (Σ(τ₁ : Type <*>). Tm ((τ₁ ⇒ (fst τ_Γ)); snd τ_Γ) × Tm (τ₁; snd τ_Γ)) → Tm τ_Γ
         ]
     in
     -- let Vec : U → ℕ → U =
     --   λA. μVec : ℕ → U. λn. ['Nil : [n ~ 0]; 'Cons : Σ(m : ℕ). [S m ~ n] × (A × Vec m)]
     -- in
-    let Form : U =
-      μ_ : U. λ. ['Ne : [⊤]; 'Nf : [⊤]]
+    let Form : [⊤] → U =
+      μForm : [⊤] → U. λ_. ['Ne : ⊤ → Form <*>; 'Nf : ⊤ → Form <*>]
     in
-    let ℳ : Form = 'Ne <*> in
-    let 𝒩 : Form = 'Nf <*> in
-    let Val : Form → Type → Context → U =
-      μVal : Form → Type → 𝔽↓T → U. λf τ Γ.
-        [ 'VVar : [f ~ ℳ] × Ix τ Γ
-        ; 'VOne : [f ~ 𝒩] × [τ ~ 1]
-        ; 'VPair : [f ~ 𝒩] × (Σ(τ₁ : Type). Σ(τ₂ : Type). (Val 𝒩 τ₁ Γ × Val 𝒩 τ₂ Γ) × [τ ~ τ₁ ✶ τ₂])
-        ; 'VFst : [f ~ ℳ] × (Σ(τ₂ : Type). Val ℳ (τ ✶ τ₂) Γ)
-        ; 'VSnd : [f ~ ℳ] × (Σ(τ₁ : Type). Val ℳ (τ₁ ✶ τ) Γ)
-        ; 'VLambda : [f ~ 𝒩] × (Σ(τ₁ : Type). Σ(τ₂ : Type). Val 𝒩 τ₂ (Γ ∷ τ₁) × [τ ~ τ₁ ⇒ τ₂])
-        ; 'VApp : [f ~ ℳ] × (Σ(τ₁ : Type). Val ℳ (τ₁ ⇒ τ) Γ × Val 𝒩 τ₁ Γ)
-        ]
-    in
-    let ⟦_⟧_ : Type → Context → U =
-      fix [Type as Ty] SemTy ty : Context → U = λG.
-        match ty as _ return U with
-        | 'Unit _ → [⊤]
-        | 'Product p →
-          let t1 : Ty = fst p in
-          let t2 : Ty = snd p in
-          SemTy t1 G × SemTy t2 G
-        | 'Function f →
-          let dom : Ty = fst f in
-          let cod : Ty = snd f in
-          (D :U Context) → Renaming (G; D) → SemTy dom D → SemTy cod D
-    in
-    let Env : Context → Context → U =
-      fix [Context as Ctx] Env G : Context → U = λD.
-        match G as _ return U with
-        | 'Empty _ → [⊤]
-        | 'Extend G_T →
-          let G : Ctx = fst G_T in
-          let T : Type = snd G_T in
-          Env G D × SemTy T D
-    in
-    let lookup : (T :U Type) → (G :U Context) → Ix T G → (D :U Context) → Env G D → SemTy T D =
-      fix [Ix as I] lookup T G ix : (D :U Context) → Env G D → SemTy T D =
-        λD. λenv.
-          match ix as _ return SemTy T D with
-          | 'Ix0 x0 →
-            let G' : Context = fst x0 in
-            let extension : G ~[Context] 'Extend (G'; T) = ▢-elim(snd x0) in
-            -- Needs better casting for fixed points.
-            fst (cast(Env G D, Env ('Extend (G'; T)) D, 0, env))
-          -- | 'IxS xS →
-          --   let G' : Context = fst (snd xS) in
-          --   let ix' : I T G' = snd (snd (snd xS)) in
-          --   lookup T G' ix' D (snd env)
-    in
+    let ℳ : Form <*> = 'Ne (*, *) in
+    -- let 𝒩 : Form <*> = 'Nf (*, *) in
+    -- let Val : (Form <*> × (Type <*> × 𝔽↓T <*>)) → U =
+    --   μVal : (Form <*> × (Type <*> × 𝔽↓T <*>)) → U. λf_τ_Γ.
+    --     [ 'VVar : Ix (snd f_τ_Γ) → Val (ℳ; snd f_τ_Γ)
+    --     ; 'VOne : ⊤ → Val (𝒩; (1; snd (snd f_τ_Γ)))
+    --     ; 'VPair : (τ₁_τ₂ :U Σ(τ₁ : Type <*>). Σ(τ₂ : Type <*>). (Val (𝒩; (τ₁; snd (snd f_τ_Γ))) × Val (𝒩; (τ₂; snd (snd f_τ_Γ))))) → Val (𝒩; ((fst τ₁_τ₂) ✶ (fst (snd τ₁_τ₂)); snd (snd f_τ_Γ)))
+    --     ; 'VFst : (Σ(τ₂ : Type <*>). Val (ℳ; ((fst (snd f_τ_Γ)) ✶ τ₂; snd (snd f_τ_Γ)))) → Val (ℳ; snd f_τ_Γ)
+    --     ; 'VSnd : (Σ(τ₁ : Type <*>). Val (ℳ; (τ₁ ✶ (fst (snd f_τ_Γ)); snd (snd f_τ_Γ)))) → Val (ℳ; snd f_τ_Γ)
+    --     ; 'VLambda : (τ₁_τ₂ :U Σ(τ₁ : Type <*>). Σ(τ₂ : Type <*>). Val (𝒩; (τ₂; ((snd (snd f_τ_Γ)) ∷ τ₁)))) → Val (𝒩; ((fst τ₁_τ₂) ⇒ (fst (snd τ₁_τ_2)); snd (snd f_τ_Γ)))
+    --     ; 'VApp : (Σ(τ₁ : Type <*>). Val (ℳ; (τ₁ ⇒ (fst (snd f_τ_Γ)); snd (snd f_τ_Γ))) × Val (𝒩; (τ₁; snd (snd f_τ_Γ)))) → Val (ℳ; snd f_τ_Γ)
+    --     ]
+    -- in
+    -- let ⟦_⟧_ : Type <*> → 𝔽↓T <*> → U =
+    --   fix [Type as Ty] SemTy _ ty : 𝔽↓T <*> → U = λΓ.
+    --     match ty as _ return U with
+    --     | 'Unit (_, _) → [⊤]
+    --     | 'Product (p, _) →
+    --       let τ₁ : Ty <*> = fst p in
+    --       let τ₂ : Ty <*> = snd p in
+    --       SemTy τ₁ Γ × SemTy τ₂ Γ
+    --     | 'Function (f, _) →
+    --       let τ₁ : Ty <*> = fst f in
+    --       let τ₂ : Ty <*> = snd f in
+    --       (Δ :U Context) → 𝔽↓̃τ (G; D) → SemTy τ₁ Δ → SemTy τ₂ Δ
+    -- in
+    -- let Env : Context → Context → U =
+    --   fix [Context as Ctx] Env G : Context → U = λD.
+    --     match G as _ return U with
+    --     | 'Empty _ → [⊤]
+    --     | 'Extend G_T →
+    --       let G : Ctx = fst G_T in
+    --       let T : Type = snd G_T in
+    --       Env G D × SemTy T D
+    -- in
+    -- let lookup : (T :U Type) → (G :U Context) → Ix T G → (D :U Context) → Env G D → SemTy T D =
+    --   fix [Ix as I] lookup T G ix : (D :U Context) → Env G D → SemTy T D =
+    --     λD. λenv.
+    --       match ix as _ return SemTy T D with
+    --       | 'Ix0 x0 →
+    --         let G' : Context = fst x0 in
+    --         let extension : G ~[Context] 'Extend (G'; T) = ▢-elim(snd x0) in
+    --         -- Needs better casting for fixed points.
+    --         fst (cast(Env G D, Env ('Extend (G'; T)) D, 0, env))
+    --       -- | 'IxS xS →
+    --       --   let G' : Context = fst (snd xS) in
+    --       --   let ix' : I T G' = snd (snd (snd xS)) in
+    --       --   lookup T G' ix' D (snd env)
+    -- in
     -- let eval : (T :U Type) → (G :U Context) → Term T G → (D :U Context) → Env G D → SemTy T D =
     --   fix [Term as Tm] eval T G tm : (D :U Context) → Env G D → SemTy T D =
     --     λD. λenv.
@@ -274,31 +280,6 @@ stlcInterpreter =
     *
   |]
 
-{-
-let Term : Type → 𝔽↓T → U =
-  μTm : Type → 𝔽↓T → U. λτ Γ.
-    [ 'Var : Ix τ Γ                                                   indexed (τ ~ τ), (Γ ~ Γ)
-    ; 'One : [τ ~ 1]                                                  indexed (τ ~ 1), (Γ ~ Γ)
-    ; 'Pair : (x : Σ(τ₁ : Type). Σ(τ₂ : Type). (Tm τ₁ Γ × Tm τ₂ Γ))   indexed (τ ~ (fst x) ✶ (fst (snd x))), (Γ ~ Γ)
-    ; 'Fst : Σ(τ₂ : Type). Tm (τ ✶ τ₂) Γ                              indexed (τ ~ τ), (Γ ~ Γ)
-    ; 'Snd : Σ(τ₁ : Type). Tm (τ₁ ✶ τ) Γ                              indexed (τ ~ τ), (Γ ~ Γ)
-    ; 'Lambda : (x : Σ(τ₁ : Type). Σ(τ₂ : Type). Tm τ₂ (Γ ∷ τ₁))      indexed  (τ ~ (fst x) ⇒ (fst (snd τ₂))), (Γ ~ Γ)
-    ; 'App : Σ(τ₁ : Type). Tm (τ₁ ⇒ τ) Γ × Tm τ₁ Γ                    indexed (τ ~ τ), (Γ ~ Γ)
-    ]
-in
-...
-
-'Pair((A; (B; (t; u))), refl (A ✶ B), *)
-
-\| 'Pair (x, pτ, pΓ) → ...
-
-a ~ S m
-a ~ b
-
-cast(I a₁ ... aₙ, I b₁ ... bₙ, e, 'C(d, p₁, ..., pₙ)) ≡
-  'C(d, (fst e)⁻¹ ∘ p₁, (fst (snd e))⁻¹ ∘ p₂, ..., (fst (sndⁿ⁻¹ e)⁻¹ ∘ pₙ)
--}
-
 test :: String -> IO ()
 test = testDebug False
 
@@ -315,15 +296,15 @@ testDebug debug input = do
               & catch @InferenceError showReport
           )
       )
-      emptyMetaContext
+      emptyCheckState
   case result of
     Right (t, tty, _) -> do
       putStrLn "Program:"
       putStrLn (prettyPrintTerm [] t)
       putStrLn "\nHas type:"
-      putStrLn (prettyPrintTerm [] (runEvaluator (quote 0 tty) mctx))
+      putStrLn (prettyPrintTerm [] (runEvaluator (quote 0 tty) (_metaCtx mctx)))
       putStrLn "\nReduces to:"
-      putStrLn (prettyPrintTerm [] (runEvaluator (normalForm [] t) mctx))
+      putStrLn (prettyPrintTerm [] (runEvaluator (nbe [] t) (_metaCtx mctx)))
       when debug $ do
         putStrLn "\nMeta context:"
         print mctx
@@ -339,7 +320,7 @@ testDebug debug input = do
       :: CouldBe e ()
       => Reportable r
       => r
-      -> ExceptT (Variant e) (StateT MetaContext IO) a
+      -> ExceptT (Variant e) (StateT CheckState IO) a
     showReport r =
       let diagnostic = addFile def "<test-file>" input
           diagnostic' = addReport diagnostic (report r)
