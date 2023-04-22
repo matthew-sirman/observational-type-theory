@@ -127,12 +127,15 @@ conv pos names = conv' names names
     -- Conversion checking
     conv'
       :: [Binder] -> [Binder] -> Lvl -> Val -> Val -> Checker (Variant e) ()
-    -- Rigid-rigid conversion: heads must be equal and spines convertible
-    conv' ns ns' lvl (VRigid x sp) (VRigid x' sp')
-      | x == x' = convSp ns ns' lvl sp sp'
     -- Flex conversion: attempt to unify
-    conv' ns _ lvl (VFlex m env sp) t = solve pos ns lvl m env sp t
-    conv' _ ns lvl t (VFlex m env sp) = solve pos ns lvl m env sp t
+    conv' ns _ lvl (VNeutral (VFlex m env) sp) t = solve pos ns lvl m env sp t
+    conv' _ ns lvl t (VNeutral (VFlex m env) sp) = solve pos ns lvl m env sp t
+    conv' ns ns' lvl (VNeutral ne sp) (VNeutral ne' sp') = do
+      conv' ns ns' lvl ne ne'
+      convSp ns ns' lvl sp sp'
+    -- Rigid-rigid conversion: heads must be equal and spines convertible
+    conv' _ _ _ (VRigid x) (VRigid x')
+      | x == x' = pure ()
     conv' _ _ _ (VU s) (VU s') = convSort pos s s'
     conv' ns ns' lvl (VLambda x t) (VLambda x' t') = do
       let vx = var lvl
@@ -226,7 +229,7 @@ conv pos names = conv' names names
     conv' ns ns' lvl (VCons c t _) (VCons c' t' _)
       | c == c' = do
           conv' ns ns' lvl t t'
-    conv' ns ns' lvl (VFixedPoint i g f p x c t a sp) (VFixedPoint i' g' f' p' x' c' t' a' sp') = do
+    conv' ns ns' lvl (VFixedPoint i g f p x c t a) (VFixedPoint i' g' f' p' x' c' t' a') = do
       c_g_p_x <- app' c (var lvl) (var (lvl + 1)) (var (lvl + 2))
       c'_g_p_x <- app' c' (var lvl) (var (lvl + 1)) (var (lvl + 2))
       conv' (ns :> g :> p :> x) (ns' :> g' :> p' :> x') (lvl + 3) c_g_p_x c'_g_p_x
@@ -236,7 +239,6 @@ conv pos names = conv' names names
       conv' (ns :> g :> f :> p :> x) (ns' :> g' :> f' :> p' :> x') (lvl + 4) t_g_f_p_x t'_g_f_p_x
       -- TODO: this *might* be problematic in the case that exactly one of [a], [a'] is Nothing
       sequence_ (liftM2 (conv' ns ns' lvl) a a')
-      convSp ns ns' lvl sp sp'
     conv' ns ns' lvl (VMu _ f fty x cs a) (VMu _ f' fty' x' cs' a') = do
       conv' ns ns' lvl fty fty'
       zipWithM_ convCons cs cs'

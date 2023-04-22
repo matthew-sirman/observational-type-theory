@@ -14,12 +14,12 @@ module Value (
   VElim (..),
   VSpine,
   Val (..),
-  ValProp (..),
-  embedProp,
   pattern VVar,
   pattern VMeta,
   pattern VFun,
   pattern VAnd,
+  ValProp (..),
+  embedProp,
   VTy,
   VProp (..),
   PushArgument (..),
@@ -132,8 +132,9 @@ showElimHead (VMatch {}) = "<match>"
 type VSpine = [VElim]
 
 data Val
-  = VRigid Lvl VSpine
-  | VFlex MetaVar (Env ValProp) VSpine
+  = VNeutral Val VSpine
+  | VRigid Lvl
+  | VFlex MetaVar (Env ValProp)
   | VU Relevance
   | VLambda Binder (ValClosure (A 1))
   | VPi Relevance Binder VTy (ValClosure (A 1))
@@ -172,16 +173,16 @@ data Val
   | VId VTy Val Val
   | VCons Name Val VProp
   | -- A fixed point will not reduce unless applied to a constructor, so it needs a spine
-    VFixedPoint VTy Binder Binder Binder Binder (ValClosure (A 3)) (ValClosure (A 4)) (Maybe Val) VSpine
+    VFixedPoint VTy Binder Binder Binder Binder (ValClosure (A 3)) (ValClosure (A 4)) (Maybe Val)
   | VMu Tag Name VTy Binder [(Name, (Relevance, Binder, ValClosure (A 2), ValClosure (A 3)))] (Maybe Val)
   | VBoxProof VProp
   | VBox Val
 
 pattern VVar :: Lvl -> Val
-pattern VVar x = VRigid x []
+pattern VVar lvl = VNeutral (VRigid lvl) []
 
 pattern VMeta :: MetaVar -> Env ValProp -> Val
-pattern VMeta mv e = VFlex mv e []
+pattern VMeta mv env = VNeutral (VFlex mv env) []
 
 pattern VFun :: Relevance -> VTy -> VTy -> VTy
 pattern VFun s a b = VPi s Hole a (Lift b)

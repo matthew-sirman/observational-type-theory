@@ -6,8 +6,11 @@
 module Experiment.TestTypeChecking where
 
 import Error
+import Eval
+import MonadChecker
 import Parser.Lexer
 import Parser.Parser
+import PrettyPrinter
 import Syntax
 import TypeChecker
 
@@ -757,7 +760,8 @@ tm37 =
     let flip : (A :U U) → (n :U ℕ) → (m :U ℕ) → Vec A (add n m) → Vec A (add m n) =
       λA. λn. λm. λv. cast(Vec A (add n m), Vec A (add m n), add_comm n m, v)
     in
-    flip ℕ 0 (S 0) ('Cons ((0; (S (S (S 0)); 'Nil (*, *))), *))
+    -- flip ℕ 0 (S 0) ('Cons ((0; (S (S (S 0)); 'Nil (*, *))), *))
+    add_comm (S (S 0)) (S 0)
   |]
 
 test :: String -> IO ()
@@ -779,9 +783,9 @@ test input = do
       putStrLn "Program:"
       putStrLn (prettyPrintTerm [] t)
       putStrLn "\nHas type:"
-      putStrLn (prettyPrintTerm [] (runEvaluator (quote 0 tty) mctx))
+      putStrLn (prettyPrintTerm [] (runEvaluator (quote 0 tty) (_metaCtx mctx)))
       putStrLn "\nReduces to:"
-      putStrLn (prettyPrintTerm [] (runEvaluator (normalForm [] t) mctx))
+      putStrLn (prettyPrintTerm [] (runEvaluator (nbe [] t) (_metaCtx mctx)))
       putStrLn "\nMeta context:"
       print mctx
     Left () -> do

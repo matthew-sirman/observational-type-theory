@@ -269,11 +269,14 @@ rename
   -> PartialRenaming
   -> Val
   -> Checker (Variant e) (Term Ix)
-rename pos ns m sub (VRigid (Lvl x) sp) =
+rename pos ns m sub (VNeutral ne sp) = do
+  ne <- rename pos ns m sub ne
+  renameSp pos ns m sub ne sp
+rename pos ns _ sub (VRigid (Lvl x)) =
   case IM.lookup x (renaming sub) of
     Nothing -> throw (EscapingVariable (show (ns !! x)) pos)
-    Just x' -> renameSp pos ns m sub (Var (lvl2ix (dom sub) x')) sp
-rename pos ns m sub (VFlex m' _ sp)
+    Just x' -> pure (Var (lvl2ix (dom sub) x'))
+rename pos _ m _ (VFlex m' _)
   -- TODO: Need to in fact check DAG ordering, not just single MetaVar occurrence.
   -- e.g. might have α := λx. β, β := α (neither directly violate occurs check, but clearly
   -- unsolvable)
@@ -281,7 +284,7 @@ rename pos ns m sub (VFlex m' _ sp)
   -- POSSIBILITY: throw occurs check if [m' <= m] (i.e. [m'] was created first,
   -- and as such [m] might depend on it)
   | m == m' = throw (OccursCheck m pos)
-  | otherwise = renameSp pos ns m sub (Meta m') sp
+  | otherwise = pure (Meta m')
 rename _ _ _ _ (VU s) = pure (U s)
 rename pos ns m sub (VLambda x t) =
   Lambda x <$> (rename pos (ns :> x) m (liftRenaming 1 sub) =<< app' t (var (cod sub)))
@@ -346,7 +349,7 @@ rename pos ns m sub (VCons c t e) = do
   t <- rename pos ns m sub t
   e <- renameProp pos ns m sub e
   pure (Cons c t e)
-rename pos ns m sub (VFixedPoint i g f p x c t a sp) = do
+rename pos ns m sub (VFixedPoint i g f p x c t a) = do
   i <- rename pos ns m sub i
   c_g_p_x <- app' c (var (cod sub)) (var (cod sub + 1)) (var (cod sub + 2))
   t_g_f_p_x <- app' t (var (cod sub)) (var (cod sub + 1)) (var (cod sub + 2)) (var (cod sub + 3))
@@ -355,7 +358,7 @@ rename pos ns m sub (VFixedPoint i g f p x c t a sp) = do
   a <- mapM (rename pos ns m sub) a
   let fix_f = FixedPoint i g f p x c t
   case a of
-    Just a -> renameSp pos ns m sub (App fix_f a) sp
+    Just a -> pure (App fix_f a)
     Nothing -> pure fix_f
 rename pos ns m sub (VMu tag f fty x cs a) = do
   fty <- rename pos ns m sub fty

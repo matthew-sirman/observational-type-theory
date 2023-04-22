@@ -81,7 +81,7 @@ infer gamma (R _ (AppF t@(R fnPos _) u)) = do
   (t, tty, s) <- infer gamma t
   (a, b) <- case tty of
     VPi _ _ a b -> pure (a, b)
-    VFlex {} -> do
+    VMeta {} -> do
       -- If the type is a metavariable, then construct a fresh Pi type with metas
       -- for each position, and solve the constraint ?α ≡ Π(x : ?β). ?γ
       -- TODO: add more rules like this
