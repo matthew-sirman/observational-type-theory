@@ -180,11 +180,11 @@ renameProp pos ns m sub (PMatch t x p bs) = do
     quoteBranch (c, x, e, t) = do
       t <- renameProp pos (ns :> x :> e) m (liftRenaming 2 sub) =<< appProp t (PVar (cod sub)) (PVar (cod sub + 1))
       pure (c, x, e, t)
-renameProp pos ns m sub (PFixedPoint i g f p x c t) = do
+renameProp pos ns m sub (PFixedPoint i g v f p x c t) = do
   i <- renameProp pos ns m sub i
-  c <- renameProp pos (ns :> g :> p :> x) m (liftRenaming 3 sub) =<< appProp c (PVar (cod sub)) (PVar (cod sub + 1)) (PVar (cod sub + 2))
-  t <- renameProp pos (ns :> g :> f :> p :> x) m (liftRenaming 4 sub) =<< appProp t (PVar (cod sub)) (PVar (cod sub + 1)) (PVar (cod sub + 2)) (PVar (cod sub + 3))
-  pure (FixedPoint i g f p x c t)
+  c <- renameProp pos (ns :> g :> v :> p :> x) m (liftRenaming 4 sub) =<< appProp c (PVar (cod sub)) (PVar (cod sub + 1)) (PVar (cod sub + 2)) (PVar (cod sub + 3))
+  t <- renameProp pos (ns :> g :> v :> f :> p :> x) m (liftRenaming 5 sub) =<< appProp t (PVar (cod sub)) (PVar (cod sub + 1)) (PVar (cod sub + 2)) (PVar (cod sub + 3)) (PVar (cod sub + 4))
+  pure (FixedPoint i g v f p x c t)
 renameProp pos ns m sub (PMu tag f t x cs) = do
   t <- renameProp pos ns m sub t
   cs <- mapM quoteCons cs
@@ -349,14 +349,14 @@ rename pos ns m sub (VCons c t e) = do
   t <- rename pos ns m sub t
   e <- renameProp pos ns m sub e
   pure (Cons c t e)
-rename pos ns m sub (VFixedPoint i g f p x c t a) = do
+rename pos ns m sub (VFixedPoint i g v f p x c t a) = do
   i <- rename pos ns m sub i
-  c_g_p_x <- app' c (var (cod sub)) (var (cod sub + 1)) (var (cod sub + 2))
-  t_g_f_p_x <- app' t (var (cod sub)) (var (cod sub + 1)) (var (cod sub + 2)) (var (cod sub + 3))
-  c <- rename pos (ns :> g :> p :> x) m (liftRenaming 3 sub) c_g_p_x
-  t <- rename pos (ns :> g :> f :> p :> x) m (liftRenaming 4 sub) t_g_f_p_x
+  c_g_p_x <- app' c (var (cod sub)) (var (cod sub + 1)) (var (cod sub + 2)) (var (cod sub + 3))
+  t_g_f_p_x <- app' t (var (cod sub)) (var (cod sub + 1)) (var (cod sub + 2)) (var (cod sub + 3)) (var (cod sub + 4))
+  c <- rename pos (ns :> g :> v :> p :> x) m (liftRenaming 4 sub) c_g_p_x
+  t <- rename pos (ns :> g :> v :> f :> p :> x) m (liftRenaming 5 sub) t_g_f_p_x
   a <- mapM (rename pos ns m sub) a
-  let fix_f = FixedPoint i g f p x c t
+  let fix_f = FixedPoint i g v f p x c t
   case a of
     Just a -> pure (App fix_f a)
     Nothing -> pure fix_f

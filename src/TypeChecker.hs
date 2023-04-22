@@ -417,49 +417,54 @@ infer gamma (R pos (MatchF t@(R argPos _) x p bs)) = do
     a -> do
       aTS <- ppVal gamma a
       throw (MatchHead aTS argPos)
-infer gamma (R _ (FixedPointF i@(R pos _) g f p x c t)) = do
-  (muF, vmuFty, _) <- infer gamma i
+infer gamma (R _ (FixedPointF i@(R pos _) g v f p x c t)) = do
+  (muF, _, _) <- infer gamma i
   vmuF <- eval (env gamma) muF
-  case (vmuF, vmuFty) of
-    (VMu _ f' _ xs cs Nothing, VPi _ _ a _) -> do
+  case vmuF of
+    VMu _ f' vmuFty@(VPi _ _ a _) x' cs Nothing -> do
       let vg = var (lvl gamma)
-          vp = VVar (lvl gamma + 1)
+          vv = var (lvl gamma + 1)
+          vp = VVar (lvl gamma + 2)
+      viewTy <- buildViewType a (val vg) vmuF
       vg_p <- val vg $$ VApp vp
-      let gammaC = gamma & bindR g vmuFty & bindR p a & bindR x vg_p
+      let gammaC = gamma & bindR g vmuFty & bindR v viewTy & bindR p a & bindR x vg_p
       (c, s) <- checkType gammaC c
-      fty <- buildFType p a (env gamma) vg c
+
+      fty <- buildFType p a (env gamma) vg vv c
       -- In type checking the body, there is one additional argument (the recursive function [f])
       -- preceding the parameters. Therefore, we shift their semantic values by one
       f_lift_g_tag <- freshTag
-      let vp = var (lvl gamma + 2)
-          f_lift_g_val = VMu f_lift_g_tag f' vmuFty xs (map (sub vg) cs) Nothing
+      let vp = var (lvl gamma + 3)
+          f_lift_g_val = VMu f_lift_g_tag f' vmuFty x' (map (sub vg) cs) Nothing
       f_lift_g <- embedVal f_lift_g_val
       f_lift_g_p <- f_lift_g_val $$ VApp (val vp)
-      let vx = var (lvl gamma + 3)
-      c_f_lift_g_p_x <- eval (env gamma :> (Bound, f_lift_g) :> (Bound, vp) :> (Bound, vx)) c
-      let gammaT = gamma & bindR g vmuFty & bind f s fty & bind p s a & bindR x f_lift_g_p
-      t <- check gammaT t c_f_lift_g_p_x
+      let vx = var (lvl gamma + 4)
+      c_f_lift_g_v_p_x <- eval (env gamma :> (Bound, f_lift_g) :> (Bound, vv) :> (Bound, vp) :> (Bound, vx)) c
+      let gammaT = gamma & bindR g vmuFty & bindR v viewTy & bind f s fty & bind p s a & bindR x f_lift_g_p
+      t <- check gammaT t c_f_lift_g_v_p_x
+
       vmuF <- embedVal vmuF
-      fixTy <- buildFType p a (env gamma) vmuF c
-      pure (FixedPoint muF g f p x c t, fixTy, s)
+      fixTy <- buildFType p a (env gamma) vmuF vv c
+      pure (FixedPoint muF g v f p x c t, fixTy, s)
     _ -> do
       vmuFTS <- ppVal gamma vmuF
       throw (FixAnnotation vmuFTS pos)
   where
-    buildFType
-      :: MonadEvaluator m
-      => Binder
-      -> VTy
-      -> Env ValProp
-      -> ValProp
-      -> Term Ix
-      -> m VTy
-    buildFType p a env vg c = do
-      let vc vp vx = eval (env :> (Bound, vg) :> (Bound, vp) :> (Bound, vx)) c
+    buildFType :: MonadEvaluator m => Binder -> VTy -> Env ValProp -> ValProp -> ValProp -> Term Ix -> m VTy
+    buildFType p a env vg vv c = do
+      let vc vp vx = eval (env :> (Bound, vg) :> (Bound, vv) :> (Bound, vp) :> (Bound, vx)) c
           vpi_x_c vp = do
             vg_p <- val vg $$ VApp (val vp)
             VPi Relevant x vg_p <$> makeFnClosure' (vc vp)
       VPi Relevant p a <$> makeFnClosure' vpi_x_c
+
+    buildViewType :: MonadEvaluator m => VTy -> VTy -> VTy -> m VTy
+    buildViewType a g muF = do
+      let vidTy vp = do
+            vg_p <- g $$ VApp (val vp)
+            muF_p <- muF $$ VApp (val vp)
+            pure (VPi Relevant Hole vg_p (Lift muF_p))
+      VPi Relevant p a <$> makeFnClosure' vidTy
 
     sub
       :: ValProp

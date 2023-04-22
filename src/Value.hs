@@ -172,8 +172,7 @@ data Val
   | VIdPath VProp
   | VId VTy Val Val
   | VCons Name Val VProp
-  | -- A fixed point will not reduce unless applied to a constructor, so it needs a spine
-    VFixedPoint VTy Binder Binder Binder Binder (ValClosure (A 3)) (ValClosure (A 4)) (Maybe Val)
+  | VFixedPoint VTy Binder Binder Binder Binder Binder (ValClosure (A 4)) (ValClosure (A 5)) (Maybe Val)
   | VMu Tag Name VTy Binder [(Name, (Relevance, Binder, ValClosure (A 2), ValClosure (A 3)))] (Maybe Val)
   | VBoxProof VProp
   | VBox Val
@@ -232,7 +231,7 @@ data VProp
   | PBox VProp
   | PCons Name VProp VProp
   | PMatch VProp Binder (PropClosure (A 1)) [(Name, Binder, Binder, PropClosure (A 2))]
-  | PFixedPoint VProp Binder Binder Binder Binder (PropClosure (A 3)) (PropClosure (A 4))
+  | PFixedPoint VProp Binder Binder Binder Binder Binder (PropClosure (A 4)) (PropClosure (A 5))
   | PMu Tag Name VProp Binder [(Name, Relevance, Binder, PropClosure (A 2), PropClosure (A 3))]
   | PLet Binder VProp VProp (PropClosure (A 1))
   | PAnnotation VProp VProp

@@ -107,11 +107,11 @@ evalProp env (Match t x p bs) = do
   where
     evalBranch :: (Name, Binder, Binder, Term Ix) -> m (Name, Binder, Binder, PropClosure (A 2))
     evalBranch (c, x, e, t) = (c,x,e,) <$> propClosure env t
-evalProp env (FixedPoint i g f p x c t) = do
+evalProp env (FixedPoint i g v f p x c t) = do
   i <- evalProp env i
   c <- propClosure env c
   t <- propClosure env t
-  pure (PFixedPoint i g f p x c t)
+  pure (PFixedPoint i g v f p x c t)
 evalProp env (Mu tag f t x cs) = do
   t <- evalProp env t
   cs <- mapM evalCons cs
@@ -213,12 +213,12 @@ valToVProp (VIdRefl t) = PIdRefl <$> valToVProp t
 valToVProp (VIdPath e) = pure (PIdPath e)
 valToVProp (VId a t u) = PId <$> valToVProp a <*> valToVProp t <*> valToVProp u
 valToVProp (VCons c t e) = PCons c <$> valToVProp t <*> pure e
-valToVProp (VFixedPoint i g f p x c t a) = do
+valToVProp (VFixedPoint i g v f p x c t a) = do
   i <- valToVProp i
   c <- closureToVProp c
   t <- closureToVProp t
   a <- mapM valToVProp a
-  let fp = PFixedPoint i g f p x c t
+  let fp = PFixedPoint i g v f p x c t
   case a of
     Just a -> pure (PApp fp a)
     Nothing -> pure fp
@@ -344,11 +344,11 @@ quoteProp lvl (PMatch t x p bs) = do
       :: (Name, Binder, Binder, PropClosure (A 2))
       -> m (Name, Binder, Binder, Term Ix)
     quoteBranch (c, x, e, t) = (c,x,e,) <$> (quoteProp (lvl + 2) =<< appProp t (PVar lvl) (PVar (lvl + 1)))
-quoteProp lvl (PFixedPoint i g f p x c t) = do
+quoteProp lvl (PFixedPoint i g v f p x c t) = do
   i <- quoteProp lvl i
-  c <- quoteProp (lvl + 3) =<< appProp c (PVar lvl) (PVar (lvl + 1)) (PVar (lvl + 2))
-  t <- quoteProp (lvl + 4) =<< appProp t (PVar lvl) (PVar (lvl + 1)) (PVar (lvl + 2)) (PVar (lvl + 3))
-  pure (FixedPoint i g f p x c t)
+  c <- quoteProp (lvl + 4) =<< appProp c (PVar lvl) (PVar (lvl + 1)) (PVar (lvl + 2)) (PVar (lvl + 3))
+  t <- quoteProp (lvl + 5) =<< appProp t (PVar lvl) (PVar (lvl + 1)) (PVar (lvl + 2)) (PVar (lvl + 3)) (PVar (lvl + 4))
+  pure (FixedPoint i g v f p x c t)
 quoteProp lvl (PMu tag f t x cs) = do
   t <- quoteProp lvl t
   cs <- mapM quoteCons cs
