@@ -184,13 +184,18 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
         branch (cons, x, e, t) =
           let cons' = str cons . str " " . showParen True (binder x . comma . binder e)
            in str "| " . cons' . str " -> " . go precLet (ns :> x :> e) t
-    go prec ns (FixedPoint i g f p x c t) =
-      let i' = go precLet ns i . str " as " . binder g
-          -- args = sep space (fmap binder (f : ps ++ [x]))
+    go prec ns (FixedPoint i g v f p x c t) =
+      let i' = go precLet ns i . showAsAlias g . showViewAlias v
           args = sep space (fmap binder [f, p, x])
-          c' = go precLet (ns :> g :> p :> x) c
-          t' = go precLet (ns :> g :> f :> p :> x) t
+          c' = go precLet (ns :> g :> v :> p :> x) c
+          t' = go precLet (ns :> g :> v :> f :> p :> x) t
        in par prec precLet (str "fix [" . i' . str "] " . args . str " : " . c' . str " = " . t')
+      where
+        showAsAlias, showViewAlias :: Binder -> ShowS
+        showAsAlias Hole = id
+        showAsAlias g = str " as " . binder g
+        showViewAlias Hole = id
+        showViewAlias v = str " view " . binder v
     go prec ns (Mu _ f t x cs) =
       let x' = str "λ" . binder x
           cs' = chr '[' . sep (str "; ") (fmap showCons cs) . chr ']'

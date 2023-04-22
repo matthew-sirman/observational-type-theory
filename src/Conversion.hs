@@ -229,14 +229,14 @@ conv pos names = conv' names names
     conv' ns ns' lvl (VCons c t _) (VCons c' t' _)
       | c == c' = do
           conv' ns ns' lvl t t'
-    conv' ns ns' lvl (VFixedPoint i g f p x c t a) (VFixedPoint i' g' f' p' x' c' t' a') = do
-      c_g_p_x <- app' c (var lvl) (var (lvl + 1)) (var (lvl + 2))
-      c'_g_p_x <- app' c' (var lvl) (var (lvl + 1)) (var (lvl + 2))
-      conv' (ns :> g :> p :> x) (ns' :> g' :> p' :> x') (lvl + 3) c_g_p_x c'_g_p_x
+    conv' ns ns' lvl (VFixedPoint i g v f p x c t a) (VFixedPoint i' g' v' f' p' x' c' t' a') = do
+      c_g_p_x <- app' c (var lvl) (var (lvl + 1)) (var (lvl + 2)) (var (lvl + 3))
+      c'_g_p_x <- app' c' (var lvl) (var (lvl + 1)) (var (lvl + 2)) (var (lvl + 3))
+      conv' (ns :> g :> v :> p :> x) (ns' :> g' :> v' :> p' :> x') (lvl + 4) c_g_p_x c'_g_p_x
       conv' ns ns' lvl i i'
-      t_g_f_p_x <- app' t (var lvl) (var (lvl + 1)) (var (lvl + 2)) (var (lvl + 3))
-      t'_g_f_p_x <- app' t' (var lvl) (var (lvl + 1)) (var (lvl + 2)) (var (lvl + 3))
-      conv' (ns :> g :> f :> p :> x) (ns' :> g' :> f' :> p' :> x') (lvl + 4) t_g_f_p_x t'_g_f_p_x
+      t_g_f_p_x <- app' t (var lvl) (var (lvl + 1)) (var (lvl + 2)) (var (lvl + 3)) (var (lvl + 4))
+      t'_g_f_p_x <- app' t' (var lvl) (var (lvl + 1)) (var (lvl + 2)) (var (lvl + 3)) (var (lvl + 4))
+      conv' (ns :> g :> v :> f :> p :> x) (ns' :> g' :> v' :> f' :> p' :> x') (lvl + 5) t_g_f_p_x t'_g_f_p_x
       -- TODO: this *might* be problematic in the case that exactly one of [a], [a'] is Nothing
       sequence_ (liftM2 (conv' ns ns' lvl) a a')
     conv' ns ns' lvl (VMu _ f fty x cs a) (VMu _ f' fty' x' cs' a') = do

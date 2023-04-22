@@ -76,6 +76,7 @@ import qualified Error.Diagnose as Err
   '|'                   { L _ TokPipe }
   mu                    { L _ SymMu }
   fix                   { L _ TokFix }
+  view                  { L _ KWView }
   let                   { L _ KWLet }
   '='                   { L _ TokEquals }
   in                    { L _ KWIn }
@@ -98,7 +99,10 @@ exp :: { Raw }
   : '\\' binder '.' exp                                             { rloc (LambdaF $2 $4) $1 $> }
   | let binder ':' exp '=' exp in exp                               { rloc (LetF $2 $4 $6 $8) $1 $> }
   | match exp as binder return exp with branches                    { rloc (MatchF $2 $4 $6 $8) $1 $7 }
-  | fix '[' exp as binder ']' binder binder binder ':' exp '=' exp  { rloc (FixedPointF $3 $5 $7 $8 $9 $11 $13) $1 $> }
+  | fix '[' exp as binder ']' binder binder binder ':' exp '=' exp  { rloc (FixedPointF $3 $5 Hole $7 $8 $9 $11 $13) $1 $> }
+  | fix '[' exp ']' binder binder binder ':' exp '=' exp            { rloc (FixedPointF $3 Hole Hole $5 $6 $7 $9 $11) $1 $> }
+  | fix '[' exp as binder view binder ']'
+         binder binder binder ':' exp '=' exp                       { rloc (FixedPointF $3 $5 $7 $9 $10 $11 $13 $15) $1 $> }
   | mu var ':' term '.' '\\' binder '.' '[' constructors ']'        { rloc (MuF () (syntax $2) $4 $7 $10) $1 $> }
   | term                                                            { $1 }
 

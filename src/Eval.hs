@@ -334,11 +334,11 @@ eval env (Match t x p bs) = do
   p <- closure env p
   bs <- mapM (branch env) bs
   t $$ VMatch x p bs
-eval env (FixedPoint i g f p x c t) = do
+eval env (FixedPoint i g v f p x c t) = do
   i <- eval env i
   c <- closure env c
   t <- closure env t
-  pure (VFixedPoint i g f p x c t Nothing)
+  pure (VFixedPoint i g v f p x c t Nothing)
 eval env (Mu tag f t x cs) = do
   t <- eval env t
   cs <- mapM (\(ci, si, xi, bi, _, ixi) -> (ci,) <$> ((si,xi,,) <$> closure env bi <*> closure env ixi)) cs
@@ -404,15 +404,21 @@ infixl 8 $$
 -- Only reduce a fixed point [(fix f) ps a => f (fix f) ps a] when
 -- [a] is a normal form; i.e. a constructor. This avoids the risk of
 -- infinitely looping.
-(VFixedPoint muF g f p x c t (Just a)) $$ (VApp u@(VCons {})) = do
-  let fix_f_val = VFixedPoint muF g f p x c t Nothing
+(VFixedPoint muF g v f p x c t (Just a)) $$ (VApp u@(VCons {})) = do
+  let fix_f_val = VFixedPoint muF g v f p x c t Nothing
   muF <- embedVal muF
   fix_f <- embedVal fix_f_val
   a <- embedVal a
   u <- embedVal u
-  app' t muF fix_f a u
-(VFixedPoint muF g f p x c t Nothing) $$ (VApp u) =
-  pure (VFixedPoint muF g f p x c t (Just u))
+  -- This identity function holds in the empty context, so we create a syntactic
+  -- form and then evaluate it in the empty environment to get a semantic identity
+  -- function.
+  let viewId = Lambda p (Lambda x (Var 0))
+  vviewId_val <- eval [] viewId
+  vv <- embedVal vviewId_val
+  app' t muF vv fix_f a u
+(VFixedPoint muF g v f p x c t Nothing) $$ (VApp u) =
+  pure (VFixedPoint muF g v f p x c t (Just u))
 (VMu tag f t xs cs Nothing) $$ (VApp a) = pure (VMu tag f t xs cs (Just a))
 VZero $$ (VNElim _ _ t0 _ _ _) = pure t0
 (VSucc n) $$ elim@(VNElim _ _ _ _ _ ts) = do
@@ -518,11 +524,11 @@ quote lvl (VIdRefl t) = IdRefl <$> quote lvl t
 quote lvl (VIdPath e) = IdPath <$> quoteProp lvl e
 quote lvl (VId a t u) = Id <$> quote lvl a <*> quote lvl t <*> quote lvl u
 quote lvl (VCons c t e) = Cons c <$> quote lvl t <*> quoteProp lvl e
-quote lvl (VFixedPoint i g f p x c t a) = do
+quote lvl (VFixedPoint i g v f p x c t a) = do
   i <- quote lvl i
-  c <- quote (lvl + 3) =<< app' c (var lvl) (var (lvl + 1)) (var (lvl + 2))
-  t <- quote (lvl + 4) =<< app' t (var lvl) (var (lvl + 1)) (var (lvl + 2)) (var (lvl + 3))
-  let fix_f = FixedPoint i g f p x c t
+  c <- quote (lvl + 4) =<< app' c (var lvl) (var (lvl + 1)) (var (lvl + 2)) (var (lvl + 3))
+  t <- quote (lvl + 5) =<< app' t (var lvl) (var (lvl + 1)) (var (lvl + 2)) (var (lvl + 3)) (var (lvl + 4))
+  let fix_f = FixedPoint i g v f p x c t
   a <- mapM (quote lvl) a
   case a of
     Just a -> pure (App fix_f a)

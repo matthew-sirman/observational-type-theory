@@ -81,6 +81,7 @@ tokens :-
        "with"                   { keyword KWWith }
        "|"                      { symbol TokPipe }
        "fix"                    { symbol TokFix }
+       "view"                   { keyword KWView }
        "mu"                     { symbol SymMu }
        "μ"                      { symbol SymMu }
        "let"                    { keyword KWLet }
@@ -144,6 +145,7 @@ data Token
   | KWWith
   | TokPipe
   | TokFix
+  | KWView
   | SymMu
   | KWLet
   | TokEquals
