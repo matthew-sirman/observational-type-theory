@@ -184,8 +184,11 @@ spineToVProp base (sp :> VMatch x p bs) = do
     branchToVProp (c, x, e, t) = (c,x,e,) <$> closureToVProp t
 
 valToVProp :: forall m. MonadEvaluator m => Val -> m VProp
-valToVProp (VRigid x sp) = spineToVProp (PVar x) sp
-valToVProp (VFlex mv env sp) = spineToVProp (PMeta mv (envToPropEnv env)) sp
+valToVProp (VNeutral ne sp) = do
+  ne <- valToVProp ne
+  spineToVProp ne sp
+valToVProp (VRigid x) = pure (PVar x)
+valToVProp (VFlex mv env) = pure (PMeta mv (envToPropEnv env))
 valToVProp (VU s) = pure (PU s)
 valToVProp (VLambda x t) = PLambda x <$> closureToVProp t
 valToVProp (VPi s x a b) = PPi s x <$> valToVProp a <*> closureToVProp b
@@ -210,14 +213,14 @@ valToVProp (VIdRefl t) = PIdRefl <$> valToVProp t
 valToVProp (VIdPath e) = pure (PIdPath e)
 valToVProp (VId a t u) = PId <$> valToVProp a <*> valToVProp t <*> valToVProp u
 valToVProp (VCons c t e) = PCons c <$> valToVProp t <*> pure e
-valToVProp (VFixedPoint i g f p x c t a sp) = do
+valToVProp (VFixedPoint i g f p x c t a) = do
   i <- valToVProp i
   c <- closureToVProp c
   t <- closureToVProp t
   a <- mapM valToVProp a
   let fp = PFixedPoint i g f p x c t
   case a of
-    Just a -> spineToVProp (PApp fp a) sp
+    Just a -> pure (PApp fp a)
     Nothing -> pure fp
 valToVProp (VMu tag f t x cs a) = do
   t <- valToVProp t

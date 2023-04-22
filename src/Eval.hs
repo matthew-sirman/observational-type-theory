@@ -338,7 +338,7 @@ eval env (FixedPoint i g f p x c t) = do
   i <- eval env i
   c <- closure env c
   t <- closure env t
-  pure (VFixedPoint i g f p x c t Nothing [])
+  pure (VFixedPoint i g f p x c t Nothing)
 eval env (Mu tag f t x cs) = do
   t <- eval env t
   cs <- mapM (\(ci, si, xi, bi, _, ixi) -> (ci,) <$> ((si,xi,,) <$> closure env bi <*> closure env ixi)) cs
@@ -365,10 +365,9 @@ match (VCons c u e) _ _ ((c', _, _, t) : _)
   | c == c' = do
       u <- embedVal u
       app' t u (embedProp e)
-match (VRigid x sp) x' p bs = pure (VRigid x (sp :> VMatch x' p bs))
-match (VFlex m env sp) x p bs = pure (VFlex m env (sp :> VMatch x p bs))
-match t x p (_ : bs) = match t x p bs
-match _ _ _ [] = error "BUG: IMPOSSIBLE (non-total or ill-typed match)!"
+match t@(VCons {}) x p (_ : bs) = match t x p bs
+match (VNeutral ne sp) x p bs = pure (VNeutral ne (sp :> VMatch x p bs))
+match t x p bs = pure (neElim t (VMatch x p bs))
 
 infixl 8 $$
 
@@ -405,17 +404,15 @@ infixl 8 $$
 -- Only reduce a fixed point [(fix f) ps a => f (fix f) ps a] when
 -- [a] is a normal form; i.e. a constructor. This avoids the risk of
 -- infinitely looping.
-(VFixedPoint muF g f p x c t (Just a) []) $$ (VApp u@(VCons {})) = do
-  let fix_f_val = VFixedPoint muF g f p x c t Nothing []
+(VFixedPoint muF g f p x c t (Just a)) $$ (VApp u@(VCons {})) = do
+  let fix_f_val = VFixedPoint muF g f p x c t Nothing
   muF <- embedVal muF
   fix_f <- embedVal fix_f_val
   a <- embedVal a
   u <- embedVal u
   app' t muF fix_f a u
-(VFixedPoint muF g f p x c t Nothing []) $$ (VApp u) =
-  pure (VFixedPoint muF g f p x c t (Just u) [])
-(VFixedPoint muF g f p x c t a sp) $$ u =
-  pure (VFixedPoint muF g f p x c t a (sp :> u))
+(VFixedPoint muF g f p x c t Nothing) $$ (VApp u) =
+  pure (VFixedPoint muF g f p x c t (Just u))
 (VMu tag f t xs cs Nothing) $$ (VApp a) = pure (VMu tag f t xs cs (Just a))
 VZero $$ (VNElim _ _ t0 _ _ _) = pure t0
 (VSucc n) $$ elim@(VNElim _ _ _ _ _ ts) = do
@@ -441,12 +438,14 @@ VZero $$ (VNElim _ _ t0 _ _ _) = pure t0
 --   cast b_t_idrefl_t b_t'_idpath_e (VProp env eqJ) u
 (VBoxProof e) $$ VBoxElim = pure (VProp e)
 t $$ (VMatch x p bs) = match t x p bs
-(VRigid x sp) $$ u = pure (VRigid x (sp :> u))
-(VFlex m env sp) $$ u = pure (VFlex m env (sp :> u))
-_ $$ _ = error "BUG: IMPOSSIBLE (ill-typed evaluation)!"
+ne $$ u = pure (neElim ne u)
 
 elimM :: MonadEvaluator m => m Val -> m VElim -> m Val
 elimM = bindM2 ($$)
+
+neElim :: Val -> VElim -> Val
+neElim (VNeutral ne sp) u = VNeutral ne (sp :> u)
+neElim ne u = VNeutral ne [u]
 
 app' :: MonadEvaluator m => ClosureApply m n cl ValProp Val => ValClosure n -> cl
 app' = app eval
@@ -483,9 +482,13 @@ quoteSp l base (sp :> VMatch x p bs) = do
   where
     quoteBranch :: (Name, Binder, Binder, ValClosure (A 2)) -> m (Name, Binder, Binder, Term Ix)
     quoteBranch (c, x, e, t) = (c,x,e,) <$> (quote (l + 2) =<< app' t (var l) (var (l + 1)))
+
 quote :: forall m. MonadEvaluator m => Lvl -> Val -> m (Term Ix)
-quote lvl (VRigid x sp) = quoteSp lvl (Var (lvl2ix lvl x)) sp
-quote lvl (VFlex mv _ sp) = quoteSp lvl (Meta mv) sp
+quote lvl (VNeutral ne sp) = do
+  ne <- quote lvl ne
+  quoteSp lvl ne sp
+quote lvl (VRigid x) = pure (Var (lvl2ix lvl x))
+quote _ (VFlex mv _) = pure (Meta mv)
 quote _ (VU s) = pure (U s)
 quote lvl (VLambda x t) = Lambda x <$> (quote (lvl + 1) =<< app' t (var lvl))
 quote lvl (VPi s x a b) = Pi s x <$> quote lvl a <*> (quote (lvl + 1) =<< app' b (var lvl))
@@ -515,14 +518,14 @@ quote lvl (VIdRefl t) = IdRefl <$> quote lvl t
 quote lvl (VIdPath e) = IdPath <$> quoteProp lvl e
 quote lvl (VId a t u) = Id <$> quote lvl a <*> quote lvl t <*> quote lvl u
 quote lvl (VCons c t e) = Cons c <$> quote lvl t <*> quoteProp lvl e
-quote lvl (VFixedPoint i g f p x c t a sp) = do
+quote lvl (VFixedPoint i g f p x c t a) = do
   i <- quote lvl i
   c <- quote (lvl + 3) =<< app' c (var lvl) (var (lvl + 1)) (var (lvl + 2))
   t <- quote (lvl + 4) =<< app' t (var lvl) (var (lvl + 1)) (var (lvl + 2)) (var (lvl + 3))
   let fix_f = FixedPoint i g f p x c t
   a <- mapM (quote lvl) a
   case a of
-    Just a -> quoteSp lvl (App fix_f a) sp
+    Just a -> pure (App fix_f a)
     Nothing -> pure fix_f
 quote lvl (VMu tag f fty x cs a) = do
   fty <- quote lvl fty
