@@ -758,6 +758,37 @@ tm37 =
     add_comm (S (S 0)) (S 0)
   |]
 
+tm38 :: String
+tm38 =
+  [r|
+    let List : U → [⊤] → U =
+      λA. μList : [⊤] → U. λp.
+        [ 'Nil : ⊤ → List p
+        ; 'Cons : (A × List p) → List p
+        ]
+        functor X Y f p x =
+          match x as _ return (μList : [⊤] → U. λp. ['Nil : ⊤ → List p; 'Cons : (A × Y p) → List p]) p with
+          | 'Nil (_, _) → 'Nil (*, *)
+          | 'Cons (xs, _) → 'Cons ((fst xs; f p (snd xs)), *)
+    in
+    let generate : (A :U U) → (ℕ → A) → (n :U ℕ) → List A <*> =
+      λA. λf. λn. rec(k. List A <*>, 'Nil (*, *), k vs. 'Cons ((f k; vs), *), n)
+    in
+    let length : (A :U U) → (p :U [⊤]) → List A p → ℕ =
+      λA. fix [List A] length p xs : ℕ =
+        match xs as _ return ℕ with
+        | 'Nil (_, _) → 0
+        | 'Cons (xs, _) → S (length p (snd xs))
+    in
+    let range : (A :U U) → (p :U [⊤]) → List A p → List ℕ p =
+      λA. fix [List A as ListA view ι] range p xs : List ℕ p =
+        match xs as _ return List ℕ p with
+        | 'Nil (_, _) → 'Nil (*, *)
+        | 'Cons (xs, _) → 'Cons ((length A p (ι p (snd xs)); range p (snd xs)), *)
+    in
+    range ℕ <*> (generate ℕ (λ_. 0) (S (S (S (S (S 0))))))
+  |]
+
 test :: String -> IO ()
 test input = do
   (result, mctx) <-

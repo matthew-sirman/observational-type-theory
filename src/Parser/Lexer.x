@@ -84,6 +84,7 @@ tokens :-
        "view"                   { keyword KWView }
        "mu"                     { symbol SymMu }
        "μ"                      { symbol SymMu }
+       "functor"                { keyword KWFunctor }
        "let"                    { keyword KWLet }
        "="                      { symbol TokEquals }
        "in"                     { keyword KWIn}
@@ -147,6 +148,7 @@ data Token
   | TokFix
   | KWView
   | SymMu
+  | KWFunctor
   | KWLet
   | TokEquals
   | KWIn

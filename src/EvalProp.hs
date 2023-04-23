@@ -112,10 +112,11 @@ evalProp env (FixedPoint i g v f p x c t) = do
   c <- propClosure env c
   t <- propClosure env t
   pure (PFixedPoint i g v f p x c t)
-evalProp env (Mu tag f t x cs) = do
+evalProp env (Mu tag f t x cs functor) = do
   t <- evalProp env t
   cs <- mapM evalCons cs
-  pure (PMu tag f t x cs)
+  functor <- mapM evalFunctor functor
+  pure (PMu tag f t x cs functor)
   where
     evalCons
       :: (Name, Relevance, Binder, Term Ix, Name, Term Ix)
@@ -124,6 +125,10 @@ evalProp env (Mu tag f t x cs) = do
       bi <- propClosure env bi
       ixi <- propClosure env ixi
       pure (ci, si, xi, bi, ixi)
+
+    evalFunctor :: FunctorInstance Ix -> m PFunctorInstance
+    evalFunctor (FunctorInstanceF a b f p x t) =
+      PFunctorInstance a b f p x <$> propClosure env t
 evalProp env (Let x a t u) = do
   a <- evalProp env a
   t <- evalProp env t
@@ -135,10 +140,10 @@ evalProp env (Meta m) = pure (PMeta m env)
 evalProp' :: MonadEvaluator m => Env ValProp -> Term Ix -> m VProp
 evalProp' env = evalProp (envToPropEnv env)
 
-propClosure :: forall n m. MonadEvaluator m => Env VProp -> Term Ix -> m (PropClosure n)
+propClosure :: MonadEvaluator m => Env VProp -> Term Ix -> m (PropClosure n)
 propClosure env t = pure (Closure env t)
 
-propClosure' :: forall n m. MonadEvaluator m => Env ValProp -> Term Ix -> m (PropClosure n)
+propClosure' :: MonadEvaluator m => Env ValProp -> Term Ix -> m (PropClosure n)
 propClosure' env = propClosure (envToPropEnv env)
 
 envToPropEnv :: Env ValProp -> Env VProp
@@ -222,11 +227,12 @@ valToVProp (VFixedPoint i g v f p x c t a) = do
   case a of
     Just a -> pure (PApp fp a)
     Nothing -> pure fp
-valToVProp (VMu tag f t x cs a) = do
+valToVProp (VMu tag f t x cs functor a) = do
   t <- valToVProp t
   cs <- mapM consToVProp cs
+  functor <- mapM vFunctorToPFunctor functor
   a <- mapM valToVProp a
-  let muF = PMu tag f t x cs
+  let muF = PMu tag f t x cs functor
   case a of
     Just a -> pure (PApp muF a)
     Nothing -> pure muF
@@ -238,6 +244,10 @@ valToVProp (VMu tag f t x cs a) = do
       bi <- closureToVProp bi
       ixi <- closureToVProp ixi
       pure (ci, si, xi, bi, ixi)
+
+    vFunctorToPFunctor :: VFunctorInstance -> m PFunctorInstance
+    vFunctorToPFunctor (VFunctorInstance a b f p x t) =
+      PFunctorInstance a b f p x <$> closureToVProp t
 valToVProp (VBoxProof p) = pure (PBoxProof p)
 valToVProp (VBox a) = PBox <$> valToVProp a
 
@@ -349,10 +359,11 @@ quoteProp lvl (PFixedPoint i g v f p x c t) = do
   c <- quoteProp (lvl + 4) =<< appProp c (PVar lvl) (PVar (lvl + 1)) (PVar (lvl + 2)) (PVar (lvl + 3))
   t <- quoteProp (lvl + 5) =<< appProp t (PVar lvl) (PVar (lvl + 1)) (PVar (lvl + 2)) (PVar (lvl + 3)) (PVar (lvl + 4))
   pure (FixedPoint i g v f p x c t)
-quoteProp lvl (PMu tag f t x cs) = do
+quoteProp lvl (PMu tag f t x cs functor) = do
   t <- quoteProp lvl t
   cs <- mapM quoteCons cs
-  pure (Mu tag f t x cs)
+  functor <- mapM quoteFunctor functor
+  pure (Mu tag f t x cs functor)
   where
     quoteCons
       :: (Name, Relevance, Binder, PropClosure (A 2), PropClosure (A 3))
@@ -361,6 +372,11 @@ quoteProp lvl (PMu tag f t x cs) = do
       bi <- quoteProp (lvl + 2) =<< appProp bi (PVar lvl) (PVar (lvl + 1))
       ixi <- quoteProp (lvl + 3) =<< appProp ixi (PVar lvl) (PVar (lvl + 1)) (PVar (lvl + 2))
       pure (ci, si, xi, bi, f, ixi)
+
+    quoteFunctor :: PFunctorInstance -> m (FunctorInstance Ix)
+    quoteFunctor (PFunctorInstance a b f p x t) = do
+      t <- quoteProp (lvl + 5) =<< appProp t (PVar lvl) (PVar (lvl + 1)) (PVar (lvl + 2)) (PVar (lvl + 3)) (PVar (lvl + 4))
+      pure (FunctorInstanceF a b f p x t)
 quoteProp lvl (PLet x a t u) = do
   a <- quoteProp lvl a
   t <- quoteProp lvl t

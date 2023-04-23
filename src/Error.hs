@@ -127,6 +127,7 @@ data InferenceError
   | NonTotalMatch [Name] Position
   | MatchHead TermString Position
   | FixAnnotation TermString Position
+  | FixViewWithNoFunctor Position
   | InductiveTypeFamily TermString Position
   | InductiveTypeConstructor Name Name Position
   | BoxElimHead TermString Position
@@ -205,6 +206,10 @@ instance Reportable InferenceError where
   report (FixAnnotation t pos) =
     let msg = "Fixed point must be annotated with inductive type."
         ctx = "Expected inductive type (μF. t) in fixed point annotation, but found [" ++ unTS t ++ "]."
+     in createError msg [(pos, ctx)]
+  report (FixViewWithNoFunctor pos) =
+    let msg = "Fixed point with view requires functor instance."
+        ctx = "The provided inductive type has no functor instance."
      in createError msg [(pos, ctx)]
   report (InductiveTypeFamily t pos) =
     let msg = "Inductive type must be a type family (A → U)."
