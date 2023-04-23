@@ -76,6 +76,9 @@ import qualified Error.Diagnose as Err
   '|'                   { L _ TokPipe }
   mu                    { L _ SymMu }
   functor               { L _ KWFunctor }
+  out                   { L _ KWOut }
+  lift                  { L _ KWLift }
+  fmap                  { L _ KWFmap }
   fix                   { L _ TokFix }
   view                  { L _ KWView }
   let                   { L _ KWLet }
@@ -163,6 +166,10 @@ apps :: { Raw }
           exp',' exp',' exp ')'                                     { rloc (JF $3 $5 $7 $8 $10 $12 $14 $16) $1 $> }
   | Id '(' exp ',' exp ',' exp ')'                                  { rloc (IdF $3 $5 $7) $1 $> }
   | cons '(' exp ',' exp ')'                                        { rloc (ConsF (syntax $1) $3 $5) $1 $> }
+  | in atom                                                         { rloc (InF $2) $1 $> }
+  | out atom                                                        { rloc (OutF $2) $1 $> }
+  | lift '[' exp ']' atom                                           { rloc (FLiftF $3 $5) $1 $> }
+  | fmap '[' exp ']' '(' exp ',' exp ',' exp ',' exp ',' exp ')'    { rloc (FmapF $3 $6 $8 $10 $12 $14) $1 $> }
   | Box atom                                                        { rloc (BoxF $2) $1 $> }
   | Diamond atom                                                    { rloc (BoxProofF $2) $1 $> }
   | Boxelim '(' exp ')'                                             { rloc (BoxElimF $3) $1 $> }

@@ -11,6 +11,7 @@ module Eval (
   eval,
   ($$),
   closure,
+  functorLift,
   app',
   quote,
   nbe,
@@ -330,6 +331,29 @@ eval env (BoxElim t) = do
   t $$ VBoxElim
 eval env (Box a) = VBox <$> eval env a
 eval env (Cons c t e) = VCons c <$> eval env t <*> evalProp' env e
+-- [In] and [Out] witness the isomorphism [μF ≅ F[μF]] for inductive types.
+-- Semantically, they both operate as the identity
+eval env (In t) = eval env t
+eval env (Out t) = eval env t
+eval env (FLift f a) = do
+  f <- eval env f
+  a <- eval env a >>= embedVal
+  case f of
+    -- TODO: this tag is wrong and can cause issues
+    VMu tag f' fty x cs functor Nothing ->
+      pure (functorLift tag f' fty x cs functor a)
+    _ -> error "BUG: Impossible"
+eval env (Fmap f a b g p x) = do
+  f <- eval env f
+  a <- eval env a >>= embedVal
+  b <- eval env b >>= embedVal
+  g <- eval env g >>= embedVal
+  p <- eval env p >>= embedVal
+  x <- eval env x >>= embedVal
+  case f of
+    VMu _ _ _ _ _ (Just (VFunctorInstance _ _ _ _ _ t)) Nothing ->
+      app' t a b g p x
+    _ -> error "BUG: Impossible"
 eval env (Match t x p bs) = do
   t <- eval env t
   p <- closure env p
@@ -359,6 +383,24 @@ eval env (Meta mv) = do
   case val of
     Nothing -> pure (VMeta mv env)
     Just solved -> eval env solved
+
+functorLift
+  :: Tag
+  -> Name
+  -> VTy
+  -> Binder
+  -> [(Name, (Relevance, Binder, ValClosure (A 2), ValClosure (A 3)))]
+  -> Maybe VFunctorInstance
+  -> ValProp
+  -> VTy
+functorLift tag f fty x cs functor a =
+  VMu tag f fty x (map sub cs) functor Nothing
+  where
+    sub
+      :: (Name, (Relevance, Binder, ValClosure (A 2), ValClosure (A 3)))
+      -> (Name, (Relevance, Binder, ValClosure (A 2), ValClosure (A 3)))
+    sub (ci, (si, xi, bi, ixi)) =
+      (ci, (si, xi, LiftClosure (appOne bi a), LiftClosure (appOne ixi a)))
 
 match
   :: MonadEvaluator m

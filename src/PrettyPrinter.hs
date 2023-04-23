@@ -174,6 +174,20 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
       par prec precApp (str "▢" . go precAtom ns a)
     go prec ns (Cons c t e) =
       par prec precApp (str c . space . showParen True (go precLet ns t . comma . go precLet ns e))
+    go prec ns (In t) =
+      par prec precApp (str "in " . go precAtom ns t)
+    go prec ns (Out t) =
+      par prec precApp (str "out " . go precAtom ns t)
+    go prec ns (FLift f a) =
+      par prec precApp (str "lift [" . go precLet ns f . str "] " . go precAtom ns a)
+    go prec ns (Fmap f a b g p x) =
+      let a' = go precLet ns a
+          b' = go precLet ns b
+          g' = go precLet ns g
+          p' = go precLet ns p
+          x' = go precLet ns x
+          args = showParen True (sep comma [a', b', g', p', x'])
+       in par prec precApp (str "fmap [" . go precLet ns f . str "]" . args)
     go prec ns (Match t x p bs) =
       let t' = go precLet ns t
           p' = go precLet (ns :> x) p

@@ -99,6 +99,17 @@ evalProp env (BoxProof t) = PBoxProof <$> evalProp env t
 evalProp env (BoxElim t) = PBoxElim <$> evalProp env t
 evalProp env (Box a) = PBox <$> evalProp env a
 evalProp env (Cons c t e) = PCons c <$> evalProp env t <*> evalProp env e
+evalProp env (In t) = PIn <$> evalProp env t
+evalProp env (Out t) = POut <$> evalProp env t
+evalProp env (FLift f a) = PFLift <$> evalProp env f <*> evalProp env a
+evalProp env (Fmap f a b g p x) = do
+  f <- evalProp env f
+  a <- evalProp env a
+  b <- evalProp env b
+  g <- evalProp env g
+  p <- evalProp env p
+  x <- evalProp env x
+  pure (PFmap f a b g p x)
 evalProp env (Match t x p bs) = do
   t <- evalProp env t
   p <- propClosure env p
@@ -344,6 +355,17 @@ quoteProp lvl (PBoxProof e) = BoxProof <$> quoteProp lvl e
 quoteProp lvl (PBoxElim t) = BoxElim <$> quoteProp lvl t
 quoteProp lvl (PBox a) = Box <$> quoteProp lvl a
 quoteProp lvl (PCons c t e) = Cons c <$> quoteProp lvl t <*> quoteProp lvl e
+quoteProp lvl (PIn t) = In <$> quoteProp lvl t
+quoteProp lvl (POut t) = Out <$> quoteProp lvl t
+quoteProp lvl (PFLift f a) = FLift <$> quoteProp lvl f <*> quoteProp lvl a
+quoteProp lvl (PFmap f a b g p x) = do
+  f <- quoteProp lvl f
+  a <- quoteProp lvl a
+  b <- quoteProp lvl b
+  g <- quoteProp lvl g
+  p <- quoteProp lvl p
+  x <- quoteProp lvl x
+  pure (Fmap f a b g p x)
 quoteProp lvl (PMatch t x p bs) = do
   t <- quoteProp lvl t
   p <- quoteProp (lvl + 1) =<< appProp p (PVar lvl)

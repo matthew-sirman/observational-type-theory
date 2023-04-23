@@ -65,6 +65,10 @@ module Syntax (
   pattern BoxElim,
   pattern Box,
   pattern Cons,
+  pattern In,
+  pattern Out,
+  pattern FLift,
+  pattern Fmap,
   pattern Match,
   pattern FixedPoint,
   pattern Mu,
@@ -213,6 +217,10 @@ data TermF proj meta tag v t
   | BoxElimF t
   | BoxF t
   | ConsF Name t t
+  | InF t
+  | OutF t
+  | FLiftF t t
+  | FmapF t t t t t t
   | MatchF t Binder t [(Name, Binder, Binder, t)]
   | FixedPointF t Binder Binder Binder Binder Binder t t
   | MuF tag Name t Binder [(Name, RelevanceF meta, Binder, t, Name, t)] (Maybe (FunctorInstanceF t))
@@ -386,6 +394,18 @@ pattern Box a = Fix (BoxF a)
 pattern Cons :: Name -> Term v -> Term v -> Term v
 pattern Cons c t e = Fix (ConsF c t e)
 
+pattern In :: Term v -> Term v
+pattern In t = Fix (InF t)
+
+pattern Out :: Term v -> Term v
+pattern Out t = Fix (OutF t)
+
+pattern FLift :: Type v -> Type v -> Term v
+pattern FLift f a = Fix (FLiftF f a)
+
+pattern Fmap :: Type v -> Type v -> Type v -> Term v -> Term v -> Term v -> Term v
+pattern Fmap f a b g p x = Fix (FmapF f a b g p x)
+
 pattern Match :: Term v -> Binder -> Type v -> [(Name, Binder, Binder, Term v)] -> Term v
 pattern Match t x p bs = Fix (MatchF t x p bs)
 
@@ -444,6 +464,10 @@ pattern Meta v = Fix (MetaF v)
   , BoxElim
   , Box
   , Cons
+  , In
+  , Out
+  , FLift
+  , Fmap
   , Match
   , FixedPoint
   , Mu
@@ -494,6 +518,10 @@ instance Functor (TermF p m t v) where
   fmap f (BoxElimF t) = BoxElimF (f t)
   fmap f (BoxF a) = BoxF (f a)
   fmap f (ConsF c t e) = ConsF c (f t) (f e)
+  fmap f (InF t) = InF (f t)
+  fmap f (OutF t) = OutF (f t)
+  fmap f (FLiftF f' a) = FLiftF (f f') (f a)
+  fmap f (FmapF f' a b g p x) = FmapF (f f') (f a) (f b) (f g) (f p) (f x)
   fmap f (MatchF t x p bs) = MatchF (f t) x (f p) (fmap (fmap f) bs)
   fmap f (FixedPointF i g v f' p x c t) = FixedPointF (f i) g v f' p x (f c) (f t)
   fmap f (MuF tag g t x cs functor) = MuF tag g (f t) x (fmap (\(ci, si, xi, ti, gi, ixi) -> (ci, si, xi, f ti, gi, f ixi)) cs) (fmap (fmap f) functor)
@@ -542,6 +570,10 @@ instance Foldable (TermF p m t v) where
   foldr f e (BoxElimF t) = f t e
   foldr f e (BoxF a) = f a e
   foldr f e (ConsF _ t p) = (f t . f p) e
+  foldr f e (InF t) = f t e
+  foldr f e (OutF t) = f t e
+  foldr f e (FLiftF f' a) = (f f' . f a) e
+  foldr f e (FmapF f' a b g p x) = (f f' . f a . f b . f g . f p . f x) e
   foldr f e (MatchF t _ p bs) = (f t . f p) (foldr (\(_, _, _, b) e -> f b e) e bs)
   foldr f e (FixedPointF i _ _ _ _ _ c t) = (f i . f c . f t) e
   foldr f e (MuF _ _ t _ cs functor) = f t (foldr (\(_, _, _, bi, _, ixi) e -> (f bi . f ixi) e) (foldr (flip (foldr f)) e functor) cs)
@@ -594,6 +626,10 @@ instance Traversable (TermF p m t v) where
   traverse f (BoxElimF t) = BoxElimF <$> f t
   traverse f (BoxF a) = BoxF <$> f a
   traverse f (ConsF c t e) = ConsF c <$> f t <*> f e
+  traverse f (InF t) = InF <$> f t
+  traverse f (OutF t) = OutF <$> f t
+  traverse f (FLiftF f' a) = FLiftF <$> f f' <*> f a
+  traverse f (FmapF f' a b g p x) = FmapF <$> f f' <*> f a <*> f b <*> f g <*> f p <*> f x
   traverse f (MatchF t x p bs) = MatchF <$> f t <*> pure x <*> f p <*> traverse (\(c, x, e, t) -> (c,x,e,) <$> f t) bs
   traverse f (FixedPointF i g v f' p x c t) = FixedPointF <$> f i <*> pure g <*> pure v <*> pure f' <*> pure p <*> pure x <*> f c <*> f t
   traverse f (MuF tag g t x cs functor) =
