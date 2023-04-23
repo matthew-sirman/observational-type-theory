@@ -14,6 +14,7 @@ module Value (
   VElim (..),
   VSpine,
   Val (..),
+  VFunctorInstance (..),
   pattern VVar,
   pattern VMeta,
   pattern VFun,
@@ -22,6 +23,7 @@ module Value (
   embedProp,
   VTy,
   VProp (..),
+  PFunctorInstance (..),
   PushArgument (..),
   Closure (..),
   PropClosure,
@@ -173,9 +175,11 @@ data Val
   | VId VTy Val Val
   | VCons Name Val VProp
   | VFixedPoint VTy Binder Binder Binder Binder Binder (ValClosure (A 4)) (ValClosure (A 5)) (Maybe Val)
-  | VMu Tag Name VTy Binder [(Name, (Relevance, Binder, ValClosure (A 2), ValClosure (A 3)))] (Maybe Val)
+  | VMu Tag Name VTy Binder [(Name, (Relevance, Binder, ValClosure (A 2), ValClosure (A 3)))] (Maybe VFunctorInstance) (Maybe Val)
   | VBoxProof VProp
   | VBox Val
+
+data VFunctorInstance = VFunctorInstance Binder Binder Binder Binder Binder (ValClosure (A 5))
 
 pattern VVar :: Lvl -> Val
 pattern VVar lvl = VNeutral (VRigid lvl) []
@@ -232,6 +236,8 @@ data VProp
   | PCons Name VProp VProp
   | PMatch VProp Binder (PropClosure (A 1)) [(Name, Binder, Binder, PropClosure (A 2))]
   | PFixedPoint VProp Binder Binder Binder Binder Binder (PropClosure (A 4)) (PropClosure (A 5))
-  | PMu Tag Name VProp Binder [(Name, Relevance, Binder, PropClosure (A 2), PropClosure (A 3))]
+  | PMu Tag Name VProp Binder [(Name, Relevance, Binder, PropClosure (A 2), PropClosure (A 3))] (Maybe PFunctorInstance)
   | PLet Binder VProp VProp (PropClosure (A 1))
   | PAnnotation VProp VProp
+
+data PFunctorInstance = PFunctorInstance Binder Binder Binder Binder Binder (PropClosure (A 5))

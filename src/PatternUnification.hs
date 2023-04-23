@@ -185,18 +185,24 @@ renameProp pos ns m sub (PFixedPoint i g v f p x c t) = do
   c <- renameProp pos (ns :> g :> v :> p :> x) m (liftRenaming 4 sub) =<< appProp c (PVar (cod sub)) (PVar (cod sub + 1)) (PVar (cod sub + 2)) (PVar (cod sub + 3))
   t <- renameProp pos (ns :> g :> v :> f :> p :> x) m (liftRenaming 5 sub) =<< appProp t (PVar (cod sub)) (PVar (cod sub + 1)) (PVar (cod sub + 2)) (PVar (cod sub + 3)) (PVar (cod sub + 4))
   pure (FixedPoint i g v f p x c t)
-renameProp pos ns m sub (PMu tag f t x cs) = do
+renameProp pos ns m sub (PMu tag f t x cs functor) = do
   t <- renameProp pos ns m sub t
-  cs <- mapM quoteCons cs
-  pure (Mu tag f t x cs)
+  cs <- mapM renameCons cs
+  functor <- mapM renameFunctor functor
+  pure (Mu tag f t x cs functor)
   where
-    quoteCons
+    renameCons
       :: (Name, Relevance, Binder, PropClosure (A 2), PropClosure (A 3))
       -> Checker (Variant e) (Name, Relevance, Binder, Term Ix, Name, Term Ix)
-    quoteCons (ci, si, xi, bi, ixi) = do
+    renameCons (ci, si, xi, bi, ixi) = do
       bi <- renameProp pos (ns :> Name f :> x) m (liftRenaming 2 sub) =<< appProp bi (PVar (cod sub)) (PVar (cod sub + 1))
       ixi <- renameProp pos (ns :> Name f :> x :> xi) m (liftRenaming 3 sub) =<< appProp ixi (PVar (cod sub)) (PVar (cod sub + 1)) (PVar (cod sub + 2))
       pure (ci, si, xi, bi, f, ixi)
+
+    renameFunctor :: PFunctorInstance -> Checker (Variant e) (FunctorInstance Ix)
+    renameFunctor (PFunctorInstance a b f p x t) = do
+      t <- renameProp pos (ns :> a :> b :> f :> p :> x) m (liftRenaming 5 sub) =<< appProp t (PVar (cod sub)) (PVar (cod sub + 1)) (PVar (cod sub + 2)) (PVar (cod sub + 3)) (PVar (cod sub + 4))
+      pure (FunctorInstanceF a b f p x t)
 renameProp pos ns m sub (PLet x a t u) = do
   a <- renameProp pos ns m sub a
   t <- renameProp pos ns m sub t
@@ -360,26 +366,31 @@ rename pos ns m sub (VFixedPoint i g v f p x c t a) = do
   case a of
     Just a -> pure (App fix_f a)
     Nothing -> pure fix_f
-rename pos ns m sub (VMu tag f fty x cs a) = do
+rename pos ns m sub (VMu tag f fty x cs functor a) = do
   fty <- rename pos ns m sub fty
-  let vf = var (cod sub)
-      vx = var (cod sub + 1)
-      renameCons
-        :: (Name, (Relevance, Binder, ValClosure (A 2), ValClosure (A 3)))
-        -> Checker (Variant e) (Name, Relevance, Binder, Type Ix, Name, Type Ix)
-      renameCons (ci, (si, xi, bi, ixi)) = do
-        let vxi = var (cod sub + 2)
-        bi_f_x <- app' bi vf vx
-        bi <- rename pos (ns :> Name f :> x) m (liftRenaming 2 sub) bi_f_x
-        ixi_f_x_xi <- app' ixi vf vx vxi
-        ixi <- rename pos (ns :> Name f :> x :> xi) m (liftRenaming 3 sub) ixi_f_x_xi
-        pure (ci, si, xi, bi, f, ixi)
   cs <- mapM renameCons cs
+  functor <- mapM renameFunctor functor
   a <- mapM (rename pos ns m sub) a
-  let muF = Mu tag f fty x cs
+  let muF = Mu tag f fty x cs functor
   case a of
     Just a -> pure (App muF a)
     Nothing -> pure muF
+  where
+    renameCons
+      :: (Name, (Relevance, Binder, ValClosure (A 2), ValClosure (A 3)))
+      -> Checker (Variant e) (Name, Relevance, Binder, Type Ix, Name, Type Ix)
+    renameCons (ci, (si, xi, bi, ixi)) = do
+      bi_f_x <- app' bi (var (cod sub)) (var (cod sub + 1))
+      bi <- rename pos (ns :> Name f :> x) m (liftRenaming 2 sub) bi_f_x
+      ixi_f_x_xi <- app' ixi (var (cod sub)) (var (cod sub + 1)) (var (cod sub + 2))
+      ixi <- rename pos (ns :> Name f :> x :> xi) m (liftRenaming 3 sub) ixi_f_x_xi
+      pure (ci, si, xi, bi, f, ixi)
+
+    renameFunctor :: VFunctorInstance -> Checker (Variant e) (FunctorInstance Ix)
+    renameFunctor (VFunctorInstance a b f p x t) = do
+      t_a_b_f_p_x <- app' t (var (cod sub)) (var (cod sub + 1)) (var (cod sub + 2)) (var (cod sub + 3)) (var (cod sub + 4))
+      t <- rename pos (ns :> a :> b :> f :> p :> x) m (liftRenaming 5 sub) t_a_b_f_p_x
+      pure (FunctorInstanceF a b f p x t)
 rename pos ns m sub (VBoxProof e) = BoxProof <$> renameProp pos ns m sub e
 rename pos ns m sub (VBox a) = Box <$> rename pos ns m sub a
 

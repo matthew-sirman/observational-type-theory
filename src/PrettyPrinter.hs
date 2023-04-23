@@ -196,10 +196,10 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
         showAsAlias g = str " as " . binder g
         showViewAlias Hole = id
         showViewAlias v = str " view " . binder v
-    go prec ns (Mu _ f t x cs) =
+    go prec ns (Mu _ f t x cs functor) =
       let x' = str "λ" . binder x
           cs' = chr '[' . sep (str "; ") (fmap showCons cs) . chr ']'
-       in par prec precLet (str "μ" . str f . str " : " . go precLet ns t . dot . x' . dot . cs')
+       in par prec precLet (str "μ" . str f . str " : " . go precLet ns t . dot . x' . dot . cs' . showFunctor functor)
       where
         showCons :: (Name, Relevance, Binder, Type v, Name, Type v) -> ShowS
         showCons (ci, _, Hole, bi, gi, ixi) =
@@ -210,6 +210,12 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
           let bi' = showParen True (binder xi . str " :" . shows si . space . go precLet (ns :> Name f :> x) bi)
               ixi' = go precAtom (ns :> Name f :> x :> xi) ixi
            in str ci . str " : " . bi' . str " → " . str gi . space . ixi'
+        showFunctor :: Maybe (FunctorInstance v) -> ShowS
+        showFunctor Nothing = id
+        showFunctor (Just (FunctorInstanceF a b f p x t)) =
+          let args = sep space [binder a, binder b, binder f, binder p, binder x]
+              t' = go precLet (ns :> a :> b :> f :> p :> x) t
+           in str "\n  functor " . args . str " = " . t'
     go prec ns (Let x a t u) =
       let a' = go precLet ns a
           t' = go precLet ns t

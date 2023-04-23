@@ -239,9 +239,10 @@ conv pos names = conv' names names
       conv' (ns :> g :> v :> f :> p :> x) (ns' :> g' :> v' :> f' :> p' :> x') (lvl + 5) t_g_f_p_x t'_g_f_p_x
       -- TODO: this *might* be problematic in the case that exactly one of [a], [a'] is Nothing
       sequence_ (liftM2 (conv' ns ns' lvl) a a')
-    conv' ns ns' lvl (VMu _ f fty x cs a) (VMu _ f' fty' x' cs' a') = do
+    conv' ns ns' lvl (VMu _ f fty x cs functor a) (VMu _ f' fty' x' cs' functor' a') = do
       conv' ns ns' lvl fty fty'
       zipWithM_ convCons cs cs'
+      sequence_ (liftM2 convFunctor functor functor')
       sequence_ (liftM2 (conv' ns ns' lvl) a a')
       where
         convCons
@@ -263,6 +264,11 @@ conv pos names = conv' names names
           | otherwise =
               -- TODO: consider allowing reordering of constructors in definitional equality
               throw (ConstructorMismatch ci ci' pos)
+        convFunctor :: VFunctorInstance -> VFunctorInstance -> Checker (Variant e) ()
+        convFunctor (VFunctorInstance a b f p x t) (VFunctorInstance a' b' f' p' x' t') = do
+          t_a_b_f_p_x <- app' t (var lvl) (var (lvl + 1)) (var (lvl + 2)) (var (lvl + 3)) (var (lvl + 4))
+          t'_a_b_f_p_x <- app' t' (var lvl) (var (lvl + 1)) (var (lvl + 2)) (var (lvl + 3)) (var (lvl + 4))
+          conv' (ns :> a :> b :> f :> p :> x) (ns' :> a' :> b' :> f' :> p' :> x') (lvl + 5) t_a_b_f_p_x t'_a_b_f_p_x
     conv' _ _ _ (VBoxProof _) (VBoxProof _) = pure ()
     conv' ns ns' lvl (VBox a) (VBox a') = conv' ns ns' lvl a a'
     conv' ns ns' lvl a b = do

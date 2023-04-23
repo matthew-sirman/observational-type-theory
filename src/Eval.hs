@@ -10,6 +10,7 @@ module Eval (
   cast,
   eval,
   ($$),
+  closure,
   app',
   quote,
   nbe,
@@ -147,19 +148,19 @@ eqReduce env vt va vu = eqReduceType va
           t_eq_t'_and_u_eq_u' ve = VAnd <$> t_eq_t' ve <*> u_eq_u' ve
       VExists (Name "$e") a_eq_a' <$> makeFnClosure' t_eq_t'_and_u_eq_u'
     -- Rule Cons-Eq
-    eqReduceAll (VCons c t _) (VMu tag f fty x cs (Just a)) (VCons c' t' _)
+    eqReduceAll (VCons c t _) (VMu tag f fty x cs functor (Just a)) (VCons c' t' _)
       | c == c' = do
           case lookup c cs of
             Nothing -> error "BUG: Impossible (constructor not well typed in equality)"
             Just (_, _, bi, _) -> do
-              let muF_val = VMu tag f fty x cs Nothing
+              let muF_val = VMu tag f fty x cs functor Nothing
               muF <- embedVal muF_val
               a <- embedVal a
               b_muF_a <- app' bi muF a
               eqReduce env t b_muF_a t'
       | otherwise = pure VEmpty
     -- Rule Mu-Eq
-    eqReduceAll (VMu tag _ (VPi _ _ aTy _) _ _ (Just a)) (VU Relevant) (VMu tag' _ _ _ _ (Just a'))
+    eqReduceAll (VMu tag _ (VPi _ _ aTy _) _ _ _ (Just a)) (VU Relevant) (VMu tag' _ _ _ _ _ (Just a'))
       | tag == tag' = eqReduce env a aTy a'
       | otherwise = pure VEmpty
     -- Rule Box-Eq
@@ -229,9 +230,9 @@ cast (VId {}) (VId {}) _ (VIdPath _) = undefined
 --     u_eq_u' = Snd (Snd e')
 --     t'_eq_u' = Trans t'_eq_t (Trans t_eq_u u_eq_u')
 -- pure (VIdPath (VProp env t'_eq_u'))
-cast (VMu tag f fty x cs (Just a)) (VMu _ _ _ _ _ (Just a')) e (VCons ci t e') = do
+cast (VMu tag f fty x cs functor (Just a)) (VMu _ _ _ _ _ _ (Just a')) e (VCons ci t e') = do
   let (_, _, _, ixi) = fromMaybe (error "BUG: Impossible") (lookup ci cs)
-      muF_val = VMu tag f fty x cs Nothing
+      muF_val = VMu tag f fty x cs functor Nothing
   muF <- embedVal muF_val
   a <- embedVal a
   a' <- embedVal a'
@@ -339,10 +340,15 @@ eval env (FixedPoint i g v f p x c t) = do
   c <- closure env c
   t <- closure env t
   pure (VFixedPoint i g v f p x c t Nothing)
-eval env (Mu tag f t x cs) = do
+eval env (Mu tag f t x cs functor) = do
   t <- eval env t
   cs <- mapM (\(ci, si, xi, bi, _, ixi) -> (ci,) <$> ((si,xi,,) <$> closure env bi <*> closure env ixi)) cs
-  pure (VMu tag f t x cs Nothing)
+  functor <- mapM evalFunctor functor
+  pure (VMu tag f t x cs functor Nothing)
+  where
+    evalFunctor :: FunctorInstance Ix -> m VFunctorInstance
+    evalFunctor (FunctorInstanceF a b f p x t) =
+      VFunctorInstance a b f p x <$> closure env t
 eval env (Let _ _ t u) = do
   t <- eval env t
   t_prop <- valToVProp t
@@ -419,7 +425,7 @@ infixl 8 $$
   app' t muF vv fix_f a u
 (VFixedPoint muF g v f p x c t Nothing) $$ (VApp u) =
   pure (VFixedPoint muF g v f p x c t (Just u))
-(VMu tag f t xs cs Nothing) $$ (VApp a) = pure (VMu tag f t xs cs (Just a))
+(VMu tag f t xs cs functor Nothing) $$ (VApp a) = pure (VMu tag f t xs cs functor (Just a))
 VZero $$ (VNElim _ _ t0 _ _ _) = pure t0
 (VSucc n) $$ elim@(VNElim _ _ _ _ _ ts) = do
   r_val <- n $$ elim
@@ -533,7 +539,7 @@ quote lvl (VFixedPoint i g v f p x c t a) = do
   case a of
     Just a -> pure (App fix_f a)
     Nothing -> pure fix_f
-quote lvl (VMu tag f fty x cs a) = do
+quote lvl (VMu tag f fty x cs functor a) = do
   fty <- quote lvl fty
   let vf = var lvl
       vx = var (lvl + 1)
@@ -546,11 +552,17 @@ quote lvl (VMu tag f fty x cs a) = do
         ixi_f_x_xi <- app' ixi vf vx vxi
         (ci,si,xi,,f,) <$> quote (lvl + 2) bi_f_x <*> quote (lvl + 3) ixi_f_x_xi
   cs <- mapM quoteCons cs
-  let muF = Mu tag f fty x cs
+  functor <- mapM quoteFunctor functor
+  let muF = Mu tag f fty x cs functor
   a <- mapM (quote lvl) a
   case a of
     Just a -> pure (App muF a)
     Nothing -> pure muF
+  where
+    quoteFunctor :: VFunctorInstance -> m (FunctorInstance Ix)
+    quoteFunctor (VFunctorInstance a b f p x t) = do
+      t <- quote (lvl + 5) =<< app' t (var lvl) (var (lvl + 1)) (var (lvl + 2)) (var (lvl + 3)) (var (lvl + 4))
+      pure (FunctorInstanceF a b f p x t)
 quote lvl (VBoxProof e) = BoxProof <$> quoteProp lvl e
 quote lvl (VBox a) = Box <$> quote lvl a
 
