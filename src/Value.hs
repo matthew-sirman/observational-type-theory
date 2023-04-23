@@ -234,6 +234,10 @@ data VProp
   | PBoxElim VProp
   | PBox VProp
   | PCons Name VProp VProp
+  | PIn VProp
+  | POut VProp
+  | PFLift VProp VProp
+  | PFmap VProp VProp VProp VProp VProp VProp
   | PMatch VProp Binder (PropClosure (A 1)) [(Name, Binder, Binder, PropClosure (A 2))]
   | PFixedPoint VProp Binder Binder Binder Binder Binder (PropClosure (A 4)) (PropClosure (A 5))
   | PMu Tag Name VProp Binder [(Name, Relevance, Binder, PropClosure (A 2), PropClosure (A 3))] (Maybe PFunctorInstance)

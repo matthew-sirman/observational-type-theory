@@ -789,6 +789,36 @@ tm38 =
     range ℕ <*> (generate ℕ (λ_. 0) (S (S (S (S (S 0))))))
   |]
 
+tm39 :: String
+tm39 =
+  [r|
+    let List : U → [⊤] → U =
+      λX. μList : [⊤] → U. λp.
+        [ 'Nil : ⊤ → List p
+        ; 'Cons : (X × List p) → List p
+        ]
+        functor A B f p x =
+          match x as _ return
+            (μList : [⊤] → U. λp.
+              [ 'Nil : ⊤ → List p
+              ; 'Cons : (X × B p) → List p
+              ]) p
+          with
+          | 'Nil (_, _) → 'Nil (*, *)
+          | 'Cons (ls, _) → 'Cons ((fst ls; f p (snd ls)), *)
+    in
+    let F : (p :U [⊤]) → List ℕ p → U =
+      fix [List ℕ as ListN] F p ls : U =
+        match ls as _ return U with
+        | 'Nil (_, _) → [⊤]
+        | 'Cons (ls, _) → ℕ × F p (snd ls)
+    in
+    fix [List ℕ as ListN view ι] f p ls : F p (ι p ls) =
+      match ls as ls return F p (in (fmap [List ℕ](ListN, List ℕ, ι, p, ls))) with
+      | 'Nil (_, _) → <*>
+      | 'Cons (ls, _) → (fst ls; f p (snd ls))
+  |]
+
 test :: String -> IO ()
 test input = do
   (result, mctx) <-

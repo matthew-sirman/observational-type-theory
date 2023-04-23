@@ -168,6 +168,17 @@ renameProp pos ns m sub (PBoxProof e) = BoxProof <$> renameProp pos ns m sub e
 renameProp pos ns m sub (PBoxElim t) = BoxElim <$> renameProp pos ns m sub t
 renameProp pos ns m sub (PBox a) = Box <$> renameProp pos ns m sub a
 renameProp pos ns m sub (PCons c t e) = Cons c <$> renameProp pos ns m sub t <*> renameProp pos ns m sub e
+renameProp pos ns m sub (PIn t) = In <$> renameProp pos ns m sub t
+renameProp pos ns m sub (POut t) = Out <$> renameProp pos ns m sub t
+renameProp pos ns m sub (PFLift f a) = FLift <$> renameProp pos ns m sub f <*> renameProp pos ns m sub a
+renameProp pos ns m sub (PFmap f a b g p x) = do
+  f <- renameProp pos ns m sub f
+  a <- renameProp pos ns m sub a
+  b <- renameProp pos ns m sub b
+  g <- renameProp pos ns m sub g
+  p <- renameProp pos ns m sub p
+  x <- renameProp pos ns m sub x
+  pure (Fmap f a b g p x)
 renameProp pos ns m sub (PMatch t x p bs) = do
   t <- renameProp pos ns m sub t
   p <- renameProp pos (ns :> x) m (liftRenaming 1 sub) =<< appProp p (PVar (cod sub))

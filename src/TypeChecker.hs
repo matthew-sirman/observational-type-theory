@@ -369,6 +369,41 @@ infer gamma (R pos (BoxElimF e)) = do
 infer gamma (R _ (BoxF a)) = do
   a <- check gamma a (VU Irrelevant)
   pure (Box a, VU Relevant, Relevant)
+infer gamma (R _ (FLiftF f a)) = do
+  (f, fty, s) <- infer gamma f
+  vf <- eval (env gamma) f
+  -- Lifting is only valid if the argument is an inductive type
+  case vf of
+    VMu {} -> do
+      a <- check gamma a fty
+      pure (FLift f a, fty, s)
+    _ -> error "TODO: error if not the case"
+infer gamma (R _ (FmapF f a b g p x)) = do
+  (f, _, _) <- infer gamma f
+  vf <- eval (env gamma) f
+  case vf of
+    VMu _ f' fty@(VPi _ _ pty _) x' cs functor Nothing -> do
+      a <- check gamma a fty
+      va <- eval (env gamma) a >>= embedVal
+      b <- check gamma b fty
+      vb <- eval (env gamma) b >>= embedVal
+      let g_p_ty vp = do
+            a_p <- val va $$ VApp (val vp)
+            b_p <- val vb $$ VApp (val vp)
+            pure (VPi Relevant Hole a_p (Lift b_p))
+      gty <- VPi Relevant x' pty <$> makeFnClosure' g_p_ty
+      g <- check gamma g gty
+      p <- check gamma p pty
+      vp <- eval (env gamma) p
+      f_lift_a_tag <- freshTag
+      let f_lift_a = functorLift f_lift_a_tag f' fty x' cs functor va
+      f_lift_a_p <- f_lift_a $$ VApp vp
+      x <- check gamma x f_lift_a_p
+      f_lift_b_tag <- freshTag
+      let f_lift_b = functorLift f_lift_b_tag f' fty x' cs functor vb
+      f_lift_b_p <- f_lift_b $$ VApp vp
+      pure (Fmap f a b g p x, f_lift_b_p, Relevant)
+    _ -> error "TODO: error if not the case"
 infer gamma (R pos (MatchF t@(R argPos _) x p bs)) = do
   (t, a, s) <- infer gamma t
   (p, s') <- checkType (gamma & bind x s a) p
@@ -433,7 +468,7 @@ infer gamma (R _ (FixedPointF i@(R pos _) g v f p x c t)) = do
       fty <- buildFType p a (env gamma) vg vv c
       f_lift_g_tag <- freshTag
       let vp = var (lvl gamma + 3)
-          f_lift_g_val = VMu f_lift_g_tag f' vmuFty x' (map (sub vg) cs) functor Nothing
+          f_lift_g_val = functorLift f_lift_g_tag f' vmuFty x' cs functor vg
       f_lift_g <- embedVal f_lift_g_val
       f_lift_g_p <- f_lift_g_val $$ VApp (val vp)
       vmuF <- embedVal vmuF
@@ -466,12 +501,6 @@ infer gamma (R _ (FixedPointF i@(R pos _) g v f p x c t)) = do
             pure (VPi Relevant Hole vg_p (Lift muF_p))
       VPi Relevant p a <$> makeFnClosure' vidTy
 
-    sub
-      :: ValProp
-      -> (Name, (Relevance, Binder, ValClosure (A 2), ValClosure (A 3)))
-      -> (Name, (Relevance, Binder, ValClosure (A 2), ValClosure (A 3)))
-    sub g (ci, (si, xi, bi, fci)) = (ci, (si, xi, LiftClosure (appOne bi g), LiftClosure (appOne fci g)))
-
     liftView :: Binder -> Maybe VFunctorInstance -> ValProp -> ValProp -> ValProp -> Checker (Variant e) Val
     -- This is a hack -- it says if the view is not used (not given a name), then we don't lift it
     -- in a well-typed manner. This allows fixed points over inductive types without an explicit
@@ -493,7 +522,7 @@ infer gamma (R muPos (MuF () f fty@(R pos _) x cs functor)) = do
   a <- checkTypeFamily vfty
   let gamma' = gamma & bindR (Name f) vfty & bindR x a
   cs <- mapM (checkConstructor gamma' a) cs
-  -- Functor action on objects (which are functors)
+  -- Functor action on objects (which are themselves functors)
   let f_lift ty = do
         f_lift_ty_tag <- freshTag
         cs <- mapM (sub ty) cs
@@ -669,6 +698,13 @@ check gamma (R pos (ConsF c t e)) (VMu tag f fty@(VPi _ _ aTy _) xs cs functor (
 check gamma (R pos (ConsF c _ _)) tty = do
   tTS <- ppVal gamma tty
   throw (CheckCons tTS c pos)
+check gamma (R _ (InF t)) (VMu tag f fty xs cs functor (Just a)) = do
+  let muF_val = VMu tag f fty xs cs functor Nothing
+  muF <- embedVal muF_val
+  let f_lift_muF = functorLift tag f fty xs cs functor muF
+  f_lift_muF_a <- f_lift_muF $$ VApp a
+  check gamma t f_lift_muF_a
+-- TODO: error case for In
 check gamma (R _ (BoxProofF e)) (VBox a) = do
   e <- check gamma e a
   pure (BoxProof e)
