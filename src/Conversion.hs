@@ -229,6 +229,16 @@ conv pos names = conv' names names
     conv' ns ns' lvl (VCons c t _) (VCons c' t' _)
       | c == c' = do
           conv' ns ns' lvl t t'
+    conv' ns ns' lvl (VFLift f a) (VFLift f' a') = do
+      conv' ns ns' lvl f f'
+      conv' ns ns' lvl a a'
+    conv' ns ns' lvl (VFmap f a b g p x) (VFmap f' a' b' g' p' x') = do
+      conv' ns ns' lvl f f'
+      conv' ns ns' lvl a a'
+      conv' ns ns' lvl b b'
+      conv' ns ns' lvl g g'
+      conv' ns ns' lvl p p'
+      conv' ns ns' lvl x x'
     conv' ns ns' lvl (VFixedPoint i g v f p x c t a) (VFixedPoint i' g' v' f' p' x' c' t' a') = do
       c_g_p_x <- app' c (var lvl) (var (lvl + 1)) (var (lvl + 2)) (var (lvl + 3))
       c'_g_p_x <- app' c' (var lvl) (var (lvl + 1)) (var (lvl + 2)) (var (lvl + 3))
@@ -265,10 +275,10 @@ conv pos names = conv' names names
               -- TODO: consider allowing reordering of constructors in definitional equality
               throw (ConstructorMismatch ci ci' pos)
         convFunctor :: VFunctorInstance -> VFunctorInstance -> Checker (Variant e) ()
-        convFunctor (VFunctorInstance a b f p x t) (VFunctorInstance a' b' f' p' x' t') = do
-          t_a_b_f_p_x <- app' t (var lvl) (var (lvl + 1)) (var (lvl + 2)) (var (lvl + 3)) (var (lvl + 4))
-          t'_a_b_f_p_x <- app' t' (var lvl) (var (lvl + 1)) (var (lvl + 2)) (var (lvl + 3)) (var (lvl + 4))
-          conv' (ns :> a :> b :> f :> p :> x) (ns' :> a' :> b' :> f' :> p' :> x') (lvl + 5) t_a_b_f_p_x t'_a_b_f_p_x
+        convFunctor (VFunctorInstance a b g p x t) (VFunctorInstance a' b' g' p' x' t') = do
+          t_f_a_b_g_p_x <- app' t (var lvl) (var (lvl + 1)) (var (lvl + 2)) (var (lvl + 3)) (var (lvl + 4)) (var (lvl + 5))
+          t'_f_a_b_g_p_x <- app' t' (var lvl) (var (lvl + 1)) (var (lvl + 2)) (var (lvl + 3)) (var (lvl + 4)) (var (lvl + 5))
+          conv' (ns :> Name f :> a :> b :> g :> p :> x) (ns' :> Name f' :> a' :> b' :> g' :> p' :> x') (lvl + 6) t_f_a_b_g_p_x t'_f_a_b_g_p_x
     conv' _ _ _ (VBoxProof _) (VBoxProof _) = pure ()
     conv' ns ns' lvl (VBox a) (VBox a') = conv' ns ns' lvl a a'
     conv' ns ns' lvl a b = do

@@ -174,12 +174,14 @@ data Val
   | VIdPath VProp
   | VId VTy Val Val
   | VCons Name Val VProp
+  | VFLift Val Val
+  | VFmap Val Val Val Val Val Val
   | VFixedPoint VTy Binder Binder Binder Binder Binder (ValClosure (A 4)) (ValClosure (A 5)) (Maybe Val)
   | VMu Tag Name VTy Binder [(Name, (Relevance, Binder, ValClosure (A 2), ValClosure (A 3)))] (Maybe VFunctorInstance) (Maybe Val)
   | VBoxProof VProp
   | VBox Val
 
-data VFunctorInstance = VFunctorInstance Binder Binder Binder Binder Binder (ValClosure (A 5))
+data VFunctorInstance = VFunctorInstance Binder Binder Binder Binder Binder (ValClosure (A 6))
 
 pattern VVar :: Lvl -> Val
 pattern VVar lvl = VNeutral (VRigid lvl) []
@@ -244,4 +246,4 @@ data VProp
   | PLet Binder VProp VProp (PropClosure (A 1))
   | PAnnotation VProp VProp
 
-data PFunctorInstance = PFunctorInstance Binder Binder Binder Binder Binder (PropClosure (A 5))
+data PFunctorInstance = PFunctorInstance Binder Binder Binder Binder Binder (PropClosure (A 6))

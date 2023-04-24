@@ -517,7 +517,7 @@ infer gamma (R _ (FixedPointF i@(R pos _) g v f p x c t)) = do
       -- to F[ι] : (p : X) → F[G] p → F[μF] p
       -- and then applies the isomorphism F[μF] p ≅ μF p (semantically this is the identity)
       let f_lift_view_p_x :: ValProp -> ValProp -> Evaluator Val
-          f_lift_view_p_x = app' t vg vmuF view
+          f_lift_view_p_x = app' t vmuF vg vmuF view
           f_lift_view_p vp = VLambda x <$> makeFnClosure' (f_lift_view_p_x vp)
       VLambda p <$> makeFnClosure' f_lift_view_p
     liftView _ _ _ _ _ = throw (FixViewWithNoFunctor pos)
@@ -527,15 +527,17 @@ infer gamma (R muPos (MuF () f fty@(R pos _) x cs functor)) = do
   a <- checkTypeFamily vfty
   let gamma' = gamma & bindR (Name f) vfty & bindR x a
   cs <- mapM (checkConstructor gamma' a) cs
+  -- A fresh tag is associated to each syntactic inductive type definition.
+  tag <- freshTag
+  vcs <- mapM evalConstructor cs
+  let vmuF_val = VMu tag f vfty x vcs Nothing Nothing
+  vmuF <- embedVal vmuF_val
   -- Functor action on objects (which are themselves functors)
   let f_lift ty = do
         f_lift_ty_tag <- freshTag
-        cs <- mapM (sub ty) cs
-        pure (VMu f_lift_ty_tag f (VPi Relevant Hole a (Lift (VU Relevant))) x cs Nothing Nothing)
+        pure (functorLift f_lift_ty_tag f vfty x vcs Nothing ty)
   -- Check the provided functor action on morphisms (which are natural transformations)
-  functor <- mapM (checkFunctor a f_lift) functor
-  -- A fresh tag is associated to each syntactic inductive type definition.
-  tag <- freshTag
+  functor <- mapM (checkFunctor vmuF a f_lift) functor
   pure (Mu tag f fty x cs functor, vfty, Relevant)
   where
     checkTypeFamily :: VTy -> Checker (Variant e) VTy
@@ -565,21 +567,23 @@ infer gamma (R muPos (MuF () f fty@(R pos _) x cs functor)) = do
           pure (ci, si, xi, bi, f, ix)
       | otherwise = throw (InductiveTypeConstructor f fi muPos)
 
-    sub
-      :: ValProp
-      -> (Name, Relevance, Binder, Type Ix, Name, Type Ix)
+    evalConstructor
+      :: (Name, Relevance, Binder, Term Ix, Name, Term Ix)
       -> Checker (Variant e) (Name, (Relevance, Binder, ValClosure (A 2), ValClosure (A 3)))
-    sub vty (ci, si, xi, bi, _, ixi) = do
-      -- TODO: ideally wouldn't need a direct call to the closure constructor, but this is fine
-      -- for the time being
+    evalConstructor (ci, si, xi, bi, _, ixi) = do
       bi <- closure (env gamma) bi
       ixi <- closure (env gamma) ixi
-      pure (ci, (si, xi, LiftClosure (appOne bi vty), LiftClosure (appOne ixi vty)))
+      pure (ci, (si, xi, bi, ixi))
 
-    checkFunctor :: VTy -> (ValProp -> Checker (Variant e) VTy) -> FunctorInstanceF Raw -> Checker (Variant e) (FunctorInstance Ix)
-    checkFunctor argTy f_lift (FunctorInstanceF a b nt p x' t) = do
-      let va = var (lvl gamma)
-          vb = var (lvl gamma + 1)
+    checkFunctor
+      :: ValProp
+      -> VTy
+      -> (ValProp -> Checker (Variant e) VTy)
+      -> FunctorInstanceF Raw
+      -> Checker (Variant e) (FunctorInstance Ix)
+    checkFunctor vmuF argTy f_lift (FunctorInstanceF a b nt p x' t) = do
+      let va = var (lvl gamma + 1)
+          vb = var (lvl gamma + 2)
       f_lift_a <- f_lift va
       f_lift_b <- f_lift vb
       let nt_p_ty vp = do
@@ -587,11 +591,19 @@ infer gamma (R muPos (MuF () f fty@(R pos _) x cs functor)) = do
             b_p <- val vb $$ VApp (val vp)
             pure (VPi Relevant Hole a_p (Lift b_p))
       ntTy <- VPi Relevant p argTy <$> makeFnClosure' nt_p_ty
-      let vp = var (lvl gamma + 3)
+      let vp = var (lvl gamma + 4)
       f_lift_a_p <- f_lift_a $$ VApp (val vp)
       f_lift_b_p <- f_lift_b $$ VApp (val vp)
       let famTy = VPi Relevant Hole argTy (Lift (VU Relevant))
-      t <- check (gamma & bindR a famTy & bindR b famTy & bindR nt ntTy & bindR p argTy & bindR x' f_lift_a_p) t f_lift_b_p
+      let gamma' =
+            gamma
+              & define (Name f) vmuF Relevant famTy
+              & bindR a famTy
+              & bindR b famTy
+              & bindR nt ntTy
+              & bindR p argTy
+              & bindR x' f_lift_a_p
+      t <- check gamma' t f_lift_b_p
       pure (FunctorInstanceF a b nt p x' t)
 infer gamma (R _ (LetF x a t u)) = do
   (a, s) <- checkType gamma a

@@ -229,6 +229,9 @@ valToVProp (VIdRefl t) = PIdRefl <$> valToVProp t
 valToVProp (VIdPath e) = pure (PIdPath e)
 valToVProp (VId a t u) = PId <$> valToVProp a <*> valToVProp t <*> valToVProp u
 valToVProp (VCons c t e) = PCons c <$> valToVProp t <*> pure e
+valToVProp (VFLift f a) = PFLift <$> valToVProp f <*> valToVProp a
+valToVProp (VFmap f a b g p x) =
+  PFmap <$> valToVProp f <*> valToVProp a <*> valToVProp b <*> valToVProp g <*> valToVProp p <*> valToVProp x
 valToVProp (VFixedPoint i g v f p x c t a) = do
   i <- valToVProp i
   c <- closureToVProp c
@@ -397,7 +400,7 @@ quoteProp lvl (PMu tag f t x cs functor) = do
 
     quoteFunctor :: PFunctorInstance -> m (FunctorInstance Ix)
     quoteFunctor (PFunctorInstance a b f p x t) = do
-      t <- quoteProp (lvl + 5) =<< appProp t (PVar lvl) (PVar (lvl + 1)) (PVar (lvl + 2)) (PVar (lvl + 3)) (PVar (lvl + 4))
+      t <- quoteProp (lvl + 6) =<< appProp t (PVar lvl) (PVar (lvl + 1)) (PVar (lvl + 2)) (PVar (lvl + 3)) (PVar (lvl + 4)) (PVar (lvl + 5))
       pure (FunctorInstanceF a b f p x t)
 quoteProp lvl (PLet x a t u) = do
   a <- quoteProp lvl a

@@ -343,18 +343,18 @@ eval env (FLift f a) = do
     -- TODO: this tag is wrong and can cause issues
     VMu tag f' fty x cs functor Nothing ->
       pure (functorLift tag f' fty x cs functor a)
-    _ -> error "BUG: Impossible"
+    _ -> pure (VFLift f (val a))
 eval env (Fmap f a b g p x) = do
-  f <- eval env f
+  f <- eval env f >>= embedVal
   a <- eval env a >>= embedVal
   b <- eval env b >>= embedVal
   g <- eval env g >>= embedVal
   p <- eval env p >>= embedVal
   x <- eval env x >>= embedVal
-  case f of
+  case val f of
     VMu _ _ _ _ _ (Just (VFunctorInstance _ _ _ _ _ t)) Nothing ->
-      app' t a b g p x
-    _ -> error "BUG: Impossible"
+      app' t f a b g p x
+    _ -> pure (VFmap (val f) (val a) (val b) (val g) (val p) (val x))
 eval env (Match t x p bs) = do
   t <- eval env t
   p <- closure env p
@@ -577,6 +577,9 @@ quote lvl (VIdRefl t) = IdRefl <$> quote lvl t
 quote lvl (VIdPath e) = IdPath <$> quoteProp lvl e
 quote lvl (VId a t u) = Id <$> quote lvl a <*> quote lvl t <*> quote lvl u
 quote lvl (VCons c t e) = Cons c <$> quote lvl t <*> quoteProp lvl e
+quote lvl (VFLift f a) = FLift <$> quote lvl f <*> quote lvl a
+quote lvl (VFmap f a b g p x) =
+  Fmap <$> quote lvl f <*> quote lvl a <*> quote lvl b <*> quote lvl g <*> quote lvl p <*> quote lvl x
 quote lvl (VFixedPoint i g v f p x c t a) = do
   i <- quote lvl i
   c <- quote (lvl + 4) =<< app' c (var lvl) (var (lvl + 1)) (var (lvl + 2)) (var (lvl + 3))
@@ -608,7 +611,7 @@ quote lvl (VMu tag f fty x cs functor a) = do
   where
     quoteFunctor :: VFunctorInstance -> m (FunctorInstance Ix)
     quoteFunctor (VFunctorInstance a b f p x t) = do
-      t <- quote (lvl + 5) =<< app' t (var lvl) (var (lvl + 1)) (var (lvl + 2)) (var (lvl + 3)) (var (lvl + 4))
+      t <- quote (lvl + 6) =<< app' t (var lvl) (var (lvl + 1)) (var (lvl + 2)) (var (lvl + 3)) (var (lvl + 4)) (var (lvl + 5))
       pure (FunctorInstanceF a b f p x t)
 quote lvl (VBoxProof e) = BoxProof <$> quoteProp lvl e
 quote lvl (VBox a) = Box <$> quote lvl a

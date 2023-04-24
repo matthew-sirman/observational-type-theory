@@ -226,9 +226,9 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
            in str ci . str " : " . bi' . str " → " . str gi . space . ixi'
         showFunctor :: Maybe (FunctorInstance v) -> ShowS
         showFunctor Nothing = id
-        showFunctor (Just (FunctorInstanceF a b f p x t)) =
-          let args = sep space [binder a, binder b, binder f, binder p, binder x]
-              t' = go precLet (ns :> a :> b :> f :> p :> x) t
+        showFunctor (Just (FunctorInstanceF a b g p x t)) =
+          let args = sep space [binder a, binder b, binder g, binder p, binder x]
+              t' = go precLet (ns :> Name f :> a :> b :> g :> p :> x) t
            in str "\n  functor " . args . str " = " . t'
     go prec ns (Let x a t u) =
       let a' = go precLet ns a
