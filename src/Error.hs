@@ -296,6 +296,7 @@ instance Reportable CheckError where
   report (CheckIn t pos) =
     let msg = "Checking inductive injection failed."
         ctx = "Checking [in] against type [" ++ unTS t ++ "] failed (expected an applied inductive type (μF p))"
+     in createError msg [(pos, ctx)]
   report (CheckBoxProof t pos) =
     let msg = "Box proof type checking failed."
         ctx = "Checking Box proof argument against type [" ++ unTS t ++ "] failed (expected Box (▢A) type)."
