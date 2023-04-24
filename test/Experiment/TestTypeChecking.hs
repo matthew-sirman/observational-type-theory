@@ -773,7 +773,7 @@ tm38 =
         ; 'Cons : (A × List p) → List p
         ]
         functor X Y f p x =
-          match x as _ return (μList : [⊤] → U. λp. ['Nil : ⊤ → List p; 'Cons : (A × Y p) → List p]) p with
+          match x as _ return (lift [List] Y) p with
           | 'Nil (_, _) → 'Nil (*, *)
           | 'Cons (xs, _) → 'Cons ((fst xs; f p (snd xs)), *)
     in

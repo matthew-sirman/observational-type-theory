@@ -211,9 +211,9 @@ renameProp pos ns m sub (PMu tag f t x cs functor) = do
       pure (ci, si, xi, bi, f, ixi)
 
     renameFunctor :: PFunctorInstance -> Checker (Variant e) (FunctorInstance Ix)
-    renameFunctor (PFunctorInstance a b f p x t) = do
-      t <- renameProp pos (ns :> a :> b :> f :> p :> x) m (liftRenaming 5 sub) =<< appProp t (PVar (cod sub)) (PVar (cod sub + 1)) (PVar (cod sub + 2)) (PVar (cod sub + 3)) (PVar (cod sub + 4))
-      pure (FunctorInstanceF a b f p x t)
+    renameFunctor (PFunctorInstance a b g p x t) = do
+      t <- renameProp pos (ns :> Name f :> a :> b :> g :> p :> x) m (liftRenaming 6 sub) =<< appProp t (PVar (cod sub)) (PVar (cod sub + 1)) (PVar (cod sub + 2)) (PVar (cod sub + 3)) (PVar (cod sub + 4)) (PVar (cod sub + 5))
+      pure (FunctorInstanceF a b g p x t)
 renameProp pos ns m sub (PLet x a t u) = do
   a <- renameProp pos ns m sub a
   t <- renameProp pos ns m sub t
@@ -366,6 +366,18 @@ rename pos ns m sub (VCons c t e) = do
   t <- rename pos ns m sub t
   e <- renameProp pos ns m sub e
   pure (Cons c t e)
+rename pos ns m sub (VFLift f a) = do
+  f <- rename pos ns m sub f
+  a <- rename pos ns m sub a
+  pure (FLift f a)
+rename pos ns m sub (VFmap f a b g p x) = do
+  f <- rename pos ns m sub f
+  a <- rename pos ns m sub a
+  b <- rename pos ns m sub b
+  g <- rename pos ns m sub g
+  p <- rename pos ns m sub p
+  x <- rename pos ns m sub x
+  pure (Fmap f a b g p x)
 rename pos ns m sub (VFixedPoint i g v f p x c t a) = do
   i <- rename pos ns m sub i
   c_g_p_x <- app' c (var (cod sub)) (var (cod sub + 1)) (var (cod sub + 2)) (var (cod sub + 3))
@@ -398,10 +410,10 @@ rename pos ns m sub (VMu tag f fty x cs functor a) = do
       pure (ci, si, xi, bi, f, ixi)
 
     renameFunctor :: VFunctorInstance -> Checker (Variant e) (FunctorInstance Ix)
-    renameFunctor (VFunctorInstance a b f p x t) = do
-      t_a_b_f_p_x <- app' t (var (cod sub)) (var (cod sub + 1)) (var (cod sub + 2)) (var (cod sub + 3)) (var (cod sub + 4))
-      t <- rename pos (ns :> a :> b :> f :> p :> x) m (liftRenaming 5 sub) t_a_b_f_p_x
-      pure (FunctorInstanceF a b f p x t)
+    renameFunctor (VFunctorInstance a b g p x t) = do
+      t_f_a_b_g_p_x <- app' t (var (cod sub)) (var (cod sub + 1)) (var (cod sub + 2)) (var (cod sub + 3)) (var (cod sub + 4)) (var (cod sub + 5))
+      t <- rename pos (ns :> Name f :> a :> b :> g :> p :> x) m (liftRenaming 6 sub) t_f_a_b_g_p_x
+      pure (FunctorInstanceF a b g p x t)
 rename pos ns m sub (VBoxProof e) = BoxProof <$> renameProp pos ns m sub e
 rename pos ns m sub (VBox a) = Box <$> rename pos ns m sub a
 
