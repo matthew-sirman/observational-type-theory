@@ -15,6 +15,7 @@ module Eval (
   app',
   quote,
   nbe,
+  valIdentity,
   module MonadEvaluator,
 ) where
 
@@ -417,6 +418,11 @@ match t@(VCons {}) x p (_ : bs) = match t x p bs
 match (VNeutral ne sp) x p bs = pure (VNeutral ne (sp :> VMatch x p bs))
 match t x p bs = pure (neElim t (VMatch x p bs))
 
+valIdentity :: MonadEvaluator m => Binder -> m Val
+valIdentity x = do
+  let idTm = Lambda Hole (Lambda x (Var 0))
+  eval [] idTm
+
 infixl 8 $$
 
 ($$) :: MonadEvaluator m => Val -> VElim -> m Val
@@ -461,8 +467,7 @@ infixl 8 $$
   -- This identity function holds in the empty context, so we create a syntactic
   -- form and then evaluate it in the empty environment to get a semantic identity
   -- function.
-  let viewId = Lambda p (Lambda x (Var 0))
-  vviewId_val <- eval [] viewId
+  vviewId_val <- valIdentity x
   vv <- embedVal vviewId_val
   app' t muF vv fix_f a u
 (VFixedPoint muF g v f p x c t Nothing) $$ (VApp u) =

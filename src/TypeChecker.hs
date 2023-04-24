@@ -369,7 +369,7 @@ infer gamma (R pos (BoxElimF e)) = do
 infer gamma (R _ (BoxF a)) = do
   a <- check gamma a (VU Irrelevant)
   pure (Box a, VU Relevant, Relevant)
-infer gamma (R _ (FLiftF f a)) = do
+infer gamma (R _ (FLiftF f@(R pos _) a)) = do
   (f, fty, s) <- infer gamma f
   vf <- eval (env gamma) f
   -- Lifting is only valid if the argument is an inductive type
@@ -377,8 +377,10 @@ infer gamma (R _ (FLiftF f a)) = do
     VMu {} -> do
       a <- check gamma a fty
       pure (FLift f a, fty, s)
-    _ -> error "TODO: error if not the case"
-infer gamma (R _ (FmapF f a b g p x)) = do
+    _ -> do
+      fTS <- ppVal gamma vf
+      throw (FLiftNotInductiveType fTS pos)
+infer gamma (R _ (FmapF f@(R pos _) a b g p x)) = do
   (f, _, _) <- infer gamma f
   vf <- eval (env gamma) f
   case vf of
@@ -403,7 +405,7 @@ infer gamma (R _ (FmapF f a b g p x)) = do
       let f_lift_b = functorLift f_lift_b_tag f' fty x' cs functor vb
       f_lift_b_p <- f_lift_b $$ VApp vp
       pure (Fmap f a b g p x, f_lift_b_p, Relevant)
-    _ -> error "TODO: error if not the case"
+    _ -> throw (FmapNeedsFunctorInstance pos)
 infer gamma (R pos (MatchF t@(R argPos _) x p bs)) = do
   (t, a, s) <- infer gamma t
   (p, s') <- checkType (gamma & bind x s a) p
@@ -479,7 +481,10 @@ infer gamma (R _ (FixedPointF i@(R pos _) g v f p x c t)) = do
       let gammaT = gamma & bindR g vmuFty & bindR v viewTy & bind f s fty & bind p s a & bindR x f_lift_g_p
       t <- check gammaT t c_f_lift_g_v_p_x
 
-      fixTy <- buildFType p a (env gamma) vmuF vv c
+      viewId_val <- valIdentity x
+      viewId <- embedVal viewId_val
+
+      fixTy <- buildFType p a (env gamma) vmuF viewId c
       pure (FixedPoint muF g v f p x c t, fixTy, s)
     _ -> do
       vmuFTS <- ppVal gamma vmuF
@@ -704,7 +709,9 @@ check gamma (R _ (InF t)) (VMu tag f fty xs cs functor (Just a)) = do
   let f_lift_muF = functorLift tag f fty xs cs functor muF
   f_lift_muF_a <- f_lift_muF $$ VApp a
   check gamma t f_lift_muF_a
--- TODO: error case for In
+check gamma (R pos (InF _)) tty = do
+  tTS <- ppVal gamma tty
+  throw (CheckIn tTS pos)
 check gamma (R _ (BoxProofF e)) (VBox a) = do
   e <- check gamma e a
   pure (BoxProof e)
