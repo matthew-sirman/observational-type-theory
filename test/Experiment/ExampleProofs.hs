@@ -121,11 +121,19 @@ stlcInterpreter :: String
 stlcInterpreter =
   [r|
     let Type : [⊤] → U =
-      μTy : [⊤] → U. λ_.
-        [ 'Unit : ⊤ → Ty <*>
-        ; 'Product : (Ty <*> × Ty <*>) → Ty <*>
-        ; 'Function : (Ty <*> × Ty <*>) → Ty <*>
+      μTy : [⊤] → U. λp.
+        [ 'Unit : ⊤ → Ty p
+        ; 'Product : (Ty p × Ty p) → Ty p
+        ; 'Function : (Ty p × Ty p) → Ty p
         ]
+      functor A B f p x =
+        match x as _ return
+          (μTy : [⊤] → U. λp.
+            ['Unit : ⊤ → Ty p; 'Product : (B p × B p) → Ty p; 'Function : (B p × B p) → Ty p]) p
+        with
+        | 'Unit (_, _) → 'Unit (*, *)
+        | 'Product (τ₁-τ₂, _) → 'Product ((f p (fst τ₁-τ₂); f p (snd τ₁-τ₂)), *)
+        | 'Function (τ₁-τ₂, _) → 'Function ((f p (fst τ₁-τ₂); f p (snd τ₁-τ₂)), *)
     in
     let 1 : Type <*> = 'Unit (*, *) in
     let _✶_ : Type <*> → Type <*> → Type <*> =
@@ -142,9 +150,9 @@ stlcInterpreter =
       λΓ. λτ. 'Extend ((Γ; τ), *)
     in
     let Ix : (Type <*> × 𝔽↓T <*>) → U =
-      μIx : (Type <*> × 𝔽↓T <*>) → U. λτ_Γ.
-        [ 'Ix0 : (Γ' :U 𝔽↓T <*>) → Ix (fst τ_Γ; Γ' ∷ (fst τ_Γ))
-        ; 'IxS : (τ'_Γ' :U Type <*> × (Σ(Γ' : 𝔽↓T <*>). Ix (fst τ_Γ; Γ'))) → Ix (fst τ_Γ; (fst (snd τ'_Γ')) ∷ (fst τ'_Γ'))
+      μIx : (Type <*> × 𝔽↓T <*>) → U. λτ-Γ.
+        [ 'Ix0 : (Γ' :U 𝔽↓T <*>) → Ix (fst τ-Γ; Γ' ∷ (fst τ-Γ))
+        ; 'IxS : (τ'-Γ' :U Type <*> × (Σ(Γ' : 𝔽↓T <*>). Ix (fst τ-Γ; Γ'))) → Ix (fst τ-Γ; (fst (snd τ'-Γ')) ∷ (fst τ'-Γ'))
         ]
     in
     let 𝔽↓̃τ : (𝔽↓T <*> × 𝔽↓T <*>) → U =
@@ -154,14 +162,14 @@ stlcInterpreter =
         (τ :U Type <*>) → Ix (τ; Δ) → Ix (τ; Γ)
     in
     let Term : (Type <*> × 𝔽↓T <*>) → U =
-      μTm : (Type <*> × 𝔽↓T <*>) → U. λτ_Γ.
-        [ 'Var : (Ix τ_Γ) → Tm τ_Γ
-        ; 'One : ⊤ → Tm (1; snd τ_Γ)
-        ; 'Pair : (τ₁_τ₂ :U Σ(τ₁ : Type <*>). Σ(τ₂ : Type <*>). (Tm (τ₁; snd τ_Γ) × Tm (τ₂; snd τ_Γ))) → Tm ((fst τ₁_τ₂) ✶ (fst (snd τ₁_τ₂)); snd τ_Γ)
-        ; 'Fst : (Σ(τ₂ : Type <*>). Tm (((fst τ_Γ) ✶ τ₂); snd τ_Γ)) → Tm τ_Γ
-        ; 'Snd : (Σ(τ₁ : Type <*>). Tm ((τ₁ ✶ (fst τ_Γ)); snd τ_Γ)) → Tm τ_Γ
-        ; 'Lambda : (τ₁_τ₂ :U Σ(τ₁ : Type <*>). Σ(τ₂ : Type <*>). Tm (τ₂; ((snd τ_Γ) ∷ τ₁))) → Tm ((fst τ₁_τ₂) ⇒ (fst (snd τ₁_τ₂)); snd τ_Γ)
-        ; 'App : (Σ(τ₁ : Type <*>). Tm ((τ₁ ⇒ (fst τ_Γ)); snd τ_Γ) × Tm (τ₁; snd τ_Γ)) → Tm τ_Γ
+      μTm : (Type <*> × 𝔽↓T <*>) → U. λτ-Γ.
+        [ 'Var : (Ix τ-Γ) → Tm τ-Γ
+        ; 'One : ⊤ → Tm (1; snd τ-Γ)
+        ; 'Pair : (τ₁-τ₂ :U Σ(τ₁ : Type <*>). Σ(τ₂ : Type <*>). (Tm (τ₁; snd τ-Γ) × Tm (τ₂; snd τ-Γ))) → Tm ((fst τ₁-τ₂) ✶ (fst (snd τ₁-τ₂)); snd τ-Γ)
+        ; 'Fst : (Σ(τ₂ : Type <*>). Tm (((fst τ-Γ) ✶ τ₂); snd τ-Γ)) → Tm τ-Γ
+        ; 'Snd : (Σ(τ₁ : Type <*>). Tm ((τ₁ ✶ (fst τ-Γ)); snd τ-Γ)) → Tm τ-Γ
+        ; 'Lambda : (τ₁-τ₂ :U Σ(τ₁ : Type <*>). Σ(τ₂ : Type <*>). Tm (τ₂; ((snd τ-Γ) ∷ τ₁))) → Tm ((fst τ₁-τ₂) ⇒ (fst (snd τ₁-τ₂)); snd τ-Γ)
+        ; 'App : (Σ(τ₁ : Type <*>). Tm ((τ₁ ⇒ (fst τ-Γ)); snd τ-Γ) × Tm (τ₁; snd τ-Γ)) → Tm τ-Γ
         ]
     in
     -- let Vec : U → ℕ → U =
@@ -171,54 +179,157 @@ stlcInterpreter =
       μForm : [⊤] → U. λ_. ['Ne : ⊤ → Form <*>; 'Nf : ⊤ → Form <*>]
     in
     let ℳ : Form <*> = 'Ne (*, *) in
-    -- let 𝒩 : Form <*> = 'Nf (*, *) in
-    -- let Val : (Form <*> × (Type <*> × 𝔽↓T <*>)) → U =
-    --   μVal : (Form <*> × (Type <*> × 𝔽↓T <*>)) → U. λf_τ_Γ.
-    --     [ 'VVar : Ix (snd f_τ_Γ) → Val (ℳ; snd f_τ_Γ)
-    --     ; 'VOne : ⊤ → Val (𝒩; (1; snd (snd f_τ_Γ)))
-    --     ; 'VPair : (τ₁_τ₂ :U Σ(τ₁ : Type <*>). Σ(τ₂ : Type <*>). (Val (𝒩; (τ₁; snd (snd f_τ_Γ))) × Val (𝒩; (τ₂; snd (snd f_τ_Γ))))) → Val (𝒩; ((fst τ₁_τ₂) ✶ (fst (snd τ₁_τ₂)); snd (snd f_τ_Γ)))
-    --     ; 'VFst : (Σ(τ₂ : Type <*>). Val (ℳ; ((fst (snd f_τ_Γ)) ✶ τ₂; snd (snd f_τ_Γ)))) → Val (ℳ; snd f_τ_Γ)
-    --     ; 'VSnd : (Σ(τ₁ : Type <*>). Val (ℳ; (τ₁ ✶ (fst (snd f_τ_Γ)); snd (snd f_τ_Γ)))) → Val (ℳ; snd f_τ_Γ)
-    --     ; 'VLambda : (τ₁_τ₂ :U Σ(τ₁ : Type <*>). Σ(τ₂ : Type <*>). Val (𝒩; (τ₂; ((snd (snd f_τ_Γ)) ∷ τ₁)))) → Val (𝒩; ((fst τ₁_τ₂) ⇒ (fst (snd τ₁_τ_2)); snd (snd f_τ_Γ)))
-    --     ; 'VApp : (Σ(τ₁ : Type <*>). Val (ℳ; (τ₁ ⇒ (fst (snd f_τ_Γ)); snd (snd f_τ_Γ))) × Val (𝒩; (τ₁; snd (snd f_τ_Γ)))) → Val (ℳ; snd f_τ_Γ)
-    --     ]
-    -- in
-    -- let ⟦_⟧_ : Type <*> → 𝔽↓T <*> → U =
-    --   fix [Type as Ty] SemTy _ ty : 𝔽↓T <*> → U = λΓ.
-    --     match ty as _ return U with
-    --     | 'Unit (_, _) → [⊤]
-    --     | 'Product (p, _) →
-    --       let τ₁ : Ty <*> = fst p in
-    --       let τ₂ : Ty <*> = snd p in
-    --       SemTy τ₁ Γ × SemTy τ₂ Γ
-    --     | 'Function (f, _) →
-    --       let τ₁ : Ty <*> = fst f in
-    --       let τ₂ : Ty <*> = snd f in
-    --       (Δ :U Context) → 𝔽↓̃τ (G; D) → SemTy τ₁ Δ → SemTy τ₂ Δ
-    -- in
-    -- let Env : Context → Context → U =
-    --   fix [Context as Ctx] Env G : Context → U = λD.
-    --     match G as _ return U with
-    --     | 'Empty _ → [⊤]
-    --     | 'Extend G_T →
-    --       let G : Ctx = fst G_T in
-    --       let T : Type = snd G_T in
-    --       Env G D × SemTy T D
-    -- in
-    -- let lookup : (T :U Type) → (G :U Context) → Ix T G → (D :U Context) → Env G D → SemTy T D =
-    --   fix [Ix as I] lookup T G ix : (D :U Context) → Env G D → SemTy T D =
-    --     λD. λenv.
-    --       match ix as _ return SemTy T D with
-    --       | 'Ix0 x0 →
-    --         let G' : Context = fst x0 in
-    --         let extension : G ~[Context] 'Extend (G'; T) = ▢-elim(snd x0) in
-    --         -- Needs better casting for fixed points.
-    --         fst (cast(Env G D, Env ('Extend (G'; T)) D, 0, env))
-    --       -- | 'IxS xS →
-    --       --   let G' : Context = fst (snd xS) in
-    --       --   let ix' : I T G' = snd (snd (snd xS)) in
-    --       --   lookup T G' ix' D (snd env)
-    -- in
+    let 𝒩 : Form <*> = 'Nf (*, *) in
+    let Normal : (Form <*> × (Type <*> × 𝔽↓T <*>)) → U =
+      μNormal : (Form <*> × (Type <*> × 𝔽↓T <*>)) → U. λf-τ-Γ.
+        [ 'VVar : Ix (snd f-τ-Γ) → Normal (ℳ; snd f-τ-Γ)
+        ; 'VOne : ⊤ → Normal (𝒩; (1; snd (snd f-τ-Γ)))
+        ; 'VPair : (τ₁-τ₂ :U Σ(τ₁ : Type <*>). Σ(τ₂ : Type <*>). (Normal (𝒩; (τ₁; snd (snd f-τ-Γ))) × Normal (𝒩; (τ₂; snd (snd f-τ-Γ))))) → Normal (𝒩; ((fst τ₁-τ₂) ✶ (fst (snd τ₁-τ₂)); snd (snd f-τ-Γ)))
+        ; 'VFst : (Σ(τ₂ : Type <*>). Normal (ℳ; ((fst (snd f-τ-Γ)) ✶ τ₂; snd (snd f-τ-Γ)))) → Normal (ℳ; snd f-τ-Γ)
+        ; 'VSnd : (Σ(τ₁ : Type <*>). Normal (ℳ; (τ₁ ✶ (fst (snd f-τ-Γ)); snd (snd f-τ-Γ)))) → Normal (ℳ; snd f-τ-Γ)
+        ; 'VLambda : (τ₁-τ₂ :U Σ(τ₁ : Type <*>). Σ(τ₂ : Type <*>). Normal (𝒩; (τ₂; ((snd (snd f-τ-Γ)) ∷ τ₁)))) → Normal (𝒩; ((fst τ₁-τ₂) ⇒ (fst (snd τ₁-τ₂)); snd (snd f-τ-Γ)))
+        ; 'VApp : (Σ(τ₁ : Type <*>). Normal (ℳ; (τ₁ ⇒ (fst (snd f-τ-Γ)); snd (snd f-τ-Γ))) × Normal (𝒩; (τ₁; snd (snd f-τ-Γ)))) → Normal (ℳ; snd f-τ-Γ)
+        ]
+    in
+    let _⟦_⟧_ : (s :U [⊤]) → Type s → 𝔽↓T <*> → U =
+      fix [Type as Ty] SemTy s ty : 𝔽↓T <*> → U = λΓ.
+        match ty as _ return U with
+        | 'Unit (_, _) → [⊤]
+        | 'Product (p, _) →
+          let τ₁ : Ty s = fst p in
+          let τ₂ : Ty s = snd p in
+          SemTy s τ₁ Γ × SemTy s τ₂ Γ
+        | 'Function (f, _) →
+          let τ₁ : Ty s = fst f in
+          let τ₂ : Ty s = snd f in
+          (Δ :U 𝔽↓T <*>) → 𝔽↓̃τ (Γ; Δ) → SemTy s τ₁ Δ → SemTy s τ₂ Δ
+    in
+    let Π : 𝔽↓T <*> → 𝔽↓T <*> → U =
+      (fix [𝔽↓T as Ctx] Env _ Γ : 𝔽↓T <*> → U = λΔ.
+        match Γ as _ return U with
+        | 'Empty (_, _) → [⊤]
+        | 'Extend (Γ-τ, _) →
+          let Γ : Ctx <*> = fst Γ-τ in
+          let τ : Type <*> = snd Γ-τ in
+          Env <*> Γ Δ × _ ⟦ τ ⟧ Δ) <*>
+    in
+    let rn : (Γ :U 𝔽↓T <*>) → (Δ :U 𝔽↓T <*>) → 𝔽↓̃τ (Δ; Γ) → (τ :U Type <*>) → _ ⟦ τ ⟧ Δ → _ ⟦ τ ⟧ Γ =
+      λΓ. λΔ. λρ.
+        (fix [Type as Ty view ι] rn p τ : p ⟦ (ι p τ) ⟧ Δ → p ⟦ (ι p τ) ⟧ Γ =
+          match τ as τ' return
+            let τ' : Type p = in (fmap[Type](Ty, Type, ι, p, τ')) in
+            p ⟦ τ' ⟧ Δ → p ⟦ τ' ⟧ Γ
+          with
+          | 'Unit (_, _) → λ_. <*>
+          | 'Product (τ₁-τ₂, _) →
+            let τ₁ : Ty p = fst τ₁-τ₂ in
+            let τ₂ : Ty p = snd τ₁-τ₂ in
+            λpair.
+              let t : _ ⟦ (ι p τ₁) ⟧ Δ = fst pair in
+              let u : _ ⟦ (ι p τ₂) ⟧ Δ = snd pair in
+              (rn p τ₁ (fst pair); rn p τ₂ (snd pair))
+          | 'Function (τ₁-τ₂, _) →
+            let τ₁ : Ty <*> = cast(Ty p, Ty <*>, ap(U, p. Ty p, p, <*>, *), fst τ₁-τ₂) in
+            let τ₂ : Ty <*> = cast(Ty p, Ty <*>, ap(U, p. Ty p, p, <*>, *), snd τ₁-τ₂) in
+            λf. λΔ'. λρ'. f Δ' (λχ. λix. ρ' χ (ρ χ ix))) <*>
+    in
+    let Π-eq-Π : (Γ :U 𝔽↓T <*>) → (Γ' :U 𝔽↓T <*>) → (Δ :U 𝔽↓T <*>) → (Γ ~ Γ') → Π Γ Δ ~ Π Γ' Δ =
+      λΓ. λΓ'. λΔ. λpf. ap(U, Γ''. Π Γ'' Δ, Γ, Γ', pf)
+    in
+    let lookup : (τ :U Type <*>) → (Γ :U 𝔽↓T <*>) → Ix (τ; Γ) → (Δ :U 𝔽↓T <*>) → Π Γ Δ → ⟦ τ ⟧ Δ =
+      λτ. λΓ.
+      (fix [Ix as I] lookup τ-Γ ix : (Δ :U 𝔽↓T <*>) → Π (snd τ-Γ) Δ → ⟦ (fst τ-Γ) ⟧ Δ =
+        λΔ. λenv.
+          match ix as _ return ⟦ (fst τ-Γ) ⟧ Δ with
+          | 'Ix0 (Γ', pf) →
+            let env-cast : Π (Γ' ∷ (fst τ-Γ)) Δ =
+              cast(Π (snd τ-Γ) Δ, Π (Γ' ∷ (fst τ-Γ)) Δ, Π-eq-Π (snd τ-Γ) (Γ' ∷ (fst τ-Γ)) Δ (sym(_, _, snd pf)), env)
+            in
+            snd env-cast
+          | 'IxS (τ'-Γ'-ix, pf) →
+            let τ' : Type <*> = fst τ'-Γ'-ix in
+            let Γ' : 𝔽↓T <*> = fst (snd τ'-Γ'-ix) in
+            let ix' : I (fst τ-Γ; Γ') = snd (snd τ'-Γ'-ix) in
+            let env-cast : Π (Γ' ∷ τ') Δ =
+              cast(Π (snd τ-Γ) Δ, Π (Γ' ∷ τ') Δ, Π-eq-Π (snd τ-Γ) (Γ' ∷ τ') Δ (sym(_, _, snd pf)), env)
+            in
+            lookup (fst τ-Γ; Γ') ix' Δ (fst env-cast)) (τ; Γ)
+    in
+    let __⟦_⟧__ : (Γ :U 𝔽↓T <*>) → (τ :U Type <*>) → Term (τ; Γ) → (Δ :U 𝔽↓T <*>) → Π Γ Δ → ⟦ τ ⟧ Δ =
+      λΓ. λτ.
+      (fix [Term as Tm ] eval τ-Γ tm : (Δ :U 𝔽↓T <*>) → Π (snd τ-Γ) Δ → ⟦ (fst τ-Γ) ⟧ Δ =
+        let τ : Type <*> = fst τ-Γ in
+        let Γ : 𝔽↓T <*> = snd τ-Γ in
+        λΔ. λenv.
+          match tm as _ return ⟦ τ ⟧ Δ with
+          | 'Var (ix, _) → lookup τ Γ ix Δ env
+          | 'One (_, pf) → cast([⊤], ⟦ τ ⟧ Δ, ap(U, τ'. ⟦ τ' ⟧ Δ, 1, τ, fst pf), <*>)
+          | 'Pair (t-u, pf) →
+            let τ₁ : Type <*> = fst t-u in
+            let τ₂ : Type <*> = fst (snd t-u) in
+            let t : Tm (τ₁; Γ) = fst (snd (snd t-u)) in
+            let u : Tm (τ₂; Γ) = snd (snd (snd t-u)) in
+            let vt : ⟦ τ₁ ⟧ Δ =
+              eval (τ₁; Γ) t Δ env
+            in
+            let vu : ⟦ τ₂ ⟧ Δ =
+              eval (τ₂; Γ) u Δ env
+            in
+            cast(⟦ τ₁ ⟧ Δ × ⟦ τ₂ ⟧ Δ, ⟦ τ ⟧ Δ, ap(U, τ'. ⟦ τ' ⟧ Δ, τ₁ ✶ τ₂, τ, fst pf), (vt; vu))
+          | 'Fst (τ₂-t, _) →
+            let τ₂ : Type <*> = fst τ₂-t in
+            let t : Tm (τ ✶ τ₂; Γ) = snd τ₂-t in
+            let vt : ⟦ τ ⟧ Δ × ⟦ τ₂ ⟧ Δ =
+              eval (τ ✶ τ₂; Γ) t Δ env
+            in
+            fst vt
+          | 'Snd (τ₁-t, _) →
+            let τ₁ : Type <*> = fst τ₁-t in
+            let t : Tm (τ₁ ✶ τ; Γ) = snd τ₁-t in
+            let vt : ⟦ τ₁ ⟧ Δ × ⟦ τ ⟧ Δ =
+              eval (τ₁ ✶ τ; Γ) t Δ env
+            in
+            snd vt
+          | 'Lambda (τ₁-τ₂-t, _) →
+            let τ₁ : Type <*> = fst τ₁-τ₂-t in
+            let τ₂ : Type <*> = fst (snd τ₁-τ₂-t) in
+            let t : Tm (τ₂; Γ ∷ τ₁) = snd (snd τ₁-τ₂-t) in
+            let Λt : (Δ' :U 𝔽↓T <*>) → 𝔽↓̃τ (Δ; Δ') → ⟦ τ₁ ⟧ Δ' → ⟦ τ₂ ⟧ Δ' =
+              λΔ'. λf. λχ.
+                let rn-env : (Ξ :U 𝔽↓T <*>) → Π Ξ Δ → 𝔽↓̃τ (Δ; Δ') → Π Ξ Δ' =
+                  fix [𝔽↓T as Ctx view ι] rn-env p Ξ :
+                      let Ξ' : 𝔽↓T <*> = cast(𝔽↓T p, 𝔽↓T <*>, *, ι p Ξ) in
+                      Π Ξ' Δ → 𝔽↓̃τ (Δ; Δ') → Π Ξ' Δ' =
+                    match Ξ as Ξ' return
+                      let Ξ'' : 𝔽↓T <*> =
+                        match Ξ' as _ return 𝔽↓T <*> with
+                        | 'Empty (_, _) → ·
+                        | 'Extend (Ξ''-τ', _) →
+                          let Ξ'' : 𝔽↓T <*> = ι <*> (fst Ξ''-τ') in
+                          let τ' : Type <*> = snd Ξ''-τ' in
+                          Ξ'' ∷ τ'
+                      in
+                      Π Ξ'' Δ → 𝔽↓̃τ (Δ; Δ') → Π Ξ'' Δ'
+                    with
+                    | 'Empty (_, _) → λ_. λ_. <*>
+                    | 'Extend (Ξ'-τ', _) →
+                      let Ξ' : Ctx <*> = fst Ξ'-τ' in
+                      let τ' : Type <*> = snd Ξ'-τ' in
+                      λε. λρ.
+                        let ε'-χ : Π ((ι <*> Ξ') ∷ τ') Δ =
+                          -- let Ξ'' : 𝔽↓T <*> = cast()
+                          -- cast(Π Ξ , , , ε)
+                          ε
+                        in
+                        (rn-env <*> Ξ' (fst ε'-χ) ρ; rn ρ (snd ε'-χ))
+                in
+                eval (τ₂; Γ ∷ τ₁) t Δ' (rn-env Γ env f; χ)
+            in
+            cast ((Δ' :U 𝔽↓T <*>) → 𝔽↓̃τ (Δ; Δ') → ⟦ τ₁ ⟧ Δ' → ⟦ τ₂ ⟧ Δ', ⟦ τ ⟧ Δ, _, Λt)
+            -- (Δ :U 𝔽↓T <*>) → 𝔽↓̃τ (Γ; Δ) → SemTy <*> τ₁ Δ → SemTy <*> τ₂ Δ
+          | 'App (_, _) → _
+          ) (τ; Γ)
+    in
     -- let eval : (T :U Type) → (G :U Context) → Term T G → (D :U Context) → Env G D → SemTy T D =
     --   fix [Term as Tm] eval T G tm : (D :U Context) → Env G D → SemTy T D =
     --     λD. λenv.
