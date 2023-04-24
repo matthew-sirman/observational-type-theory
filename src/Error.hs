@@ -125,6 +125,8 @@ data InferenceError
   | IdReflIrrelevant TermString Position
   | ConstructorNotInTypeMatch Name TermString Position
   | NonTotalMatch [Name] Position
+  | FLiftNotInductiveType TermString Position
+  | FmapNeedsFunctorInstance Position
   | MatchHead TermString Position
   | FixAnnotation TermString Position
   | FixViewWithNoFunctor Position
@@ -199,6 +201,14 @@ instance Reportable InferenceError where
     let msg = "Match expression is not total."
         ctx = "Missing cases are " ++ show (map TS missing) ++ "."
      in createError msg [(pos, ctx)]
+  report (FLiftNotInductiveType t pos) =
+    let msg = "Functor lift must be supplied with inductive type."
+        ctx = "Expected inductive type, but found [" ++ unTS t ++ "]."
+     in createError msg [(pos, ctx)]
+  report (FmapNeedsFunctorInstance pos) =
+    let msg = "No functor instance found."
+        ctx = "Inductive type needs functor instance to use [fmap]."
+     in createError msg [(pos, ctx)]
   report (MatchHead t pos) =
     let msg = "Expected inductive type (μF. t) in argument of match expression."
         ctx = "Expected inductive type, but found [" ++ unTS t ++ "]."
@@ -237,6 +247,7 @@ data CheckError
   | CheckIdPath TermString Position
   | ConstructorNotInTypeCons Name TermString Position
   | CheckCons TermString Name Position
+  | CheckIn TermString Position
   | CheckBoxProof TermString Position
 
 instance Reportable CheckError where
@@ -282,6 +293,9 @@ instance Reportable CheckError where
             ++ unTS t
             ++ "] failed (expected inductive type containing constructor)."
      in createError msg [(pos, ctx)]
+  report (CheckIn t pos) =
+    let msg = "Checking inductive injection failed."
+        ctx = "Checking [in] against type [" ++ unTS t ++ "] failed (expected an applied inductive type (μF p))"
   report (CheckBoxProof t pos) =
     let msg = "Box proof type checking failed."
         ctx = "Checking Box proof argument against type [" ++ unTS t ++ "] failed (expected Box (▢A) type)."
