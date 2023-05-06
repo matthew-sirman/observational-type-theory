@@ -1,3 +1,4 @@
+{-# LANGUAGE MonoLocalBinds #-}
 {-# LANGUAGE QuasiQuotes #-}
 
 module Experiment.TestTypeChecking where
@@ -16,6 +17,9 @@ import Control.Monad.State
 import Data.Function ((&))
 import Data.Functor.Identity
 import Text.RawString.QQ
+
+import Control.Monad.Oops
+import Error.Diagnose
 
 tm0 :: String
 tm0 =
