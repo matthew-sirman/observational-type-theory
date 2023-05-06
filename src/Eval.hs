@@ -150,24 +150,45 @@ eqReduce env vt va vu = eqReduceType va
           t_eq_t'_and_u_eq_u' ve = VAnd <$> t_eq_t' ve <*> u_eq_u' ve
       VExists (Name "$e") a_eq_a' <$> makeFnClosure' t_eq_t'_and_u_eq_u'
     -- Rule Cons-Eq
-    eqReduceAll (VCons c t _) (VMu tag f fty x cs functor (Just a)) (VCons c' t' _)
+    eqReduceAll (VCons c t e) i@(VMu tag f fty x cs functor (Just a)) (VCons c' t' e')
       | c == c' = do
           case lookup c cs of
             Nothing -> error "BUG: Impossible (constructor not well typed in equality)"
-            Just (_, _, bi, _) -> do
-              let muF_val = VMu tag f fty x cs functor Nothing
-              muF <- embedVal muF_val
-              a <- embedVal a
-              b_muF_a <- app' bi muF a
-              eqReduce env t b_muF_a t'
+            Just cons -> consEqReduce cons
       | otherwise = pure VEmpty
+      where
+        consEqReduce :: (Relevance, Binder, ValClosure (A 2), ValClosure (A 3)) -> m Val
+        consEqReduce (Relevant, _, bi, _) = do
+          let muF_val = VMu tag f fty x cs functor Nothing
+          muF <- embedVal muF_val
+          a <- embedVal a
+          b_muF_a <- app' bi muF a
+          eqReduce env t b_muF_a t'
+        consEqReduce (Irrelevant, _, _, _) = pure VUnit
+        consEqReduce (SortMeta sm, xi, bi, ixi) = do
+          s <- lookupSortMeta sm
+          case s of
+            -- Block if the meta is unsolved
+            Nothing -> pure (VEq (VCons c t e) i (VCons c' t' e'))
+            Just s -> consEqReduce (s, xi, bi, ixi)
     -- Rule Mu-Eq
-    eqReduceAll (VMu tag _ (VPi _ _ aTy _) _ _ _ (Just a)) (VU Relevant) (VMu tag' _ _ _ _ _ (Just a'))
-      | tag == tag' = eqReduce env a aTy a'
-      | otherwise = pure VEmpty
+    eqReduceAll i@(VMu tag _ (VPi s _ aTy _) _ _ _ (Just a)) (VU Relevant) i'@(VMu tag' _ _ _ _ _ (Just a'))
+      | tag == tag' = indEqReduce s
+      where
+        indEqReduce :: Relevance -> m Val
+        indEqReduce Relevant = eqReduce env a aTy a'
+        indEqReduce Irrelevant = pure VUnit
+        indEqReduce (SortMeta sm) = do
+          s <- lookupSortMeta sm
+          case s of
+            -- Block if the meta is unsolved
+            Nothing -> pure (VEq i (VU Relevant) i')
+            Just s -> indEqReduce s
     -- Rule Box-Eq
     eqReduceAll (VBox a) (VU Relevant) (VBox b) =
       eqReduce env a (VU Irrelevant) b
+    -- Rule Box-Proof-Eq
+    eqReduceAll (VBoxProof _) (VBox _) (VBoxProof _) = pure VUnit
     -- No reduction rule
     eqReduceAll t a u = pure (VEq t a u)
 
@@ -191,7 +212,7 @@ eqReduce env vt va vu = eqReduceType va
     headNeq (VId {}) (VId {}) = False
     headNeq t u = hasTypeHead t && hasTypeHead u
 
-cast :: MonadEvaluator m => VTy -> VTy -> VProp -> Val -> m Val
+cast :: forall m. MonadEvaluator m => VTy -> VTy -> VProp -> Val -> m Val
 -- Rule Cast-Zero
 cast VNat VNat _ VZero = pure VZero
 -- Rule Cast-Succ
@@ -232,16 +253,27 @@ cast (VId {}) (VId {}) _ (VIdPath _) = undefined
 --     u_eq_u' = Snd (Snd e')
 --     t'_eq_u' = Trans t'_eq_t (Trans t_eq_u u_eq_u')
 -- pure (VIdPath (VProp env t'_eq_u'))
-cast (VMu tag f fty x cs functor (Just a)) (VMu _ _ _ _ _ _ (Just a')) e (VCons ci t e') = do
-  let (_, _, _, ixi) = fromMaybe (error "BUG: Impossible") (lookup ci cs)
-      muF_val = VMu tag f fty x cs functor Nothing
-  muF <- embedVal muF_val
-  a <- embedVal a
-  a' <- embedVal a'
-  t <- embedVal t
-  ixi_muF_a_t <- app' ixi muF a t
-  ixi_prop <- valToVProp ixi_muF_a_t
-  pure (VCons ci (val t) (PTrans ixi_prop (prop a) (prop a') e' e))
+cast i@(VMu tag f fty@(VPi s _ _ _) x cs functor (Just a)) i'@(VMu _ _ _ _ _ _ (Just a')) e cons@(VCons ci t e') =
+  reduceConsCast s
+  where
+    reduceConsCast :: Relevance -> m Val
+    reduceConsCast Irrelevant = pure (VCons ci t e')
+    reduceConsCast Relevant = do
+      let (_, _, _, ixi) = fromMaybe (error "BUG: Impossible") (lookup ci cs)
+          muF_val = VMu tag f fty x cs functor Nothing
+      muF <- embedVal muF_val
+      a <- embedVal a
+      a' <- embedVal a'
+      t <- embedVal t
+      ixi_muF_a_t <- app' ixi muF a t
+      ixi_prop <- valToVProp ixi_muF_a_t
+      pure (VCons ci (val t) (PTrans ixi_prop (prop a) (prop a') e' e))
+    reduceConsCast (SortMeta sm) = do
+      s <- lookupSortMeta sm
+      case s of
+        -- Block on unknown sort
+        Nothing -> pure (VCast i i' e cons)
+        Just s -> reduceConsCast s
 cast (VBox a) (VBox b) e (VBoxProof t) = do
   t' <- cast a b e (VProp t)
   VBoxProof <$> valToVProp t'
@@ -263,7 +295,7 @@ evalSort Irrelevant = pure Irrelevant
 evalSort (SortMeta m) = do
   s <- lookupSortMeta m
   case s of
-    Just s -> pure s
+    Just s -> evalSort s
     Nothing -> pure (SortMeta m)
 
 eval :: forall m. MonadEvaluator m => Env ValProp -> Term Ix -> m Val
