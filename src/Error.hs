@@ -247,6 +247,7 @@ data CheckError
   | CheckIdPath TermString Position
   | ConstructorNotInTypeCons Name TermString Position
   | CheckCons TermString Name Position
+  | ConstructorIndexSortUnknown Position
   | CheckIn TermString Position
   | CheckBoxProof TermString Position
 
@@ -292,6 +293,10 @@ instance Reportable CheckError where
             ++ "] against type ["
             ++ unTS t
             ++ "] failed (expected inductive type containing constructor)."
+     in createError msg [(pos, ctx)]
+  report (ConstructorIndexSortUnknown pos) =
+    let msg = "Checking constructor failed."
+        ctx = "Index type of inductive type is unknown, but necessary to check the equality proof term in the constructor."
      in createError msg [(pos, ctx)]
   report (CheckIn t pos) =
     let msg = "Checking inductive injection failed."

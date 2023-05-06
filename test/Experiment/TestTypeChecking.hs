@@ -825,6 +825,18 @@ tm39 =
       | 'Cons (ls, _) → (fst ls; f p (snd ls))
   |]
 
+tm40 :: String
+tm40 =
+  [r|
+    let List : U → ⊤ → U =
+      λX. μList : ⊤ → U. λ_.
+        [ 'Nil : ⊤ → List *
+        ; 'Cons : (X × List *) → List *
+        ]
+    in
+    cast(List ℕ *, List ℕ *, *, 'Nil (*, *))
+  |]
+
 test :: String -> IO ()
 test input = do
   (result, mctx) <-

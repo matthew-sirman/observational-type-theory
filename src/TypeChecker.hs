@@ -524,8 +524,8 @@ infer gamma (R _ (FixedPointF i@(R pos _) g v f p x c t)) = do
 infer gamma (R muPos (MuF () f fty@(R pos _) x cs functor)) = do
   (fty, _) <- checkType gamma fty
   vfty <- eval (env gamma) fty
-  a <- checkTypeFamily vfty
-  let gamma' = gamma & bindR (Name f) vfty & bindR x a
+  (s, a) <- checkTypeFamily vfty
+  let gamma' = gamma & bindR (Name f) vfty & bind x s a
   cs <- mapM (checkConstructor gamma' a) cs
   -- A fresh tag is associated to each syntactic inductive type definition.
   tag <- freshTag
@@ -540,12 +540,12 @@ infer gamma (R muPos (MuF () f fty@(R pos _) x cs functor)) = do
   functor <- mapM (checkFunctor vmuF a f_lift) functor
   pure (Mu tag f fty x cs functor, vfty, Relevant)
   where
-    checkTypeFamily :: VTy -> Checker (Variant e) VTy
-    checkTypeFamily t@(VPi Relevant _ a b) = do
+    checkTypeFamily :: VTy -> Checker (Variant e) (Relevance, VTy)
+    checkTypeFamily t@(VPi s _ a b) = do
       let vx = var (lvl gamma)
       b_x <- app' b vx
       case b_x of
-        VU Relevant -> pure a
+        VU Relevant -> pure (s, a)
         _ -> do
           tTS <- ppVal gamma t
           throw (InductiveTypeFamily tTS pos)
@@ -644,7 +644,8 @@ checkType gamma t@(R pos _) = do
       throw (CheckType tTS pos)
 
 check
-  :: ( e `CouldBe` CheckError
+  :: forall e
+   . ( e `CouldBe` CheckError
      , e `CouldBe` InferenceError
      , e `CouldBe` ConversionError
      , e `CouldBe` UnificationError
@@ -694,23 +695,32 @@ check gamma (R _ (IdPathF e)) (VId a t u) = do
 check gamma (R pos (IdPathF {})) tty = do
   tTS <- ppVal gamma tty
   throw (CheckIdPath tTS pos)
-check gamma (R pos (ConsF c t e)) (VMu tag f fty@(VPi _ _ aTy _) xs cs functor (Just a)) = do
+check gamma (R pos (ConsF c t e@(R ePos _))) (VMu tag f fty@(VPi s _ aTy _) xs cs functor (Just a)) = do
   let muF = VMu tag f fty xs cs functor Nothing
   case lookup c cs of
     Nothing -> do
       muFTS <- ppVal gamma muF
       throw (ConstructorNotInTypeCons c muFTS pos)
     Just (_, _, bi, ixi) -> do
-      -- Apply to inductive type without parameters
       muF <- embedVal muF
       a <- embedVal a
+      -- Apply to inductive type without parameters
       bi_muF_a <- app' bi muF a
       t <- check gamma t bi_muF_a
-      vt_val <- eval (env gamma) t
-      vt <- embedVal vt_val
-      ixi_muF_a_x <- app' ixi muF a vt
-      ixi_eq_a <- eqReduce (env gamma) ixi_muF_a_x aTy (val a)
-      e <- check gamma e ixi_eq_a
+      let checkProof :: Relevance -> Checker (Variant e) (Term Ix)
+          checkProof Relevant = do
+            vt_val <- eval (env gamma) t
+            vt <- embedVal vt_val
+            ixi_muF_a_x <- app' ixi muF a vt
+            ixi_eq_a <- eqReduce (env gamma) ixi_muF_a_x aTy (val a)
+            check gamma e ixi_eq_a
+          checkProof Irrelevant = check gamma e VUnit
+          checkProof (SortMeta sm) = do
+            s <- lookupSortMeta sm
+            case s of
+              Nothing -> throw (ConstructorIndexSortUnknown ePos)
+              Just s -> checkProof s
+      e <- checkProof s
       pure (Cons c t e)
 check gamma (R pos (ConsF c _ _)) tty = do
   tTS <- ppVal gamma tty
