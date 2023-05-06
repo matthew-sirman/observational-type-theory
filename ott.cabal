@@ -85,7 +85,9 @@ test-suite ott-test
   type: exitcode-stdio-1.0
   main-is: Spec.hs
   other-modules:
+      Experiment.ExampleProofs
       Experiment.Naive
+      Experiment.TestExecution
       Experiment.TestTypeChecking
       Unit.TestEnvironment
       Unit.TypeChecker
