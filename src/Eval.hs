@@ -253,12 +253,15 @@ cast (VId {}) (VId {}) _ (VIdPath _) = undefined
 --     u_eq_u' = Snd (Snd e')
 --     t'_eq_u' = Trans t'_eq_t (Trans t_eq_u u_eq_u')
 -- pure (VIdPath (VProp env t'_eq_u'))
-cast i@(VMu tag f fty@(VPi s _ _ _) x cs functor (Just a)) i'@(VMu _ _ _ _ _ _ (Just a')) e cons@(VCons ci t e') =
-  reduceConsCast s
+cast i@(VMu tag f fty@(VPi s _ _ _) x cs functor (Just a)) i'@(VMu _ _ _ _ _ _ (Just a')) e cons =
+  reduceConsCast s cons
   where
-    reduceConsCast :: Relevance -> m Val
-    reduceConsCast Irrelevant = pure (VCons ci t e')
-    reduceConsCast Relevant = do
+    reduceConsCast :: Relevance -> Val -> m Val
+    -- Don't block on reduction when we have irrelevant types
+    -- TODO: check this is actually valid (feels like it should be, but also should be avoidable
+    -- due to casts being trivial when index type is irrelevant)
+    reduceConsCast Irrelevant cons = pure cons
+    reduceConsCast Relevant (VCons ci t e') = do
       let (_, _, _, ixi) = fromMaybe (error "BUG: Impossible") (lookup ci cs)
           muF_val = VMu tag f fty x cs functor Nothing
       muF <- embedVal muF_val
@@ -268,12 +271,13 @@ cast i@(VMu tag f fty@(VPi s _ _ _) x cs functor (Just a)) i'@(VMu _ _ _ _ _ _ (
       ixi_muF_a_t <- app' ixi muF a t
       ixi_prop <- valToVProp ixi_muF_a_t
       pure (VCons ci (val t) (PTrans ixi_prop (prop a) (prop a') e' e))
-    reduceConsCast (SortMeta sm) = do
+    reduceConsCast Relevant cons = pure (VCast i i' e cons)
+    reduceConsCast (SortMeta sm) cons = do
       s <- lookupSortMeta sm
       case s of
         -- Block on unknown sort
         Nothing -> pure (VCast i i' e cons)
-        Just s -> reduceConsCast s
+        Just s -> reduceConsCast s cons
 cast (VBox a) (VBox b) e (VBoxProof t) = do
   t' <- cast a b e (VProp t)
   VBoxProof <$> valToVProp t'
