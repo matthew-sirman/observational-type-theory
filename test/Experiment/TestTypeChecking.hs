@@ -835,6 +835,15 @@ tm40 =
     cast(List ℕ *, List ℕ *, *, 'Nil (*, *))
   |]
 
+tm41 :: String
+tm41 =
+  [r|
+    let f : (P :U Ω) → (p :Ω P) → (q :Ω P) → (f :U P → ℕ) → f p ~ f q =
+      λP. λp. λq. λf. refl (f p)
+    in
+    *
+  |]
+
 test :: String -> IO ()
 test input = do
   (result, mctx) <-
