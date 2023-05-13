@@ -34,8 +34,8 @@ ghc-options:
 - -Wpartial-fields
 - -Wredundant-constraints
 - -Wno-name-shadowing
-# TODO: remove and account for export lists
-- -Wno-missing-export-lists
+# TODO: not ideal to allow orphan instances, but its fine for now
+- -Wno-orphans
 
 library:
   source-dirs: src

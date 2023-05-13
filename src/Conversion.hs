@@ -171,8 +171,6 @@ conv pos names = conv' names names
     conv' _ _ _ (VAbort {}) (VAbort {}) = pure ()
     conv' _ _ _ VEmpty VEmpty = pure ()
     -- Proof irrelevant, so always convertible
-    conv' _ _ _ (VProp {}) _ = pure ()
-    conv' _ _ _ _ (VProp {}) = pure ()
     conv' _ _ _ VUnit VUnit = pure ()
     conv' ns ns' lvl (VEq t a u) (VEq t' a' u') = do
       conv' ns ns' lvl t t'
@@ -248,12 +246,16 @@ conv pos names = conv' names names
       t'_g_f_p_x <- app' t' (var lvl) (var (lvl + 1)) (var (lvl + 2)) (var (lvl + 3)) (var (lvl + 4))
       conv' (ns :> g :> v :> f :> p :> x) (ns' :> g' :> v' :> f' :> p' :> x') (lvl + 5) t_g_f_p_x t'_g_f_p_x
       -- TODO: this *might* be problematic in the case that exactly one of [a], [a'] is Nothing
-      sequence_ (liftM2 (conv' ns ns' lvl) a a')
+      case (a, a') of
+        (Just (VAppR a), Just (VAppR a')) -> conv' ns ns' lvl a a'
+        _ -> pure ()
     conv' ns ns' lvl (VMu _ f fty x cs functor a) (VMu _ f' fty' x' cs' functor' a') = do
       conv' ns ns' lvl fty fty'
       zipWithM_ convCons cs cs'
       sequence_ (liftM2 convFunctor functor functor')
-      sequence_ (liftM2 (conv' ns ns' lvl) a a')
+      case (a, a') of
+        (Just (VAppR a), Just (VAppR a')) -> conv' ns ns' lvl a a'
+        _ -> pure ()
       where
         convCons
           :: (Name, (Relevance, Binder, ValClosure (A 2), ValClosure (A 3)))

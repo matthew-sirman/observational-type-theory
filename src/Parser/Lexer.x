@@ -85,7 +85,6 @@ tokens :-
        "mu"                     { symbol SymMu }
        "μ"                      { symbol SymMu }
        "functor"                { keyword KWFunctor }
-       "out"                    { keyword KWOut }
        "lift"                   { keyword KWLift }
        "fmap"                   { keyword KWFmap }
        "let"                    { keyword KWLet }
@@ -152,7 +151,6 @@ data Token
   | KWView
   | SymMu
   | KWFunctor
-  | KWOut
   | KWLift
   | KWFmap
   | KWLet

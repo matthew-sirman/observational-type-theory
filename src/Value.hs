@@ -11,7 +11,10 @@
 {-# LANGUAGE UndecidableInstances #-}
 
 module Value (
+  VAppElim (..),
   VElim (..),
+  pattern VApp,
+  pattern VAppProp,
   VSpine,
   Val (..),
   VFunctorInstance (..),
@@ -19,23 +22,27 @@ module Value (
   pattern VMeta,
   pattern VFun,
   pattern VAnd,
-  ValProp (..),
-  embedProp,
   VTy,
   VProp (..),
   PFunctorInstance (..),
-  PushArgument (..),
+  PFunctorInstanceUniform (..),
   Closure (..),
+  Defun (..),
   PropClosure,
   ValClosure,
+  ClosureEval (..),
   ClosureApply (..),
-  appOne,
   A,
   BD (..),
   Env,
+  EnvEntry (..),
+  prop,
+  val,
   level,
   extend,
   var,
+  varR,
+  varP,
   showElimHead,
 )
 where
@@ -43,76 +50,96 @@ where
 import Syntax
 
 import Data.Type.Nat
+import Data.Void
 
 data BD = Bound | Defined
   deriving (Show)
 
-type Env v = [(BD, v)]
+data EnvEntry
+  = Prop VProp
+  | Val Val VProp
 
-level :: Env v -> Lvl
+prop :: EnvEntry -> VProp
+prop (Prop p) = p
+prop (Val _ p) = p
+
+val :: EnvEntry -> Val
+val (Val v _) = v
+val (Prop _) = error "BUG: Tried to project value from prop entry"
+
+type Env = [(BD, EnvEntry)]
+
+level :: Env -> Lvl
 level env = Lvl (length env)
 
-extend :: Lvl -> Env ValProp -> Env ValProp
-extend lvl env = env :> (Bound, var lvl)
+extend :: Sort -> Lvl -> Env -> Env
+extend sort lvl env = env :> (Bound, var sort lvl)
 
-class Applicative f => PushArgument f where
-  push :: (a -> f b) -> f (a -> b)
+data Defun cod
+  = ClosureEqFun cod (Closure (A 1) cod) cod
+  | ClosureEqPiFamily EnvEntry cod cod (Closure (A 1) cod) (Closure (A 1) cod)
+  | ClosureEqPi Relevance Binder cod cod (Closure (A 1) cod) (Closure (A 1) cod)
+  | ClosureEqSigmaFamily EnvEntry cod cod (Closure (A 1) cod) (Closure (A 1) cod)
+  | ClosureEqSigma Binder cod cod (Closure (A 1) cod) (Closure (A 1) cod)
+  | ClosureEqQuotientY EnvEntry EnvEntry cod cod (Closure (A 2) cod) (Closure (A 2) cod)
+  | ClosureEqQuotientX EnvEntry Binder cod cod (Closure (A 2) cod) (Closure (A 2) cod)
+  | ClosureEqQuotient Binder Binder cod cod (Closure (A 2) cod) (Closure (A 2) cod)
+  | ClosureEqPair Binder (Closure (A 1) cod) EnvEntry EnvEntry cod cod
+  | ClosureCastPi cod cod (Closure (A 1) cod) (Closure (A 1) cod) VProp cod
 
-data Closure (n :: Nat) val cod where
-  Closure :: forall n val cod. Env val -> Term Ix -> Closure n val cod
-  Lift :: forall n val cod. cod -> Closure n val cod
-  LiftClosure :: forall n val cod. Closure n val cod -> Closure ('S n) val cod
-  Function :: forall n val cod. (val -> Closure n val cod) -> Closure ('S n) val cod
+data Closure (n :: Nat) cod where
+  Closure :: forall n cod. Env -> Term Ix -> Closure n cod
+  Lift :: forall n cod. cod -> Closure n cod
+  SubstClosure :: forall n cod. EnvEntry -> Closure ('S n) cod -> Closure ('S n) cod
+  DefunBase :: forall cod. EnvEntry -> Defun cod -> Closure 'Z cod
+  Defun :: forall cod. Defun cod -> Closure ('S 'Z) cod
 
-class Applicative f => ClosureApply f (n :: Nat) cl val cod | val cod cl -> f where
-  app :: ([(BD, val)] -> Term Ix -> f cod) -> Closure n val cod -> cl
-  makeFnClosure :: PushArgument f => cl -> f (Closure n val cod)
+class Monad m => ClosureEval m cod where
+  closureEval :: Env -> Term Ix -> m cod
+  closureDefunEval :: Defun cod -> EnvEntry -> m cod
 
-instance Applicative f => ClosureApply f 'Z (f cod) val cod where
-  app eval (Closure env t) = eval env t
-  app _ (Lift v) = pure v
+class Monad m => ClosureApply m (n :: Nat) cl cod | cod cl -> m, m n cod -> cl where
+  app :: ClosureEval m cod => Closure n cod -> cl
 
-  makeFnClosure v = Lift <$> v
+instance Monad m => ClosureApply m 'Z (m cod) cod where
+  app (Closure env t) = closureEval env t
+  app (Lift v) = pure v
+  app (DefunBase v defun) = do
+    closureDefunEval defun v
 
-instance ClosureApply f n res val cod => ClosureApply f ('S n) (val -> res) val cod where
-  app eval (Closure env t) u = app eval (Closure @n (env :> (Bound, u)) t)
-  app eval (Lift v) _ = app eval (Lift @n v)
-  app eval (LiftClosure cl) _ = app eval cl
-  app eval (Function f) u = app eval (f u)
-
-  makeFnClosure f = Function <$> push (makeFnClosure . f)
-
-appOne :: Closure ('S n) val cod -> val -> Closure n val cod
-appOne (Closure env t) u = Closure (env :> (Bound, u)) t
-appOne (Lift v) _ = Lift v
-appOne (LiftClosure cl) _ = cl
-appOne (Function f) u = f u
+instance ClosureApply m n res cod => ClosureApply m ('S n) (EnvEntry -> res) cod where
+  app (Closure env t) u = app @m @n @res @cod (Closure @n (env :> (Bound, u)) t)
+  app (Lift v) _ = app (Lift @n v)
+  app (SubstClosure v cl) _ = app cl v
+  app (Defun f) u = app (DefunBase u f)
 
 type family A n where
   A n = FromGHC n
 
-data ValProp = ValProp
-  { val :: Val
-  , prop :: VProp
-  }
+var :: Sort -> Lvl -> EnvEntry
+var Relevant lvl = Val (VVar lvl) (PVar lvl)
+var Irrelevant lvl = Prop (PVar lvl)
+var (SortMeta m) _ = absurd m
 
-embedProp :: VProp -> ValProp
-embedProp p = ValProp {val = VProp p, prop = p}
-
-var :: Lvl -> ValProp
-var lvl = ValProp {val = VVar lvl, prop = PVar lvl}
+varR, varP :: Lvl -> EnvEntry
+varR = var Relevant
+varP = var Irrelevant
 
 type VTy = Val
 
-type ValClosure n = Closure n ValProp Val
+type ValClosure n = Closure n Val
 
-type PropClosure n = Closure n VProp VProp
+type PropClosure n = Closure n VProp
+
+data VAppElim
+  = VAppR Val
+  | VAppP VProp
 
 -- Note that [~] is an eliminator for the universe, however it does not
 -- have a single point on which it might block. Therefore, it cannot be an
 -- eliminator in a spine
 data VElim
-  = VApp Val
+  = VAppElim VAppElim
   | VNElim Binder (ValClosure (A 1)) Val Binder Binder (ValClosure (A 2))
   | VFst
   | VSnd
@@ -120,9 +147,18 @@ data VElim
   | VJ VTy Val Binder Binder (ValClosure (A 2)) Val Val
   | VBoxElim
   | VMatch Binder (ValClosure (A 1)) [(Name, Binder, Binder, ValClosure (A 2))]
+  | VMatchUniform Binder (ValClosure (A 1)) [(Name, Binder, ValClosure (A 1))]
+
+pattern VApp :: Val -> VElim
+pattern VApp v = VAppElim (VAppR v)
+
+pattern VAppProp :: VProp -> VElim
+pattern VAppProp v = VAppElim (VAppP v)
+
+{-# COMPLETE VApp, VAppProp, VNElim, VFst, VSnd, VQElim, VJ, VBoxElim, VMatch, VMatchUniform #-}
 
 showElimHead :: VElim -> String
-showElimHead (VApp {}) = "<application>"
+showElimHead (VAppElim {}) = "<application>"
 showElimHead (VNElim {}) = "<ℕ-elim>"
 showElimHead VFst = "<fst>"
 showElimHead VSnd = "<snd>"
@@ -130,13 +166,14 @@ showElimHead (VQElim {}) = "<Q-elim>"
 showElimHead (VJ {}) = "<J>"
 showElimHead VBoxElim = "<▢-elim>"
 showElimHead (VMatch {}) = "<match>"
+showElimHead (VMatchUniform {}) = "<match>"
 
 type VSpine = [VElim]
 
 data Val
   = VNeutral Val VSpine
   | VRigid Lvl
-  | VFlex MetaVar (Env ValProp)
+  | VFlex MetaVar Env
   | VU Relevance
   | VLambda Binder (ValClosure (A 1))
   | VPi Relevance Binder VTy (ValClosure (A 1))
@@ -146,7 +183,6 @@ data Val
   | VExists Binder VTy (ValClosure (A 1))
   | VAbort VTy VProp
   | VEmpty
-  | VProp VProp
   | VUnit
   | VEq Val VTy Val
   | VCast VTy VTy VProp Val
@@ -175,9 +211,9 @@ data Val
   | VId VTy Val Val
   | VCons Name Val VProp
   | VFLift Val Val
-  | VFmap Val Val Val Val Val Val
-  | VFixedPoint VTy Binder Binder Binder Binder Binder (ValClosure (A 4)) (ValClosure (A 5)) (Maybe Val)
-  | VMu Tag Name VTy Binder [(Name, (Relevance, Binder, ValClosure (A 2), ValClosure (A 3)))] (Maybe VFunctorInstance) (Maybe Val)
+  | VFmap Val Val Val Val (Maybe Val) Val
+  | VFixedPoint VTy Binder Binder Binder Binder Binder (ValClosure (A 4)) (ValClosure (A 5)) (Maybe VAppElim)
+  | VMu Tag Name VTy Binder [(Name, (Relevance, Binder, ValClosure (A 2), ValClosure (A 3)))] (Maybe VFunctorInstance) (Maybe VAppElim)
   | VBoxProof VProp
   | VBox Val
 
@@ -186,7 +222,7 @@ data VFunctorInstance = VFunctorInstance Binder Binder Binder Binder Binder (Val
 pattern VVar :: Lvl -> Val
 pattern VVar lvl = VNeutral (VRigid lvl) []
 
-pattern VMeta :: MetaVar -> Env ValProp -> Val
+pattern VMeta :: MetaVar -> Env -> Val
 pattern VMeta mv env = VNeutral (VFlex mv env) []
 
 pattern VFun :: Relevance -> VTy -> VTy -> VTy
@@ -197,7 +233,7 @@ pattern VAnd a b = VExists Hole a (Lift b)
 
 data VProp
   = PVar Lvl
-  | PMeta MetaVar (Env VProp)
+  | PMeta MetaVar Env
   | PU Relevance
   | PLambda Binder (PropClosure (A 1))
   | PApp VProp VProp
@@ -239,11 +275,14 @@ data VProp
   | PIn VProp
   | POut VProp
   | PFLift VProp VProp
-  | PFmap VProp VProp VProp VProp VProp VProp
+  | PFmap VProp VProp VProp VProp (Maybe VProp) VProp
   | PMatch VProp Binder (PropClosure (A 1)) [(Name, Binder, Binder, PropClosure (A 2))]
-  | PFixedPoint VProp Binder Binder Binder Binder Binder (PropClosure (A 4)) (PropClosure (A 5))
+  | PMatchUniform VProp Binder (PropClosure (A 1)) [(Name, Binder, PropClosure (A 1))]
+  | PFixedPoint VProp Binder Binder Binder (Maybe Binder) Binder (PropClosure (A 4)) (PropClosure (A 5))
   | PMu Tag Name VProp Binder [(Name, Relevance, Binder, PropClosure (A 2), PropClosure (A 3))] (Maybe PFunctorInstance)
+  | PMuUniform Tag Name [(Name, PropClosure (A 2))] (Maybe PFunctorInstanceUniform)
   | PLet Binder VProp VProp (PropClosure (A 1))
   | PAnnotation VProp VProp
 
 data PFunctorInstance = PFunctorInstance Binder Binder Binder Binder Binder (PropClosure (A 6))
+data PFunctorInstanceUniform = PFunctorInstanceUniform Binder Binder Binder Binder (PropClosure (A 5))

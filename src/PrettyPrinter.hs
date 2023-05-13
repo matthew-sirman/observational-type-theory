@@ -60,13 +60,19 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
       | debug = chr '{' . str t . chr '}'
       | otherwise = id
 
+    showAsAlias, showViewAlias :: Binder -> ShowS
+    showAsAlias Hole = id
+    showAsAlias g = str " as " . binder g
+    showViewAlias Hole = id
+    showViewAlias v = str " view " . binder v
+
     go :: Int -> [Binder] -> Term v -> ShowS
     go _ ns (Var x) = tag "V" . showsVar x ns
     go _ _ (U s) = shows s
     go prec ns (Lambda x e) =
       let domain = chr 'λ' . binder x
        in par prec precLet (domain . dot . go precLet (ns :> x) e)
-    go prec ns (App t u) =
+    go prec ns (App _ t u) =
       tag "A" . par prec precApp (go precApp ns t . space . go precAtom ns u)
     go prec ns (Pi _ Hole a b) =
       let domain = go precApp ns a
@@ -176,8 +182,6 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
       par prec precApp (str c . space . showParen True (go precLet ns t . comma . go precLet ns e))
     go prec ns (In t) =
       par prec precApp (str "in " . go precAtom ns t)
-    go prec ns (Out t) =
-      par prec precApp (str "out " . go precAtom ns t)
     go prec ns (FLift f a) =
       par prec precApp (str "lift [" . go precLet ns f . str "] " . go precAtom ns a)
     go prec ns (Fmap f a b g p x) =
@@ -187,6 +191,13 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
           p' = go precLet ns p
           x' = go precLet ns x
           args = showParen True (sep comma [a', b', g', p', x'])
+       in par prec precApp (str "fmap [" . go precLet ns f . str "]" . args)
+    go prec ns (FmapUniform f a b g x) =
+      let a' = go precLet ns a
+          b' = go precLet ns b
+          g' = go precLet ns g
+          x' = go precLet ns x
+          args = showParen True (sep comma [a', b', g', x'])
        in par prec precApp (str "fmap [" . go precLet ns f . str "]" . args)
     go prec ns (Match t x p bs) =
       let t' = go precLet ns t
@@ -198,18 +209,28 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
         branch (cons, x, e, t) =
           let cons' = str cons . str " " . showParen True (binder x . comma . binder e)
            in str "| " . cons' . str " -> " . go precLet (ns :> x :> e) t
+    go prec ns (MatchUniform t x p bs) =
+      let t' = go precLet ns t
+          p' = go precLet (ns :> x) p
+          bs' = foldr ((.) . (str "\n" .) . branch) id bs
+       in par prec precLet (str "match " . t' . str " as " . binder x . str " return " . p' . str " with" . bs')
+      where
+        branch :: (Name, Binder, Term v) -> ShowS
+        branch (cons, x, t) =
+          let cons' = str cons . str " " . binder x
+           in str "| " . cons' . str " -> " . go precLet (ns :> x) t
     go prec ns (FixedPoint i g v f p x c t) =
       let i' = go precLet ns i . showAsAlias g . showViewAlias v
           args = sep space (fmap binder [f, p, x])
           c' = go precLet (ns :> g :> v :> p :> x) c
           t' = go precLet (ns :> g :> v :> f :> p :> x) t
        in par prec precLet (str "fix [" . i' . str "] " . args . str " : " . c' . str " = " . t')
-      where
-        showAsAlias, showViewAlias :: Binder -> ShowS
-        showAsAlias Hole = id
-        showAsAlias g = str " as " . binder g
-        showViewAlias Hole = id
-        showViewAlias v = str " view " . binder v
+    go prec ns (FixedPointUniform i g v f x c t) =
+      let i' = go precLet ns i . showAsAlias g . showViewAlias v
+          args = sep space (fmap binder [f, x])
+          c' = go precLet (ns :> g :> v :> x) c
+          t' = go precLet (ns :> g :> v :> f :> x) t
+       in par prec precLet (str "fix [" . i' . str "] " . args . str " : " . c' . str " = " . t')
     go prec ns (Mu _ f t x cs functor) =
       let x' = str "λ" . binder x
           cs' = chr '[' . sep (str "; ") (fmap showCons cs) . chr ']'
@@ -229,6 +250,20 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
         showFunctor (Just (FunctorInstanceF a b g p x t)) =
           let args = sep space [binder a, binder b, binder g, binder p, binder x]
               t' = go precLet (ns :> Name f :> a :> b :> g :> p :> x) t
+           in str "\n  functor " . args . str " = " . t'
+    go prec ns (MuUniform _ f cs functor) =
+      let cs' = chr '[' . sep (str "; ") (fmap showCons cs) . chr ']'
+       in par prec precLet (str "μ" . str f . dot . cs' . showFunctor functor)
+      where
+        showCons :: (Name, Type v, Name) -> ShowS
+        showCons (ci, bi, gi) =
+          let bi' = go precApp (ns :> Name f) bi
+           in str ci . str " : " . bi' . str " → " . str gi
+        showFunctor :: Maybe (FunctorInstanceUniform v) -> ShowS
+        showFunctor Nothing = id
+        showFunctor (Just (FunctorInstanceUniformF a b g x t)) =
+          let args = sep space [binder a, binder b, binder g, binder x]
+              t' = go precLet (ns :> Name f :> a :> b :> g :> x) t
            in str "\n  functor " . args . str " = " . t'
     go prec ns (Let x a t u) =
       let a' = go precLet ns a

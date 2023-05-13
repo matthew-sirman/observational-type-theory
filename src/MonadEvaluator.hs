@@ -14,11 +14,9 @@ module MonadEvaluator (
   emptyMetaContext,
   lookupMeta,
   lookupSortMeta,
-  makeFnClosure',
 ) where
 
 import Syntax
-import Value
 
 import Control.Lens hiding (Context, Empty, Refl, (:>))
 import Control.Monad.Reader
@@ -66,11 +64,3 @@ lookupSortMeta (MetaVar m) = evaluate $ do
 
 instance MonadEvaluator Evaluator where
   evaluate = id
-
-instance PushArgument Evaluator where
-  push f = do
-    ctx <- ask
-    pure (\a -> runEvaluator (f a) ctx)
-
-makeFnClosure' :: (MonadEvaluator m, ClosureApply Evaluator n cl val cod) => cl -> m (Closure n val cod)
-makeFnClosure' c = evaluate (makeFnClosure c)
