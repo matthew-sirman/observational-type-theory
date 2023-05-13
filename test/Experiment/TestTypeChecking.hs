@@ -1,5 +1,6 @@
 {-# LANGUAGE MonoLocalBinds #-}
 {-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE ViewPatterns #-}
 
 module Experiment.TestTypeChecking where
 
@@ -244,7 +245,7 @@ tm15 =
                                y),
                       z)
     in
-    *
+    !
   |]
 
 tm16 :: String
@@ -479,7 +480,7 @@ tm18 =
          -> (λe. f A t u (g A t u e)) ~[(_ :U Id(A, t, u)) -> Id(A, t, u)] (λe. e) =
       λA. λt. λu. λe. *
     in
-    *
+    !
   |]
 
 tm19 :: String
@@ -575,12 +576,12 @@ tm29 =
   [r|
     let Vec : U → ℕ → U =
       λA. μF : ℕ → U. λn.
-        ['Nil : ⊤ → F 0
-        ; 'Cons : (m :U Σ(m : ℕ). A × F m) → F (S (fst m))
+        [ 'Nil : 1 → F 0
+        ; 'Cons : (m : Σ(m : ℕ). A × F m) → F (S (fst m))
         ]
     in
     -- ('Cons (S (S 0); (0; (<refl (S 0)>; 'Nil (<refl 0>; <*>)))) : Vec ℕ (S 0))
-    ('Cons ((0; (S (S 0); 'Nil (*, *))), *) : Vec ℕ (S 0))
+    ('Cons ((0; (S (S 0); 'Nil (!, *))), *) : Vec ℕ (S 0))
   |]
 
 tm30 :: String
@@ -588,15 +589,15 @@ tm30 =
   [r|
     let Vec : U → ℕ → U =
       λA. μF : ℕ → U. λn.
-        ['Nil : ⊤ → F 0
-        ; 'Cons : (m :U Σ(m : ℕ). A × F m) → F (S (fst m))
+        [ 'Nil : 1 → F 0
+        ; 'Cons : (m : Σ(m : ℕ). A × F m) → F (S (fst m))
         ]
     in
     let empty : Vec ℕ 0 =
-      'Nil (*, *)
+      'Nil (!, *)
     in
     let ls : Vec ℕ (S 0) =
-      'Cons ((0; (S (S 0); 'Nil (*, *))), *)
+      'Cons ((0; (S (S 0); 'Nil (!, *))), *)
     in
     match ls as _ return ℕ with
       | 'Cons (x, _) -> fst x
@@ -610,7 +611,7 @@ tm31 =
     -- inductive type, but could possibly be simplified by having ['Refl : [x ~ y]]
     let IEq : (A :U U) → (A × A) → U =
       λA. μIEq : (A × A) → U. λx_y.
-        ['Refl : (a :U A) → IEq (a; a)]
+        ['Refl : (a : A) → IEq (a; a)]
     in
     -- This implementation of J does not work, as we cannot transport observational
     -- equality into a relevant universe.
@@ -632,7 +633,7 @@ tm32 :: String
 tm32 =
   [r|
     let Nat' : U =
-      (μN : [⊤] → U. λ_. ['Zero : ⊤ → N <*>; 'Succ : N <*> → N <*>]) <*>
+      (μN : 1 → U. λ_. ['Zero : 1 → N !; 'Succ : N ! → N !]) !
     in
     (λn. 'Succ (n, *) ~[Nat'] 'Succ (n, *) : Nat' → Ω)
   |]
@@ -642,8 +643,8 @@ tm33 =
   [r|
     let Vec : U → (ℕ × ℕ) → U =
       λA. μF : (ℕ × ℕ) → U. λn.
-        ['Nil : ⊤ → F (0; 0)
-        ; 'Cons : (m :U Σ(m : ℕ). A × F (m; 0)) → F (S (fst m); 0)
+        [ 'Nil : 1 → F (0; 0)
+        ; 'Cons : (m : Σ(m : ℕ). A × F (m; 0)) → F (S (fst m); 0)
         ]
     in
     Vec ℕ (0; (S 0))
@@ -652,39 +653,39 @@ tm33 =
 tm34 :: String
 tm34 =
   [r|
-    let List : U → [⊤] → U =
-      λA. μF : [⊤] → U. λ_. ['Nil : ⊤ → F <*>; 'Cons : (A × F <*>) → F <*>]
+    let List : U → 1 → U =
+      λA. μF : 1 → U. λ_. ['Nil : 1 → F !; 'Cons : (A × F !) → F !]
     in
-    let generate : (A :U U) → (ℕ → A) → ℕ → List A <*> =
-      λA. λf. λn. rec(_. List A <*>, 'Nil (*, *), k ls. 'Cons ((f k; ls), *), n)
+    let generate : (A :U U) → (ℕ → A) → ℕ → List A ! =
+      λA. λf. λn. rec(_. List A !, 'Nil (!, *), k ls. 'Cons ((f k; ls), *), n)
     in
-    let length : (A :U U) → List A <*> → ℕ =
+    let length : (A :U U) → List A ! → ℕ =
       λA. (fix [List A as G] length _ x : ℕ =
         match x as _ return ℕ with
           | 'Nil (_, _) → 0
           | 'Cons (ls, _) →
-            let tl : G <*> = snd ls in
-            S (length <*> tl)) <*>
+            let tl : G ! = snd ls in
+            S (length ! tl)) !
     in
-    let map : (A :U U) → (B :U U) → (A → B) → List A <*> → List B <*> =
-      λA. λB. λf. (fix [List A as G] mapf _ x : List B <*> =
-        match x as _ return List B <*> with
-          | 'Nil (_, _) → 'Nil (*, *)
+    let map : (A :U U) → (B :U U) → (A → B) → List A ! → List B ! =
+      λA. λB. λf. (fix [List A as G] mapf _ x : List B ! =
+        match x as _ return List B ! with
+          | 'Nil (_, _) → 'Nil (!, *)
           | 'Cons (ls, _) →
             let a : A = fst ls in
-            let tl : G <*> = snd ls in
-            'Cons ((f a; mapf <*> tl), *)) <*>
+            let tl : G ! = snd ls in
+            'Cons ((f a; mapf ! tl), *)) !
     in
-    let foldr : (A :U U) → (B :U U) → B → (A → B → B) → List A <*> → B =
+    let foldr : (A :U U) → (B :U U) → B → (A → B → B) → List A ! → B =
       λA. λB. λnil. λcons. (fix [List A as G] fold _ x : B =
         match x as _ return B with
           | 'Nil (_, _) → nil
           | 'Cons (ls, _) →
             let a : A = fst ls in
-            let tl : G <*> = snd ls in
-            cons a (fold <*> tl)) <*>
+            let tl : G ! = snd ls in
+            cons a (fold ! tl)) !
     in
-    let ls : List ℕ <*> =
+    let ls : List ℕ ! =
       generate _ (λ_. 0) (S (S 0))
     in
     -- length _ ls
@@ -697,17 +698,17 @@ tm35 =
   [r|
     let Vec : U → ℕ → U =
        λA. μF : ℕ → U. λn.
-         ['Nil : ⊤ → F 0
-         ; 'Cons : (m :U Σ(m : ℕ). A × F m) → F (S (fst m))
+         [ 'Nil : 1 → F 0
+         ; 'Cons : (m : Σ(m : ℕ). A × F m) → F (S (fst m))
          ]
     in
     let generate : (A :U U) → (ℕ → A) → (n :U ℕ) → Vec A n =
-      λA. λf. λn. rec(k. Vec A k, 'Nil (*, *), k vs. 'Cons ((k; (f k; vs)), refl k), n)
+      λA. λf. λn. rec(k. Vec A k, 'Nil (!, *), k vs. 'Cons ((k; (f k; vs)), refl k), n)
     in
     let map : (A :U U) → (B :U U) → (A → B) → (n :U ℕ) → Vec A n → Vec B n =
       λA. λB. λf. fix [Vec A as G] mapf n x : Vec B n =
         match x as _ return Vec B n with
-          | 'Nil (_, pf) → 'Nil (*, pf)
+          | 'Nil (_, pf) → 'Nil (!, pf)
           | 'Cons (ls, pf) →
             let m : ℕ = fst ls in
             let a : A = fst (snd ls) in
@@ -724,7 +725,6 @@ tm35 =
             let tl : G m = snd (snd ls) in
             cons a (fold m tl)
     in
-    -- map _ [⊤] (λx. <*>) _ (generate _ (λn. n) (S (S 0)))
     foldr _ _ 0 (λ_. λn. S n) _ (generate _ (λn. n) (S (S (S 0))))
   |]
 
@@ -751,88 +751,88 @@ tm37 =
     in
     let Vec : U → ℕ → U =
       λA. μVecA : ℕ → U. λn.
-        [ 'Nil : ⊤ → VecA 0
-        ; 'Cons : (data :U Σ(m : ℕ). A × VecA m) → VecA (S (fst data))
+        [ 'Nil : 1 → VecA 0
+        ; 'Cons : (data : Σ(m : ℕ). A × VecA m) → VecA (S (fst data))
         ]
     in
     let flip : (A :U U) → (n :U ℕ) → (m :U ℕ) → Vec A (add n m) → Vec A (add m n) =
       λA. λn. λm. λv. cast(Vec A (add n m), Vec A (add m n), add_comm n m, v)
     in
-    -- flip ℕ 0 (S 0) ('Cons ((0; (S (S (S 0)); 'Nil (*, *))), *))
+    -- flip ℕ 0 (S 0) ('Cons ((0; (S (S (S 0)); 'Nil (!, *))), *))
     add_comm (S (S 0)) (S 0)
   |]
 
 tm38 :: String
 tm38 =
   [r|
-    let List : U → [⊤] → U =
-      λA. μList : [⊤] → U. λp.
-        [ 'Nil : ⊤ → List p
-        ; 'Cons : (A × List p) → List p
+    let List : U → 1 → U =
+      λA. μList : 1 → U. λ_.
+        [ 'Nil : 1 → List !
+        ; 'Cons : (A × List !) → List !
         ]
         functor X Y f p x =
           match x as _ return (lift [List] Y) p with
-          | 'Nil (_, _) → 'Nil (*, *)
+          | 'Nil (_, _) → 'Nil (!, *)
           | 'Cons (xs, _) → 'Cons ((fst xs; f p (snd xs)), *)
     in
-    let generate : (A :U U) → (ℕ → A) → (n :U ℕ) → List A <*> =
-      λA. λf. λn. rec(k. List A <*>, 'Nil (*, *), k vs. 'Cons ((f k; vs), *), n)
+    let generate : (A :U U) → (ℕ → A) → (n :U ℕ) → List A ! =
+      λA. λf. λn. rec(k. List A !, 'Nil (!, *), k vs. 'Cons ((f k; vs), *), n)
     in
-    let length : (A :U U) → (p :U [⊤]) → List A p → ℕ =
-      λA. fix [List A] length p xs : ℕ =
+    let length : (A :U U) → (p :U 1) → List A p → ℕ =
+      λA. fix [List A] length _ xs : ℕ =
         match xs as _ return ℕ with
         | 'Nil (_, _) → 0
-        | 'Cons (xs, _) → S (length p (snd xs))
+        | 'Cons (xs, _) → S (length ! (snd xs))
     in
-    let range : (A :U U) → (p :U [⊤]) → List A p → List ℕ p =
+    let range : (A :U U) → (p :U 1) → List A p → List ℕ p =
       λA. fix [List A as ListA view ι] range p xs : List ℕ p =
         match xs as _ return List ℕ p with
-        | 'Nil (_, _) → 'Nil (*, *)
+        | 'Nil (_, _) → 'Nil (!, *)
         | 'Cons (xs, _) → 'Cons ((length A p (ι p (snd xs)); range p (snd xs)), *)
     in
-    range ℕ <*> (generate ℕ (λ_. 0) (S (S (S (S (S 0))))))
+    range ℕ ! (generate ℕ (λ_. 0) (S (S (S (S (S 0))))))
   |]
 
 tm39 :: String
 tm39 =
   [r|
-    let List : U → [⊤] → U =
-      λX. μList : [⊤] → U. λp.
-        [ 'Nil : ⊤ → List p
-        ; 'Cons : (X × List p) → List p
+    let List : U → 1 → U =
+      λX. μList : 1 → U. λ_.
+        [ 'Nil : 1 → List !
+        ; 'Cons : (X × List !) → List !
         ]
-        functor A B f p x =
+        functor A B f _ x =
           match x as _ return
-            (μList : [⊤] → U. λp.
-              [ 'Nil : ⊤ → List p
-              ; 'Cons : (X × B p) → List p
-              ]) p
+            (μList : 1 → U. λ_.
+              [ 'Nil : 1 → List !
+              ; 'Cons : (X × B !) → List !
+              ]) !
           with
-          | 'Nil (_, _) → 'Nil (*, *)
-          | 'Cons (ls, _) → 'Cons ((fst ls; f p (snd ls)), *)
+          | 'Nil (_, _) → 'Nil (!, *)
+          | 'Cons (ls, _) → 'Cons ((fst ls; f ! (snd ls)), *)
     in
-    let F : (p :U [⊤]) → List ℕ p → U =
-      fix [List ℕ as ListN] F p ls : U =
+    let F : List ℕ ! → U =
+      (fix [List ℕ as ListN] F _ ls : U =
         match ls as _ return U with
-        | 'Nil (_, _) → [⊤]
-        | 'Cons (ls, _) → ℕ × F p (snd ls)
+        | 'Nil (_, _) → 1
+        | 'Cons (ls, _) → ℕ × F ! (snd ls)) !
     in
-    fix [List ℕ as ListN view ι] f p ls : F p (ι p ls) =
-      match ls as ls return F p (in (fmap [List ℕ](ListN, List ℕ, ι, p, ls))) with
-      | 'Nil (_, _) → <*>
-      | 'Cons (ls, _) → (fst ls; f p (snd ls))
+    fix [List ℕ as ListN view ι] f _ ls : F (ι ! ls) =
+      match ls as ls return F (in (fmap [List ℕ](ListN, List ℕ, ι, !, ls))) with
+      | 'Nil (_, _) → !
+      | 'Cons (ls, _) → (fst ls; f ! (snd ls))
   |]
 
 tm40 :: String
 tm40 =
   [r|
-    let List : U → ⊤ → U =
-      λX. μList : ⊤ → U. λ_.
-        [ 'Nil : ⊤ → List *
-        ; 'Cons : (X × List *) → List *
+    let List : U → 1 → U =
+      λX. μList : 1 → U. λ_.
+        [ 'Nil : 1 → List !
+        ; 'Cons : (X × List !) → List !
         ]
     in
-    cast(List ℕ *, List ℕ *, *, 'Nil (*, *))
+    cast(List ℕ !, List ℕ !, *, 'Nil (!, *))
   |]
 
 tm41 :: String
@@ -859,15 +859,17 @@ test input = do
       )
       emptyCheckState
   case result of
-    Right (t, tty, _) -> do
+    Right (t, tty, knownSort -> Just s) -> do
       putStrLn "Program:"
       putStrLn (prettyPrintTerm [] t)
       putStrLn "\nHas type:"
       putStrLn (prettyPrintTerm [] (runEvaluator (quote 0 tty) (_metaCtx mctx)))
       putStrLn "\nReduces to:"
-      putStrLn (prettyPrintTerm [] (runEvaluator (nbe [] t) (_metaCtx mctx)))
+      putStrLn (prettyPrintTerm [] (runEvaluator (nbe s [] t) (_metaCtx mctx)))
       putStrLn "\nMeta context:"
       print mctx
+    Right _ -> do
+      putStrLn "Program has unsolved sort; cannot be executed."
     Left () -> do
       putStrLn "\nMeta context:"
       print mctx
@@ -886,6 +888,11 @@ test input = do
        in do
             lift (printDiagnostic stdout True True 4 defaultStyle diagnostic')
             throw ()
+
+    knownSort :: Relevance -> Maybe Sort
+    knownSort Relevant = Just Relevant
+    knownSort Irrelevant = Just Irrelevant
+    knownSort _ = Nothing
 
 lexAll :: Alex [Token]
 lexAll = do

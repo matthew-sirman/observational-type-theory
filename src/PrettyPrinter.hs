@@ -60,13 +60,19 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
       | debug = chr '{' . str t . chr '}'
       | otherwise = id
 
+    showAsAlias, showViewAlias :: Binder -> ShowS
+    showAsAlias Hole = id
+    showAsAlias g = str " as " . binder g
+    showViewAlias Hole = id
+    showViewAlias v = str " view " . binder v
+
     go :: Int -> [Binder] -> Term v -> ShowS
     go _ ns (Var x) = tag "V" . showsVar x ns
     go _ _ (U s) = shows s
     go prec ns (Lambda x e) =
       let domain = chr 'λ' . binder x
        in par prec precLet (domain . dot . go precLet (ns :> x) e)
-    go prec ns (App t u) =
+    go prec ns (App _ t u) =
       tag "A" . par prec precApp (go precApp ns t . space . go precAtom ns u)
     go prec ns (Pi _ Hole a b) =
       let domain = go precApp ns a
@@ -172,12 +178,12 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
       par prec precApp (str "▢-elim(" . go precLet ns t . chr ')')
     go prec ns (Box a) =
       par prec precApp (str "▢" . go precAtom ns a)
+    go _ _ ROne = chr '!'
+    go _ _ RUnit = chr '1'
     go prec ns (Cons c t e) =
       par prec precApp (str c . space . showParen True (go precLet ns t . comma . go precLet ns e))
     go prec ns (In t) =
       par prec precApp (str "in " . go precAtom ns t)
-    go prec ns (Out t) =
-      par prec precApp (str "out " . go precAtom ns t)
     go prec ns (FLift f a) =
       par prec precApp (str "lift [" . go precLet ns f . str "] " . go precAtom ns a)
     go prec ns (Fmap f a b g p x) =
@@ -204,24 +210,18 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
           c' = go precLet (ns :> g :> v :> p :> x) c
           t' = go precLet (ns :> g :> v :> f :> p :> x) t
        in par prec precLet (str "fix [" . i' . str "] " . args . str " : " . c' . str " = " . t')
-      where
-        showAsAlias, showViewAlias :: Binder -> ShowS
-        showAsAlias Hole = id
-        showAsAlias g = str " as " . binder g
-        showViewAlias Hole = id
-        showViewAlias v = str " view " . binder v
     go prec ns (Mu _ f t x cs functor) =
       let x' = str "λ" . binder x
           cs' = chr '[' . sep (str "; ") (fmap showCons cs) . chr ']'
        in par prec precLet (str "μ" . str f . str " : " . go precLet ns t . dot . x' . dot . cs' . showFunctor functor)
       where
-        showCons :: (Name, Relevance, Binder, Type v, Name, Type v) -> ShowS
-        showCons (ci, _, Hole, bi, gi, ixi) =
+        showCons :: (Name, Binder, Type v, Name, Type v) -> ShowS
+        showCons (ci, Hole, bi, gi, ixi) =
           let bi' = go precApp (ns :> Name f :> x) bi
               ixi' = go precAtom (ns :> Name f :> x :> Hole) ixi
            in str ci . str " : " . bi' . str " → " . str gi . space . ixi'
-        showCons (ci, si, xi, bi, gi, ixi) =
-          let bi' = showParen True (binder xi . str " :" . shows si . space . go precLet (ns :> Name f :> x) bi)
+        showCons (ci, xi, bi, gi, ixi) =
+          let bi' = showParen True (binder xi . str " : " . go precLet (ns :> Name f :> x) bi)
               ixi' = go precAtom (ns :> Name f :> x :> xi) ixi
            in str ci . str " : " . bi' . str " → " . str gi . space . ixi'
         showFunctor :: Maybe (FunctorInstance v) -> ShowS

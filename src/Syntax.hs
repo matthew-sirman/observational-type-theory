@@ -15,6 +15,7 @@ module Syntax (
   Tag (..),
   RelevanceF (..),
   Relevance,
+  Sort,
   pattern SortHole,
   ULevel,
   TermF (..),
@@ -64,9 +65,10 @@ module Syntax (
   pattern BoxProof,
   pattern BoxElim,
   pattern Box,
+  pattern ROne,
+  pattern RUnit,
   pattern Cons,
   pattern In,
-  pattern Out,
   pattern FLift,
   pattern Fmap,
   pattern Match,
@@ -148,6 +150,8 @@ data RelevanceF meta
   | SortMeta meta
   deriving (Eq)
 
+type Sort = RelevanceF Void
+
 instance {-# OVERLAPS #-} Show (RelevanceF ()) where
   show Relevant = "U"
   show Irrelevant = "Ω"
@@ -165,12 +169,12 @@ pattern SortHole = SortMeta ()
 
 type Relevance = RelevanceF MetaVar
 
-data TermF proj meta tag v t
+data TermF sort meta tag v t
   = VarF v
   | -- Universe terms have a relevance and a level
     UF (RelevanceF meta)
   | LambdaF Binder t
-  | AppF t t
+  | AppF sort t t
   | -- Pi types are annotated with their domain type's relevance and level, and the co-domain level
     PiF (RelevanceF meta) Binder t t
   | ZeroF
@@ -178,8 +182,8 @@ data TermF proj meta tag v t
   | NElimF Binder t t Binder Binder t t
   | NatF
   | PropPairF t t
-  | FstF proj t
-  | SndF proj t
+  | FstF sort t
+  | SndF sort t
   | -- Existential types are annotated with their domain and co-domain levels
     ExistsF Binder t t
   | AbortF t t
@@ -216,14 +220,15 @@ data TermF proj meta tag v t
   | BoxProofF t
   | BoxElimF t
   | BoxF t
+  | ROneF
+  | RUnitF
   | ConsF Name t t
   | InF t
-  | OutF t
   | FLiftF t t
   | FmapF t t t t t t
   | MatchF t Binder t [(Name, Binder, Binder, t)]
   | FixedPointF t Binder Binder Binder Binder Binder t t
-  | MuF tag Name t Binder [(Name, RelevanceF meta, Binder, t, Name, t)] (Maybe (FunctorInstanceF t))
+  | MuF tag Name t Binder [(Name, Binder, t, Name, t)] (Maybe (FunctorInstanceF t))
   | -- Annotations
     LetF Binder t t t
   | AnnotationF t t
@@ -243,7 +248,7 @@ pattern HoleF = MetaF ()
 
 {-# COMPLETE R #-}
 
-type Term v = Fix (TermF (RelevanceF Void) MetaVar Tag v)
+type Term v = Fix (TermF Sort MetaVar Tag v)
 
 type Type v = Term v
 
@@ -258,8 +263,8 @@ pattern U s = Fix (UF s)
 pattern Lambda :: Binder -> Term v -> Term v
 pattern Lambda x e = Fix (LambdaF x e)
 
-pattern App :: Term v -> Term v -> Term v
-pattern App t u = Fix (AppF t u)
+pattern App :: Sort -> Term v -> Term v -> Term v
+pattern App s t u = Fix (AppF s t u)
 
 pattern Pi :: Relevance -> Binder -> Type v -> Type v -> Type v
 pattern Pi s x a b = Fix (PiF s x a b)
@@ -391,14 +396,17 @@ pattern BoxElim t = Fix (BoxElimF t)
 pattern Box :: Type v -> Type v
 pattern Box a = Fix (BoxF a)
 
+pattern ROne :: Term v
+pattern ROne = Fix ROneF
+
+pattern RUnit :: Type v
+pattern RUnit = Fix RUnitF
+
 pattern Cons :: Name -> Term v -> Term v -> Term v
 pattern Cons c t e = Fix (ConsF c t e)
 
 pattern In :: Term v -> Term v
 pattern In t = Fix (InF t)
-
-pattern Out :: Term v -> Term v
-pattern Out t = Fix (OutF t)
 
 pattern FLift :: Type v -> Type v -> Term v
 pattern FLift f a = Fix (FLiftF f a)
@@ -412,7 +420,7 @@ pattern Match t x p bs = Fix (MatchF t x p bs)
 pattern FixedPoint :: Type v -> Binder -> Binder -> Binder -> Binder -> Binder -> Type v -> Term v -> Term v
 pattern FixedPoint i g v f p x c t = Fix (FixedPointF i g v f p x c t)
 
-pattern Mu :: Tag -> Name -> Type v -> Binder -> [(Name, Relevance, Binder, Type v, Name, Type v)] -> Maybe (FunctorInstance v) -> Type v
+pattern Mu :: Tag -> Name -> Type v -> Binder -> [(Name, Binder, Type v, Name, Term v)] -> Maybe (FunctorInstance v) -> Type v
 pattern Mu tag f t x cs functor = Fix (MuF tag f t x cs functor)
 
 pattern Let :: Binder -> Type v -> Term v -> Term v -> Term v
@@ -463,9 +471,10 @@ pattern Meta v = Fix (MetaF v)
   , BoxProof
   , BoxElim
   , Box
+  , ROne
+  , RUnit
   , Cons
   , In
-  , Out
   , FLift
   , Fmap
   , Match
@@ -483,7 +492,7 @@ instance Functor (TermF p m t v) where
   fmap _ (VarF x) = VarF x
   fmap _ (UF s) = UF s
   fmap f (LambdaF x e) = LambdaF x (f e)
-  fmap f (AppF t u) = AppF (f t) (f u)
+  fmap f (AppF s t u) = AppF s (f t) (f u)
   fmap f (PiF s x a b) = PiF s x (f a) (f b)
   fmap _ ZeroF = ZeroF
   fmap f (SuccF n) = SuccF (f n)
@@ -517,14 +526,15 @@ instance Functor (TermF p m t v) where
   fmap f (BoxProofF e) = BoxProofF (f e)
   fmap f (BoxElimF t) = BoxElimF (f t)
   fmap f (BoxF a) = BoxF (f a)
+  fmap _ ROneF = ROneF
+  fmap _ RUnitF = RUnitF
   fmap f (ConsF c t e) = ConsF c (f t) (f e)
   fmap f (InF t) = InF (f t)
-  fmap f (OutF t) = OutF (f t)
   fmap f (FLiftF f' a) = FLiftF (f f') (f a)
   fmap f (FmapF f' a b g p x) = FmapF (f f') (f a) (f b) (f g) (f p) (f x)
   fmap f (MatchF t x p bs) = MatchF (f t) x (f p) (fmap (fmap f) bs)
   fmap f (FixedPointF i g v f' p x c t) = FixedPointF (f i) g v f' p x (f c) (f t)
-  fmap f (MuF tag g t x cs functor) = MuF tag g (f t) x (fmap (\(ci, si, xi, ti, gi, ixi) -> (ci, si, xi, f ti, gi, f ixi)) cs) (fmap (fmap f) functor)
+  fmap f (MuF tag g t x cs functor) = MuF tag g (f t) x (fmap (\(ci, xi, ti, gi, ixi) -> (ci, xi, f ti, gi, f ixi)) cs) (fmap (fmap f) functor)
   fmap f (LetF x a t u) = LetF x (f a) (f t) (f u)
   fmap f (AnnotationF t a) = AnnotationF (f t) (f a)
   fmap _ (MetaF m) = MetaF m
@@ -536,7 +546,7 @@ instance Foldable (TermF p m t v) where
   foldr _ e (VarF _) = e
   foldr _ e (UF _) = e
   foldr f e (LambdaF _ t) = f t e
-  foldr f e (AppF t u) = (f t . f u) e
+  foldr f e (AppF _ t u) = (f t . f u) e
   foldr f e (PiF _ _ a b) = (f a . f b) e
   foldr _ e ZeroF = e
   foldr f e (SuccF n) = f n e
@@ -569,14 +579,15 @@ instance Foldable (TermF p m t v) where
   foldr f e (BoxProofF t) = f t e
   foldr f e (BoxElimF t) = f t e
   foldr f e (BoxF a) = f a e
+  foldr _ e ROneF = e
+  foldr _ e RUnitF = e
   foldr f e (ConsF _ t p) = (f t . f p) e
   foldr f e (InF t) = f t e
-  foldr f e (OutF t) = f t e
   foldr f e (FLiftF f' a) = (f f' . f a) e
   foldr f e (FmapF f' a b g p x) = (f f' . f a . f b . f g . f p . f x) e
   foldr f e (MatchF t _ p bs) = (f t . f p) (foldr (\(_, _, _, b) e -> f b e) e bs)
   foldr f e (FixedPointF i _ _ _ _ _ c t) = (f i . f c . f t) e
-  foldr f e (MuF _ _ t _ cs functor) = f t (foldr (\(_, _, _, bi, _, ixi) e -> (f bi . f ixi) e) (foldr (flip (foldr f)) e functor) cs)
+  foldr f e (MuF _ _ t _ cs functor) = f t (foldr (\(_, _, bi, _, ixi) e -> (f bi . f ixi) e) (foldr (flip (foldr f)) e functor) cs)
   foldr f e (LetF _ a t u) = (f a . f t . f u) e
   foldr f e (AnnotationF t a) = (f t . f a) e
   foldr _ e (MetaF _) = e
@@ -588,7 +599,7 @@ instance Traversable (TermF p m t v) where
   traverse _ (VarF x) = pure (VarF x)
   traverse _ (UF s) = pure (UF s)
   traverse f (LambdaF x e) = LambdaF x <$> f e
-  traverse f (AppF t u) = AppF <$> f t <*> f u
+  traverse f (AppF s t u) = AppF s <$> f t <*> f u
   traverse f (PiF s x a b) = PiF s x <$> f a <*> f b
   traverse _ ZeroF = pure ZeroF
   traverse f (SuccF n) = SuccF <$> f n
@@ -625,15 +636,16 @@ instance Traversable (TermF p m t v) where
   traverse f (BoxProofF e) = BoxProofF <$> f e
   traverse f (BoxElimF t) = BoxElimF <$> f t
   traverse f (BoxF a) = BoxF <$> f a
+  traverse _ ROneF = pure ROneF
+  traverse _ RUnitF = pure RUnitF
   traverse f (ConsF c t e) = ConsF c <$> f t <*> f e
   traverse f (InF t) = InF <$> f t
-  traverse f (OutF t) = OutF <$> f t
   traverse f (FLiftF f' a) = FLiftF <$> f f' <*> f a
   traverse f (FmapF f' a b g p x) = FmapF <$> f f' <*> f a <*> f b <*> f g <*> f p <*> f x
   traverse f (MatchF t x p bs) = MatchF <$> f t <*> pure x <*> f p <*> traverse (\(c, x, e, t) -> (c,x,e,) <$> f t) bs
   traverse f (FixedPointF i g v f' p x c t) = FixedPointF <$> f i <*> pure g <*> pure v <*> pure f' <*> pure p <*> pure x <*> f c <*> f t
   traverse f (MuF tag g t x cs functor) =
-    MuF tag g <$> f t <*> pure x <*> traverse (\(ci, si, xi, bi, gi, ixi) -> (ci,si,xi,,gi,) <$> f bi <*> f ixi) cs <*> traverse (traverse f) functor
+    MuF tag g <$> f t <*> pure x <*> traverse (\(ci, xi, bi, gi, ixi) -> (ci,xi,,gi,) <$> f bi <*> f ixi) cs <*> traverse (traverse f) functor
   traverse f (LetF x a t u) = LetF x <$> f a <*> f t <*> f u
   traverse f (AnnotationF t a) = AnnotationF <$> f t <*> f a
   traverse _ (MetaF m) = pure (MetaF m)

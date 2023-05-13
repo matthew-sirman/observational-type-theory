@@ -75,6 +75,8 @@ tokens :-
        "◇"                      { symbol SymDiamond }
        "▢-elim"                 { keyword KWBoxElim }
        "Box-elim"               { keyword KWBoxElim }
+       "1"                      { symbol SymRUnit }
+       "!"                      { symbol SymROne }
        "match"                  { keyword KWMatch }
        "as"                     { keyword KWAs }
        "return"                 { keyword KWReturn }
@@ -85,7 +87,6 @@ tokens :-
        "mu"                     { symbol SymMu }
        "μ"                      { symbol SymMu }
        "functor"                { keyword KWFunctor }
-       "out"                    { keyword KWOut }
        "lift"                   { keyword KWLift }
        "fmap"                   { keyword KWFmap }
        "let"                    { keyword KWLet }
@@ -143,6 +144,8 @@ data Token
   | SymBox
   | SymDiamond
   | KWBoxElim
+  | SymRUnit
+  | SymROne
   | KWMatch
   | KWAs
   | KWReturn
@@ -152,7 +155,6 @@ data Token
   | KWView
   | SymMu
   | KWFunctor
-  | KWOut
   | KWLift
   | KWFmap
   | KWLet

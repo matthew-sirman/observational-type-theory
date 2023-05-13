@@ -69,6 +69,8 @@ import qualified Error.Diagnose as Err
   Box                   { L _ SymBox }
   Diamond               { L _ SymDiamond }
   Boxelim               { L _ KWBoxElim }
+  '!'                   { L _ SymROne }
+  '1'                   { L _ SymRUnit }
   match                 { L _ KWMatch }
   as                    { L _ KWAs }
   return                { L _ KWReturn }
@@ -76,7 +78,6 @@ import qualified Error.Diagnose as Err
   '|'                   { L _ TokPipe }
   mu                    { L _ SymMu }
   functor               { L _ KWFunctor }
-  out                   { L _ KWOut }
   lift                  { L _ KWLift }
   fmap                  { L _ KWFmap }
   fix                   { L _ TokFix }
@@ -103,13 +104,13 @@ exp :: { Raw }
   : '\\' binder '.' exp                                             { rloc (LambdaF $2 $4) $1 $> }
   | let binder ':' exp '=' exp in exp                               { rloc (LetF $2 $4 $6 $8) $1 $> }
   | match exp as binder return exp with branches                    { rloc (MatchF $2 $4 $6 $8) $1 $7 }
-  | fix '[' exp as binder ']' binder binder binder ':' exp '=' exp  { rloc (FixedPointF $3 $5 Hole $7 $8 $9 $11 $13) $1 $> }
   | fix '[' exp ']' binder binder binder ':' exp '=' exp            { rloc (FixedPointF $3 Hole Hole $5 $6 $7 $9 $11) $1 $> }
+  | fix '[' exp as binder ']' binder binder binder ':' exp '=' exp  { rloc (FixedPointF $3 $5 Hole $7 $8 $9 $11 $13) $1 $> }
   | fix '[' exp as binder view binder ']'
          binder binder binder ':' exp '=' exp                       { rloc (FixedPointF $3 $5 $7 $9 $10 $11 $13 $15) $1 $> }
-  | mu var ':' term '.' '\\' binder '.' '[' constructors ']'        { rloc (MuF () (syntax $2) $4 $7 $10 Nothing) $1 $> }
-  | mu var ':' term '.' '\\' binder '.' '[' constructors ']'
-       functor_inst                                                 { rloc (MuF () (syntax $2) $4 $7 $10 (Just (syntax $12))) $1 $> }
+  | mu var ':' apps '->' U '.' '\\' binder '.' '[' constructors ']' { rloc (MuF () (syntax $2) $4 $9 $12 Nothing) $1 $> }
+  | mu var ':' apps '->' U '.' '\\' binder '.' '[' constructors ']'
+       functor_inst                                                 { rloc (MuF () (syntax $2) $4 $9 $12 (Just (syntax $14))) $1 $> }
   | term                                                            { $1 }
 
 functor_inst :: { Loc (FunctorInstanceF Raw) }
@@ -167,7 +168,6 @@ apps :: { Raw }
   | Id '(' exp ',' exp ',' exp ')'                                  { rloc (IdF $3 $5 $7) $1 $> }
   | cons '(' exp ',' exp ')'                                        { rloc (ConsF (syntax $1) $3 $5) $1 $> }
   | in atom                                                         { rloc (InF $2) $1 $> }
-  | out atom                                                        { rloc (OutF $2) $1 $> }
   | lift '[' exp ']' atom                                           { rloc (FLiftF $3 $5) $1 $> }
   | fmap '[' exp ']' '(' exp ',' exp ',' exp ',' exp ',' exp ')'    { rloc (FmapF $3 $6 $8 $10 $12 $14) $1 $> }
   | Box atom                                                        { rloc (BoxF $2) $1 $> }
@@ -191,6 +191,8 @@ atom :: { Raw }
   | Empty                                                           { rloc EmptyF $1 $> }
   | '*'                                                             { rloc OneF $1 $> }
   | Unit                                                            { rloc UnitF $1 $> }
+  | '!'                                                             { rloc ROneF $1 $> }
+  | '1'                                                             { rloc RUnitF $1 $> }
   | '(' exp ';' exp ')'                                             { rloc (PairF $2 $4) $1 $> }
   | '(' exp ':' exp ')'                                             { rloc (AnnotationF $2 $4) $1 $>}
   | '[' exp ']'                                                     { rloc (BoxF $2) $1 $> }
@@ -201,14 +203,14 @@ branches :: { [(Name, Binder, Binder, Raw)] }
   : {-# empty #-}                                                   { [] }
   | '|' cons '(' binder ',' binder ')' '->' exp branches            { (syntax $2, $4, $6, $9) : $10 }
 
-constructors :: { [(Name, RelevanceF (), Binder, Raw, Name, Raw)] }
+constructors :: { [(Name, Binder, Raw, Name, Raw)] }
   : {-# empty #-}                                                   { [] }
   | constructor                                                     { [$1] }
   | constructor ';' constructors                                    { $1 : $3 }
 
-constructor :: { (Name, RelevanceF (), Binder, Raw, Name, Raw) }
-  : cons ':' '(' binder ':' rel exp ')' '->' var atom               { (syntax $1, syntax $6, $4, $7, syntax $10, $11) }
-  | cons ':' apps '->' var atom                                     { (syntax $1, SortHole, Hole, $3, syntax $5, $6) }
+constructor :: { (Name, Binder, Raw, Name, Raw) }
+  : cons ':' '(' binder ':' exp ')' '->' var atom                   { (syntax $1, $4, $6, syntax $9, $10) }
+  | cons ':' apps '->' var atom                                     { (syntax $1, Hole, $3, syntax $5, $6) }
 
 binder :: { Binder }
   : var                                                             {% addComposite (syntax $1) >>
@@ -294,7 +296,7 @@ constructApps apps@(L _ tms) = do
     matches name (rest :> (Hole, t)) =
       case matches name rest of
         Nothing -> Nothing
-        Just rest -> Just (rloc (AppF rest t) rest t)
+        Just rest -> Just (rloc (AppF () rest t) rest t)
     matches name (rest :> (Name x, R _ (VarF x')))
       | x == x' = matches name rest
     matches _ _ = Nothing
@@ -303,7 +305,7 @@ constructApps apps@(L _ tms) = do
     mkApps ([], t) = t
     mkApps (ts :> t', t) =
       let ts_app_t' = mkApps (ts, t')
-       in rloc (AppF ts_app_t' t) ts_app_t' t
+       in rloc (AppF () ts_app_t' t) ts_app_t' t
 
 parseError :: Loc Token -> Parser a
 parseError (L _ TokEOF) = do
