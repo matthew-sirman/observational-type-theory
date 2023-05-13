@@ -111,7 +111,7 @@ infer gamma (R _ (AppF _ t@(R fnPos _) u)) = do
   u <- check gamma u a
   s' <- checkSortKnown s'
   vu <- eval' s' (env gamma) u
-  b_u <- app' b vu
+  b_u <- app b vu
   pure (App s' t u, b_u, s)
 infer gamma (R _ (PiF s x a b)) = do
   s <- checkSort s
@@ -127,11 +127,14 @@ infer gamma (R _ (SuccF n)) = do
   pure (Succ n, VNat, Relevant)
 infer gamma (R _ (NElimF z a t0 x ih ts n)) = do
   (a, s) <- checkType (bindR z VNat gamma) a
-  a0 <- eval (env gamma :> (Bound, ValProp (Just VZero) PZero)) a
+  vzero <- embedVal VZero
+  a0 <- eval (env gamma :> (Bound, vzero)) a
   t0 <- check gamma t0 a0
-  let vx = var (lvl gamma)
+  let xVar = VVar (lvl gamma)
+  vx <- embedVal xVar
   ax <- eval (env gamma :> (Bound, vx)) a
-  aSx <- eval (env gamma :> (Bound, ValProp (Just (VSucc (val' vx))) (PSucc (prop vx)))) a
+  vSx <- embedVal (VSucc xVar)
+  aSx <- eval (env gamma :> (Bound, vSx)) a
   ts <- check (gamma & bindR x VNat & bind ih s ax) ts aSx
   -- In general, argument to inductor should be inferred, but can be checked
   -- in simple case of Nat
@@ -153,14 +156,13 @@ infer gamma (R _ (SndF () t@(R pos _))) = do
   (t, tty, _) <- infer gamma t
   case tty of
     VExists _ _ b -> do
-      t_prop <- evalProp' (env gamma) t
-      b_fst_t <- app' b (embedProp (PPropFst t_prop))
+      t_prop <- evalProp (env gamma) t
+      b_fst_t <- app b (Prop (PPropFst t_prop))
       pure (PropSnd t, b_fst_t, Irrelevant)
     VSigma _ _ b -> do
       vt <- eval (env gamma) t
-      fst_vt_val <- vt $$ VFst
-      fst_vt <- embedVal fst_vt_val
-      b_fst_t <- app' b fst_vt
+      fst_vt <- vt $$ VFst >>= embedVal
+      b_fst_t <- app b fst_vt
       pure (Snd t, b_fst_t, Relevant)
     _ -> do
       tTS <- ppVal gamma tty
@@ -239,8 +241,6 @@ infer gamma (R _ (ApF b x t u@(R pos _) v e)) = do
   pure (Ap b x t u v e, vt_u_eq_vt_v, Irrelevant)
 infer gamma (R _ (TranspF t@(R pos _) x pf b u t' e)) = do
   (t, va, s) <- infer gamma t
-  -- aTS <- ppVal gamma va
-  -- when (s == Irrelevant) (throw (TranspIrrelevant aTS pos))
   convSort pos s Relevant
   t' <- check gamma t' va
   vt_val <- eval (env gamma) t
@@ -250,13 +250,13 @@ infer gamma (R _ (TranspF t@(R pos _) x pf b u t' e)) = do
   let vx = VVar (lvl gamma)
   t_eq_x <- eqReduce vt_val va vx
   b <- check (gamma & bindR x va & bindP pf t_eq_x) b (VU Irrelevant)
-  let refl_t = embedProp (PRefl (prop vt))
+  let refl_t = Prop (PRefl (prop vt))
   b_t_refl <- eval (env gamma :> (Bound, vt) :> (Bound, refl_t)) b
   u <- check gamma u b_t_refl
   vt_eq_vt' <- eqReduce vt_val va vt'_val
   e <- check gamma e vt_eq_vt'
-  e_prop <- evalProp' (env gamma) e
-  b_t'_e <- eval (env gamma :> (Bound, vt') :> (Bound, embedProp e_prop)) b
+  e_prop <- evalProp (env gamma) e
+  b_t'_e <- eval (env gamma :> (Bound, vt') :> (Bound, Prop e_prop)) b
   pure (Transp t x pf b u t' e, b_t'_e, Irrelevant)
 infer gamma (R _ (CastF a@(R aPos _) b@(R bPos _) e t)) = do
   (a, s) <- checkType gamma a
@@ -277,9 +277,9 @@ infer gamma (R _ (QuotientF a x y r rx rr sx sy sxy rs tx ty tz txy tyz rt)) = d
   a <- check gamma a (VU Relevant)
   va <- eval (env gamma) a
   r <- check (gamma & bindR x va & bindR y va) r (VU Irrelevant)
-  let vx = var (lvl gamma)
-      vy = var (lvl gamma + 1)
-      vz = var (lvl gamma + 2)
+  let vx = varR (lvl gamma)
+      vy = varR (lvl gamma + 1)
+      vz = varR (lvl gamma + 2)
   vrxx <- eval (env gamma :> (Bound, vx) :> (Bound, vx)) r
   rr <- check (gamma & bindR x va) rr vrxx
   vrxy <- eval (env gamma :> (Bound, vx) :> (Bound, vy)) r
@@ -308,28 +308,32 @@ infer gamma (R pos (QElimF z b x tpi px py pe p u)) = do
   case uty of
     VQuotient a _ _ r _ _ _ _ _ rs _ _ _ _ _ _ -> do
       (b, s) <- checkType (gamma & bindR z uty) b
-      let vx = var (lvl gamma)
-          vy = var (lvl gamma + 1)
-          ve = var (lvl gamma + 2)
-      b_pix <- eval (env gamma :> (Bound, ValProp (Just (VQProj (val' vx))) (PQProj (prop vx)))) b
-      b_piy <- eval (env gamma :> (Bound, ValProp (Just (VQProj (val' vy))) (PQProj (prop vy)))) b
+      let xVar = VVar (lvl gamma)
+          yVar = VVar (lvl gamma + 1)
+          ve = varP (lvl gamma + 2)
+      vx <- embedVal xVar
+      vy <- embedVal yVar
+      vproj_x <- embedVal (VQProj xVar)
+      vproj_y <- embedVal (VQProj yVar)
+      b_pix <- eval (env gamma :> (Bound, vproj_x)) b
+      b_piy <- eval (env gamma :> (Bound, vproj_y)) b
       tpi <- check (gamma & bindR x a) tpi b_pix
       tpi_x <- eval (env gamma :> (Bound, vx)) tpi
       tpi_y <- eval (env gamma :> (Bound, vy)) tpi
 
-      e_inv_prop <- app rs (prop vx) (prop vy) (prop ve)
+      e_inv_prop <- app rs (restrict vx) (restrict vy) (restrict ve)
 
-      tpi_x_prop <- valToVProp tpi_x
-      tpi_y_prop <- valToVProp tpi_y
+      tpi_x_prop <- freeze tpi_x
+      tpi_y_prop <- freeze tpi_y
 
-      b_prop <- propClosure' (env gamma) b
+      b_prop <- propClosure (env gamma) b
 
       let ap_B_e_inv = PAp (PU s) z b_prop tpi_x_prop tpi_y_prop e_inv_prop
 
       cast_b_piy_b_pix <- cast b_piy b_pix ap_B_e_inv tpi_y
       tpi_x_eq_tpi_y <- eqReduce tpi_x b_pix cast_b_piy_b_pix
 
-      r_x_y <- app' r vx vy
+      r_x_y <- app r vx vy
       let gamma''' = gamma & bindR px a & bindR py a & bindP pe r_x_y
       p <- check gamma''' p tpi_x_eq_tpi_y
       vu_val <- eval (env gamma) u
@@ -353,7 +357,8 @@ infer gamma (R _ (JF a t x pf b u t' e)) = do
   vt <- embedVal vt_val
   let vx = VVar (lvl gamma)
   (b, s) <- checkType (gamma & bindR x va & bindR pf (VId va vt_val vx)) b
-  b_t_idrefl_t <- eval (env gamma :> (Bound, vt) :> (Bound, ValProp (Just (VIdRefl (val' vt))) (PIdRefl (prop vt)))) b
+  vidrefl_t <- embedVal (VIdRefl vt_val)
+  b_t_idrefl_t <- eval (env gamma :> (Bound, vt) :> (Bound, vidrefl_t)) b
   u <- check gamma u b_t_idrefl_t
   t' <- check gamma t' va
   vt'_val <- eval (env gamma) t'
@@ -379,6 +384,8 @@ infer gamma (R pos (BoxElimF e)) = do
 infer gamma (R _ (BoxF a)) = do
   a <- check gamma a (VU Irrelevant)
   pure (Box a, VU Relevant, Relevant)
+infer _ (R _ RUnitF) = pure (RUnit, VU Relevant, Relevant)
+infer _ (R _ ROneF) = pure (ROne, VRUnit, Relevant)
 infer gamma (R _ (FLiftF f@(R pos _) a)) = do
   (f, fty, s) <- infer gamma f
   vf <- eval (env gamma) f
@@ -394,30 +401,23 @@ infer gamma (R _ (FmapF f@(R pos _) a b g p x)) = do
   (f, _, _) <- infer gamma f
   vf <- eval (env gamma) f
   case vf of
-    VMu _ f' fty@(VPi s _ pty _) x' cs functor Nothing -> do
+    VMu _ f' pty x' cs functor Nothing -> do
+      let fty = VPi Relevant Hole pty (Lift (VU Relevant))
       a <- check gamma a fty
-      va <- eval (env gamma) a >>= embedVal
+      (va_entry, va) <- eval (env gamma) a >>= embedVal'
       b <- check gamma b fty
-      vb <- eval (env gamma) b >>= embedVal
-      let g_p_ty vp = do
-            -- Actually, needs to be VAppProp when [s] is irrelevant
-            a_p <- val' va $$ VApp (val' vp)
-            b_p <- val' vb $$ VApp (val' vp)
-            pure (VPi Relevant Hole a_p (Lift b_p))
-      gty <- VPi s x' pty <$> makeFnClosure' g_p_ty
+      (vb_entry, vb) <- eval (env gamma) b >>= embedVal'
+      let gty = VPi Relevant x' pty (Defun (ClosureNaturalTransformation va vb))
       g <- check gamma g gty
       p <- check gamma p pty
-      vp <- case s of
-        Relevant -> VApp <$> eval (env gamma) p
-        Irrelevant -> VAppProp <$> evalProp' (env gamma) p
-        _ -> error "TODO: error"
+      vp <- eval (env gamma) p
       f_lift_a_tag <- freshTag
-      let f_lift_a = functorLift f_lift_a_tag f' fty x' cs functor va
-      f_lift_a_p <- f_lift_a $$ vp
+      let f_lift_a = functorLift f_lift_a_tag f' pty x' cs functor va_entry
+      f_lift_a_p <- f_lift_a $$ VApp vp
       x <- check gamma x f_lift_a_p
       f_lift_b_tag <- freshTag
-      let f_lift_b = functorLift f_lift_b_tag f' fty x' cs functor vb
-      f_lift_b_p <- f_lift_b $$ vp
+      let f_lift_b = functorLift f_lift_b_tag f' pty x' cs functor vb_entry
+      f_lift_b_p <- f_lift_b $$ VApp vp
       pure (Fmap f a b g p x, f_lift_b_p, Relevant)
     _ -> throw (FmapNeedsFunctorInstance pos)
 infer gamma (R pos (MatchF t@(R argPos _) x p bs)) = do
@@ -426,10 +426,9 @@ infer gamma (R pos (MatchF t@(R argPos _) x p bs)) = do
   case a of
     -- We must have [Just a], otherwise this is not a type. Also, [fty] is
     -- a type family by induction.
-    -- TODO: maybe a syntactic restriction for the type family is better
-    VMu tag f fty@(VPi _ _ aTy _) xs constructors functor (Just a) -> do
+    VMu tag f aty xs constructors functor (Just a) -> do
       let
-        muF = VMu tag f fty xs constructors functor Nothing
+        muF = VMu tag f aty xs constructors functor Nothing
         -- checkBranches returns a set of remaining constructors.
         -- Each step we check if the constructor is in the remaining set,
         -- and then remove it. This allows us to check for totality.
@@ -440,21 +439,23 @@ infer gamma (R pos (MatchF t@(R argPos _) x p bs)) = do
             Nothing -> do
               muFTS <- ppVal gamma muF
               throw (ConstructorNotInTypeMatch c muFTS pos)
-            Just (_, _, b, ixi) -> do
+            Just (_, bi, ixi) -> do
               muF <- embedVal muF
-              a <- embedAppElim a
-              b_muF_a <- app' b muF a
-              let vx = var (lvl gamma)
-                  ve = var (lvl gamma + 1)
+              a_entry <- embedVal a
+              b_muF_a <- app bi muF a_entry
+              let xVar = VVar (lvl gamma)
+                  eVar = PVar (lvl gamma + 1)
 
-              ixi_muF_a_x <- app' ixi muF a vx
+              vx <- embedVal xVar
+              ixi_muF_a_x <- app ixi muF a_entry vx
 
               let gamma' = gamma & bindR x b_muF_a
-              ixi_eq_a <- eqReduce ixi_muF_a_x aTy (val' a)
+              ixi_eq_a <- eqReduce ixi_muF_a_x aty a
 
               let gamma'' = gamma' & bindP e ixi_eq_a
 
-              pCx <- eval (env gamma :> (Bound, ValProp (Just (VCons c (val' vx) (prop ve))) (PCons c (prop vx) (prop ve)))) p
+              vCx <- embedVal (VCons c xVar eVar)
+              pCx <- eval (env gamma :> (Bound, vCx)) p
               t <- check gamma'' t pCx
 
               pure (brs :> (c, x, e, t), M.delete c cs)
@@ -472,31 +473,30 @@ infer gamma (R _ (FixedPointF i@(R pos _) g v f p x c t)) = do
   (muF, _, _) <- infer gamma i
   vmuF <- eval (env gamma) muF
   case vmuF of
-    VMu _ f' vmuFty@(VPi s _ a _) x' cs functor Nothing -> do
-      let vg = var (lvl gamma)
-          vv = var (lvl gamma + 1)
-          vp = var (lvl gamma + 2)
-      viewTy <- buildViewType a (val' vg) vmuF
-      vg_p <- case s of
-        Relevant -> val' vg $$ VApp (val' vp)
-        Irrelevant -> val' vg $$ VAppProp (prop vp)
-        _ -> error "TODO: error"
+    VMu _ f' a x' cs functor Nothing -> do
+      let vmuFty = VPi Relevant Hole a (Lift (VU Relevant))
+      let gVar = VVar (lvl gamma)
+          vVar = VVar (lvl gamma + 1)
+          pVar = VVar (lvl gamma + 2)
+      let viewTy = buildViewType a gVar vmuF
+      vg_p <- gVar $$ VApp pVar
       let gammaC = gamma & bindR g vmuFty & bindR v viewTy & bindR p a & bindR x vg_p
       (c, s) <- checkType gammaC c
 
-      fty <- buildFType p a (env gamma) vg vv c
+      vg <- embedVal gVar
+      vv <- embedVal vVar
+      let fty = buildFType p a (env gamma) vg vv c
+
       f_lift_g_tag <- freshTag
-      let vp = var (lvl gamma + 3)
-          f_lift_g_val = functorLift f_lift_g_tag f' vmuFty x' cs functor vg
+      let pVar = VVar (lvl gamma + 3)
+          f_lift_g_val = functorLift f_lift_g_tag f' a x' cs functor vg
       f_lift_g <- embedVal f_lift_g_val
-      f_lift_g_p <- case s of
-        Relevant -> f_lift_g_val $$ VApp (val' vp)
-        Irrelevant -> f_lift_g_val $$ VAppProp (prop vp)
-        _ -> error "TODO: error"
+      f_lift_g_p <- f_lift_g_val $$ VApp pVar
       vmuF <- embedVal vmuF
       vv_lifted_val <- liftView v functor vg vmuF vv
       vv_lifted <- embedVal vv_lifted_val
-      let vx = var (lvl gamma + 4)
+      vp <- embedVal pVar
+      let vx = varR (lvl gamma + 4)
       c_f_lift_g_v_p_x <- eval (env gamma :> (Bound, f_lift_g) :> (Bound, vv_lifted) :> (Bound, vp) :> (Bound, vx)) c
       let gammaT = gamma & bindR g vmuFty & bindR v viewTy & bind f s fty & bind p s a & bindR x f_lift_g_p
       t <- check gammaT t c_f_lift_g_v_p_x
@@ -504,121 +504,89 @@ infer gamma (R _ (FixedPointF i@(R pos _) g v f p x c t)) = do
       viewId_val <- valIdentity x
       viewId <- embedVal viewId_val
 
-      fixTy <- buildFType p a (env gamma) vmuF viewId c
+      let fixTy = buildFType p a (env gamma) vmuF viewId c
       pure (FixedPoint muF g v f p x c t, fixTy, s)
     _ -> do
       vmuFTS <- ppVal gamma vmuF
       throw (FixAnnotation vmuFTS pos)
   where
-    buildFType :: MonadEvaluator m => Binder -> VTy -> Env ValProp -> ValProp -> ValProp -> Term Ix -> m VTy
+    buildFType :: Binder -> VTy -> Env -> EnvEntry -> EnvEntry -> Term Ix -> VTy
     buildFType p a env vg vv c = do
-      let vc vp vx = eval (env :> (Bound, vg) :> (Bound, vv) :> (Bound, vp) :> (Bound, vx)) c
-          vpi_x_c vp = do
-            vg_p <- val' vg $$ VApp (val' vp)
-            VPi Relevant x vg_p <$> makeFnClosure' (vc vp)
-      VPi Relevant p a <$> makeFnClosure' vpi_x_c
+      let env' = env :> (Bound, vg) :> (Bound, vv)
+       in VPi Relevant p a (Defun (ClosureFixFType x (val vg) env' c))
 
-    buildViewType :: MonadEvaluator m => VTy -> VTy -> VTy -> m VTy
-    buildViewType a g muF = do
-      let vidTy vp = do
-            vg_p <- g $$ VApp (val' vp)
-            muF_p <- muF $$ VApp (val' vp)
-            pure (VPi Relevant Hole vg_p (Lift muF_p))
-      VPi Relevant p a <$> makeFnClosure' vidTy
+    buildViewType :: VTy -> VTy -> VTy -> VTy
+    buildViewType a g muF = VPi Relevant p a (Defun (ClosureNaturalTransformation g muF))
 
-    liftView :: Binder -> Maybe VFunctorInstance -> ValProp -> ValProp -> ValProp -> Checker (Variant e) Val
+    liftView :: Binder -> Maybe VFunctorInstance -> EnvEntry -> EnvEntry -> EnvEntry -> Checker (Variant e) Val
     -- This is a hack -- it says if the view is not used (not given a name), then we don't lift it
     -- in a well-typed manner. This allows fixed points over inductive types without an explicit
     -- functor definition provided they don't use views.
     -- TODO: Infer functor definitions when not explicitly provided to avoid this hack
-    liftView Hole _ _ _ view = pure (val' view)
-    liftView _ (Just (VFunctorInstance _ _ _ _ _ t)) vg vmuF view = do
+    liftView Hole _ _ _ view = pure (val view)
+    liftView _ (Just (VFunctorInstance _ _ _ _ _ t)) vg vmuF view =
       -- Lifts ι : (p : X) → G p → μF p
       -- to F[ι] : (p : X) → F[G] p → F[μF] p
       -- and then applies the isomorphism F[μF] p ≅ μF p (semantically this is the identity)
-      let f_lift_view_p_x :: ValProp -> ValProp -> Evaluator Val
-          f_lift_view_p_x = app' t vmuF vg vmuF view
-          f_lift_view_p vp = VLambda x <$> makeFnClosure' (f_lift_view_p_x vp)
-      VLambda p <$> makeFnClosure' f_lift_view_p
+      pure (VLambda p (Defun (ClosureLiftView x t vmuF vg view)))
     liftView _ _ _ _ _ = throw (FixViewWithNoFunctor pos)
-infer gamma (R muPos (MuF () f fty@(R pos _) x cs functor)) = do
-  (fty, _) <- checkType gamma fty
-  vfty <- eval (env gamma) fty
-  (s, a) <- checkTypeFamily vfty
-  let gamma' = gamma & bindR (Name f) vfty & bind x s a
-  cs <- mapM (checkConstructor gamma' a) cs
+infer gamma (R muPos (MuF () f a x cs functor)) = do
+  a <- check gamma a (VU Relevant)
+  va <- eval (env gamma) a
+  let vfty = VPi Relevant Hole va (Lift (VU Relevant))
+  let gamma' = gamma & bindR (Name f) vfty & bindR x va
+  cs <- mapM (checkConstructor gamma' va) cs
   -- A fresh tag is associated to each syntactic inductive type definition.
   tag <- freshTag
   vcs <- mapM evalConstructor cs
-  let vmuF_val = VMu tag f vfty x vcs Nothing Nothing
+  let vmuF_val = VMu tag f va x vcs Nothing Nothing
   vmuF <- embedVal vmuF_val
   -- Functor action on objects (which are themselves functors)
   let f_lift ty = do
         f_lift_ty_tag <- freshTag
-        pure (functorLift f_lift_ty_tag f vfty x vcs Nothing ty)
+        pure (functorLift f_lift_ty_tag f va x vcs Nothing ty)
   -- Check the provided functor action on morphisms (which are natural transformations)
-  functor <- mapM (checkFunctor vmuF s a f_lift) functor
-  pure (Mu tag f fty x cs functor, vfty, Relevant)
+  functor <- mapM (checkFunctor vmuF va f_lift) functor
+  pure (Mu tag f a x cs functor, vfty, Relevant)
   where
-    checkTypeFamily :: VTy -> Checker (Variant e) (Relevance, VTy)
-    checkTypeFamily t@(VPi s _ a b) = do
-      let vx = var (lvl gamma)
-      b_x <- app' b vx
-      case b_x of
-        VU Relevant -> pure (s, a)
-        _ -> do
-          tTS <- ppVal gamma t
-          throw (InductiveTypeFamily tTS pos)
-    checkTypeFamily t = do
-      tTS <- ppVal gamma t
-      throw (InductiveTypeFamily tTS pos)
-
     checkConstructor
       :: Context
       -> VTy
-      -> (Name, RelevanceF (), Binder, Raw, Name, Raw)
-      -> Checker (Variant e) (Name, Relevance, Binder, Type Ix, Name, Type Ix)
-    checkConstructor gamma' ixTy (ci, si, xi, bi, fi, ix)
+      -> (Name, Binder, Raw, Name, Raw)
+      -> Checker (Variant e) (Name, Binder, Type Ix, Name, Type Ix)
+    checkConstructor gamma' ixTy (ci, xi, bi, fi, ix)
       | f == fi = do
-          si <- checkSort si
-          bi <- check gamma' bi (VU si)
+          bi <- check gamma' bi (VU Relevant)
           vbi <- eval (env gamma') bi
-          ix <- check (gamma' & bind xi si vbi) ix ixTy
-          pure (ci, si, xi, bi, f, ix)
+          ix <- check (gamma' & bindR xi vbi) ix ixTy
+          pure (ci, xi, bi, f, ix)
       | otherwise = throw (InductiveTypeConstructor f fi muPos)
 
     evalConstructor
-      :: (Name, Relevance, Binder, Term Ix, Name, Term Ix)
-      -> Checker (Variant e) (Name, (Relevance, Binder, ValClosure (A 2), ValClosure (A 3)))
-    evalConstructor (ci, si, xi, bi, _, ixi) = do
+      :: (Name, Binder, Term Ix, Name, Term Ix)
+      -> Checker (Variant e) (Name, (Binder, ValClosure (A 2), ValClosure (A 3)))
+    evalConstructor (ci, xi, bi, _, ixi) = do
       bi <- closure (env gamma) bi
       ixi <- closure (env gamma) ixi
-      pure (ci, (si, xi, bi, ixi))
+      pure (ci, (xi, bi, ixi))
 
     checkFunctor
-      :: ValProp
-      -> Relevance
+      :: EnvEntry
       -> VTy
-      -> (ValProp -> Checker (Variant e) VTy)
+      -> (EnvEntry -> Checker (Variant e) VTy)
       -> FunctorInstanceF Raw
       -> Checker (Variant e) (FunctorInstance Ix)
-    checkFunctor vmuF s argTy f_lift (FunctorInstanceF a b nt p x' t) = do
-      let va = var (lvl gamma + 1)
-          vb = var (lvl gamma + 2)
+    checkFunctor vmuF argTy f_lift (FunctorInstanceF a b nt p x' t) = do
+      let aVar = VVar (lvl gamma + 1)
+          bVar = VVar (lvl gamma + 2)
+      va <- embedVal aVar
+      vb <- embedVal bVar
       f_lift_a <- f_lift va
       f_lift_b <- f_lift vb
-      let nt_p_ty vp = do
-            -- Need to handle app properly
-            a_p <- val' va $$ VApp (val vp)
-            b_p <- val' vb $$ VApp (val vp)
-            pure (VPi Relevant Hole a_p (Lift b_p))
-      ntTy <- VPi Relevant p argTy <$> makeFnClosure' nt_p_ty
-      let vp = case s of
-            Relevant -> VApp (VVar (lvl gamma + 4))
-            Irrelevant -> VAppProp (PVar (lvl gamma + 4))
-            _ -> error "TODO: error"
-      f_lift_a_p <- f_lift_a $$ vp
-      f_lift_b_p <- f_lift_b $$ vp
+      let ntTy = VPi Relevant p argTy (Defun (ClosureNaturalTransformation aVar bVar))
+      let vp = VVar (lvl gamma + 4)
+      f_lift_a_p <- f_lift_a $$ VApp vp
+      f_lift_b_p <- f_lift_b $$ VApp vp
       let famTy = VPi Relevant Hole argTy (Lift (VU Relevant))
       let gamma' =
             gamma
@@ -680,7 +648,8 @@ check
   -> VTy
   -> Checker (Variant e) (Term Ix)
 check gamma (R _ (LambdaF x t)) (VPi s _ a b) = do
-  b' <- app' b (var (lvl gamma))
+  s' <- checkSortKnown s
+  b' <- app b (var s' (lvl gamma))
   t <- check (bind x s a gamma) t b'
   pure (Lambda x t)
 check gamma (R pos (LambdaF {})) tty = do
@@ -688,8 +657,8 @@ check gamma (R pos (LambdaF {})) tty = do
   throw (CheckLambda tTS pos)
 check gamma (R _ (PropPairF t u)) (VExists _ a b) = do
   t <- check gamma t a
-  t_prop <- evalProp' (env gamma) t
-  b_t <- app' b (embedProp t_prop)
+  t_prop <- evalProp (env gamma) t
+  b_t <- app b (Prop t_prop)
   u <- check gamma u b_t
   pure (PropPair t u)
 check gamma (R pos (PropPairF {})) tty = do
@@ -699,7 +668,7 @@ check gamma (R _ (PairF t u)) (VSigma _ a b) = do
   t <- check gamma t a
   vt_val <- eval (env gamma) t
   vt <- embedVal vt_val
-  b_t <- app' b vt
+  b_t <- app b vt
   u <- check gamma u b_t
   pure (Pair t u)
 check gamma (R pos (PairF {})) tty = do
@@ -720,41 +689,32 @@ check gamma (R _ (IdPathF e)) (VId a t u) = do
 check gamma (R pos (IdPathF {})) tty = do
   tTS <- ppVal gamma tty
   throw (CheckIdPath tTS pos)
-check gamma (R pos (ConsF c t e@(R ePos _))) (VMu tag f fty@(VPi s _ aTy _) xs cs functor (Just a)) = do
-  let muF = VMu tag f fty xs cs functor Nothing
+check gamma (R pos (ConsF c t e)) (VMu tag f aty xs cs functor (Just a)) = do
+  let muF = VMu tag f aty xs cs functor Nothing
   case lookup c cs of
     Nothing -> do
       muFTS <- ppVal gamma muF
       throw (ConstructorNotInTypeCons c muFTS pos)
-    Just (_, _, bi, ixi) -> do
+    Just (_, bi, ixi) -> do
       muF <- embedVal muF
-      a <- embedAppElim a
-      -- Apply to inductive type without parameters
-      bi_muF_a <- app' bi muF a
+      a_entry <- embedVal a
+      -- Apply [bi] to inductive type without parameters
+      bi_muF_a <- app bi muF a_entry
       t <- check gamma t bi_muF_a
-      let checkProof :: Relevance -> Checker (Variant e) (Term Ix)
-          checkProof Relevant = do
-            vt_val <- eval (env gamma) t
-            vt <- embedVal vt_val
-            ixi_muF_a_x <- app' ixi muF a vt
-            ixi_eq_a <- eqReduce ixi_muF_a_x aTy (val' a)
-            check gamma e ixi_eq_a
-          checkProof Irrelevant = check gamma e VUnit
-          checkProof (SortMeta sm) = do
-            s <- lookupSortMeta sm
-            case s of
-              Nothing -> throw (ConstructorIndexSortUnknown ePos)
-              Just s -> checkProof s
-      e <- checkProof s
+      vt_val <- eval (env gamma) t
+      vt <- embedVal vt_val
+      ixi_muF_a_x <- app ixi muF a_entry vt
+      ixi_eq_a <- eqReduce ixi_muF_a_x aty a
+      e <- check gamma e ixi_eq_a
       pure (Cons c t e)
 check gamma (R pos (ConsF c _ _)) tty = do
   tTS <- ppVal gamma tty
   throw (CheckCons tTS c pos)
-check gamma (R _ (InF t)) (VMu tag f fty xs cs functor (Just a)) = do
-  let muF_val = VMu tag f fty xs cs functor Nothing
+check gamma (R _ (InF t)) (VMu tag f aty xs cs functor (Just a)) = do
+  let muF_val = VMu tag f aty xs cs functor Nothing
   muF <- embedVal muF_val
-  let f_lift_muF = functorLift tag f fty xs cs functor muF
-  f_lift_muF_a <- f_lift_muF $$ VAppElim a
+  let f_lift_muF = functorLift tag f aty xs cs functor muF
+  f_lift_muF_a <- f_lift_muF $$ VApp a
   check gamma t f_lift_muF_a
 check gamma (R pos (InF _)) tty = do
   tTS <- ppVal gamma tty

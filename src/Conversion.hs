@@ -60,47 +60,49 @@ conv pos names = conv' names names
     convSp ns ns' lvl (sp :> VApp u) (sp' :> VApp u') = do
       convSp ns ns' lvl sp sp'
       conv' ns ns' lvl u u'
+    convSp ns ns' lvl (sp :> VAppProp _) (sp' :> VAppProp _) = do
+      convSp ns ns' lvl sp sp'
     convSp ns ns' lvl (sp :> VNElim z a t0 x ih ts) (sp' :> VNElim z' a' t0' x' ih' ts') = do
       convSp ns ns' lvl sp sp'
-      let vz = var lvl
-      a_z <- app' a vz
-      a'_z <- app' a' vz
+      let vz = varR lvl
+      a_z <- app a vz
+      a'_z <- app a' vz
       conv' (ns :> z) (ns' :> z') (lvl + 1) a_z a'_z
       conv' ns ns' lvl t0 t0'
-      let vx = var lvl
-          vih = var (lvl + 1)
-      ts_x_ih <- app' ts vx vih
-      ts'_x_ih <- app' ts' vx vih
+      let vx = varR lvl
+          vih = varR (lvl + 1)
+      ts_x_ih <- app ts vx vih
+      ts'_x_ih <- app ts' vx vih
       conv' (ns :> x :> ih) (ns' :> x' :> ih') (lvl + 2) ts_x_ih ts'_x_ih
     convSp ns ns' lvl (sp :> VFst) (sp' :> VFst) = convSp ns ns' lvl sp sp'
     convSp ns ns' lvl (sp :> VSnd) (sp' :> VSnd) = convSp ns ns' lvl sp sp'
     convSp ns ns' lvl (sp :> VQElim z b x tpi _ _ _ _) (sp' :> VQElim z' b' x' tpi' _ _ _ _) = do
       convSp ns ns' lvl sp sp'
-      let vz = var lvl
-      b_z <- app' b vz
-      b'_z <- app' b' vz
-      let vx = var lvl
-      tpi_x <- app' tpi vx
-      tpi'_x <- app' tpi' vx
+      let vz = varR lvl
+      b_z <- app b vz
+      b'_z <- app b' vz
+      let vx = varR lvl
+      tpi_x <- app tpi vx
+      tpi'_x <- app tpi' vx
       conv' (ns :> z) (ns' :> z') (lvl + 1) b_z b'_z
       conv' (ns :> x) (ns' :> x') (lvl + 1) tpi_x tpi'_x
     convSp ns ns' lvl (sp :> VJ a t x pf b u v) (sp' :> VJ a' t' x' pf' b' u' v') = do
       convSp ns ns' lvl sp sp'
       conv' ns ns' lvl a a'
       conv' ns ns' lvl t t'
-      let vx = var lvl
-          vpf = var (lvl + 1)
-      b_x_pf <- app' b vx vpf
-      b'_x_pf <- app' b' vx vpf
+      let vx = varR lvl
+          vpf = varR (lvl + 1)
+      b_x_pf <- app b vx vpf
+      b'_x_pf <- app b' vx vpf
       conv' (ns :> x :> pf) (ns' :> x' :> pf') (lvl + 2) b_x_pf b'_x_pf
       conv' ns ns' lvl u u'
       conv' ns ns' lvl v v'
     convSp ns ns' lvl (sp :> VBoxElim) (sp' :> VBoxElim) = convSp ns ns' lvl sp sp'
     convSp ns ns' lvl (sp :> VMatch x p bs) (sp' :> VMatch x' p' bs') = do
       convSp ns ns' lvl sp sp'
-      let vx = var lvl
-      p_x <- app' p vx
-      p'_x <- app' p' vx
+      let vx = varR lvl
+      p_x <- app p vx
+      p'_x <- app p' vx
       conv' (ns :> x) (ns' :> x') (lvl + 1) p_x p'_x
       zipWithM_ convBranch bs bs'
       where
@@ -111,10 +113,10 @@ conv pos names = conv' names names
           -> Checker (Variant e) ()
         convBranch (c, x, e, t) (c', x', e', t')
           | c == c' = do
-              let vx = var lvl
-                  ve = var (lvl + 1)
-              t <- app' t vx ve
-              t' <- app' t' vx ve
+              let vx = varR lvl
+                  ve = varR (lvl + 1)
+              t <- app t vx ve
+              t' <- app t' vx ve
               conv' (ns :> x :> e) (ns' :> x' :> e') (lvl + 2) t t'
           | otherwise = throw (ConstructorMismatch c c' pos)
     convSp _ _ _ sp sp' =
@@ -138,39 +140,38 @@ conv pos names = conv' names names
       | x == x' = pure ()
     conv' _ _ _ (VU s) (VU s') = convSort pos s s'
     conv' ns ns' lvl (VLambda x t) (VLambda x' t') = do
-      let vx = var lvl
-      t_x <- app' t vx
-      t'_x <- app' t' vx
+      let vx = varR lvl
+      t_x <- app t vx
+      t'_x <- app t' vx
       conv' (ns :> x) (ns' :> x') (lvl + 1) t_x t'_x
     conv' ns ns' lvl (VLambda x t) t' = do
-      t_x <- app' t (var lvl)
+      t_x <- app t (varR lvl)
       t'_x <- t' $$ VApp (VVar lvl)
       conv' (ns :> x) (ns' :> x) (lvl + 1) t_x t'_x
     conv' ns ns' lvl t (VLambda x' t') = do
       t_x <- t $$ VApp (VVar lvl)
-      t'_x <- app' t' (var lvl)
+      t'_x <- app t' (varR lvl)
       conv' (ns :> x') (ns' :> x') (lvl + 1) t_x t'_x
     conv' ns ns' lvl (VPi s x a b) (VPi s' x' a' b') = do
       convSort pos s s'
       conv' ns ns' lvl a a'
-      let vx = var lvl
-      b_x <- app' b vx
-      b'_x <- app' b' vx
+      let vx = varR lvl
+      b_x <- app b vx
+      b'_x <- app b' vx
       conv' (ns :> x) (ns' :> x') (lvl + 1) b_x b'_x
     conv' _ _ _ VZero VZero = pure ()
     conv' ns ns' lvl (VSucc n) (VSucc n') = conv' ns ns' lvl n n'
     conv' _ _ _ VNat VNat = pure ()
     conv' ns ns' lvl (VExists x a b) (VExists x' a' b') = do
       conv' ns ns' lvl a a'
-      let vx = var lvl
-      b_x <- app' b vx
-      b'_x <- app' b' vx
+      let vx = varR lvl
+      b_x <- app b vx
+      b'_x <- app b' vx
       conv' (ns :> x) (ns' :> x') (lvl + 1) b_x b'_x
     -- Both terms have the same type (by invariant), so [a ≡ a'], and [t] and [t'] are
     -- both of type [⊥], thus also convertible.
     conv' _ _ _ (VAbort {}) (VAbort {}) = pure ()
     conv' _ _ _ VEmpty VEmpty = pure ()
-    -- Proof irrelevant, so always convertible
     conv' _ _ _ VUnit VUnit = pure ()
     conv' ns ns' lvl (VEq t a u) (VEq t' a' u') = do
       conv' ns ns' lvl t t'
@@ -206,16 +207,16 @@ conv pos names = conv' names names
       conv' ns ns' lvl snd_p u'
     conv' ns ns' lvl (VSigma x a b) (VSigma x' a' b') = do
       conv' ns ns' lvl a a'
-      let vx = var lvl
-      b_x <- app' b vx
-      b'_x <- app' b' vx
+      let vx = varR lvl
+      b_x <- app b vx
+      b'_x <- app b' vx
       conv' (ns :> x) (ns' :> x') (lvl + 1) b_x b'_x
     conv' ns ns' lvl (VQuotient a x y r _ _ _ _ _ _ _ _ _ _ _ _) (VQuotient a' x' y' r' _ _ _ _ _ _ _ _ _ _ _ _) = do
       conv' ns ns' lvl a a'
-      let vx = var lvl
-          vy = var (lvl + 1)
-      r_x_y <- app' r vx vy
-      r'_x_y <- app' r' vx vy
+      let vx = varR lvl
+          vy = varR (lvl + 1)
+      r_x_y <- app r vx vy
+      r'_x_y <- app r' vx vy
       conv' (ns :> x :> y) (ns' :> x' :> y') (lvl + 2) r_x_y r'_x_y
     conv' ns ns' lvl (VQProj t) (VQProj t') = conv' ns ns' lvl t t'
     conv' ns ns' lvl (VIdRefl t) (VIdRefl t') = conv' ns ns' lvl t t'
@@ -224,6 +225,12 @@ conv pos names = conv' names names
       conv' ns ns' lvl a a'
       conv' ns ns' lvl t t'
       conv' ns ns' lvl u u'
+    conv' _ _ _ (VBoxProof _) (VBoxProof _) = pure ()
+    conv' ns ns' lvl (VBox a) (VBox a') = conv' ns ns' lvl a a'
+    -- Partial eta law for unit type (expands one side, but can't convert on vars [Γ ⊢ x ≡ y : 1])
+    conv' _ _ _ VROne _ = pure ()
+    conv' _ _ _ _ VROne = pure ()
+    conv' _ _ _ VRUnit VRUnit = pure ()
     conv' ns ns' lvl (VCons c t _) (VCons c' t' _)
       | c == c' = do
           conv' ns ns' lvl t t'
@@ -238,51 +245,44 @@ conv pos names = conv' names names
       conv' ns ns' lvl p p'
       conv' ns ns' lvl x x'
     conv' ns ns' lvl (VFixedPoint i g v f p x c t a) (VFixedPoint i' g' v' f' p' x' c' t' a') = do
-      c_g_p_x <- app' c (var lvl) (var (lvl + 1)) (var (lvl + 2)) (var (lvl + 3))
-      c'_g_p_x <- app' c' (var lvl) (var (lvl + 1)) (var (lvl + 2)) (var (lvl + 3))
+      c_g_p_x <- app c (varR lvl) (varR (lvl + 1)) (varR (lvl + 2)) (varR (lvl + 3))
+      c'_g_p_x <- app c' (varR lvl) (varR (lvl + 1)) (varR (lvl + 2)) (varR (lvl + 3))
       conv' (ns :> g :> v :> p :> x) (ns' :> g' :> v' :> p' :> x') (lvl + 4) c_g_p_x c'_g_p_x
       conv' ns ns' lvl i i'
-      t_g_f_p_x <- app' t (var lvl) (var (lvl + 1)) (var (lvl + 2)) (var (lvl + 3)) (var (lvl + 4))
-      t'_g_f_p_x <- app' t' (var lvl) (var (lvl + 1)) (var (lvl + 2)) (var (lvl + 3)) (var (lvl + 4))
+      t_g_f_p_x <- app t (varR lvl) (varR (lvl + 1)) (varR (lvl + 2)) (varR (lvl + 3)) (varR (lvl + 4))
+      t'_g_f_p_x <- app t' (varR lvl) (varR (lvl + 1)) (varR (lvl + 2)) (varR (lvl + 3)) (varR (lvl + 4))
       conv' (ns :> g :> v :> f :> p :> x) (ns' :> g' :> v' :> f' :> p' :> x') (lvl + 5) t_g_f_p_x t'_g_f_p_x
       -- TODO: this *might* be problematic in the case that exactly one of [a], [a'] is Nothing
-      case (a, a') of
-        (Just (VAppR a), Just (VAppR a')) -> conv' ns ns' lvl a a'
-        _ -> pure ()
-    conv' ns ns' lvl (VMu _ f fty x cs functor a) (VMu _ f' fty' x' cs' functor' a') = do
-      conv' ns ns' lvl fty fty'
+      sequence_ (liftM2 (conv' ns ns' lvl) a a')
+    conv' ns ns' lvl (VMu _ f aty x cs functor a) (VMu _ f' aty' x' cs' functor' a') = do
+      conv' ns ns' lvl aty aty'
       zipWithM_ convCons cs cs'
       sequence_ (liftM2 convFunctor functor functor')
-      case (a, a') of
-        (Just (VAppR a), Just (VAppR a')) -> conv' ns ns' lvl a a'
-        _ -> pure ()
+      sequence_ (liftM2 (conv' ns ns' lvl) a a')
       where
         convCons
-          :: (Name, (Relevance, Binder, ValClosure (A 2), ValClosure (A 3)))
-          -> (Name, (Relevance, Binder, ValClosure (A 2), ValClosure (A 3)))
+          :: (Name, (Binder, ValClosure (A 2), ValClosure (A 3)))
+          -> (Name, (Binder, ValClosure (A 2), ValClosure (A 3)))
           -> Checker (Variant e) ()
-        convCons (ci, (si, xi, bi, ixi)) (ci', (si', xi', bi', ixi'))
+        convCons (ci, (xi, bi, ixi)) (ci', (xi', bi', ixi'))
           | ci == ci' = do
-              convSort pos si si'
-              let vf = var lvl
-                  vx = var (lvl + 1)
-                  vxi = var (lvl + 2)
-              bi_muF_x <- app' bi vf vx
-              bi'_muF_x <- app' bi' vf vx
+              let vf = varR lvl
+                  vx = varR (lvl + 1)
+                  vxi = varR (lvl + 2)
+              bi_muF_x <- app bi vf vx
+              bi'_muF_x <- app bi' vf vx
               conv' (ns :> Name f :> x) (ns' :> Name f' :> x') (lvl + 2) bi_muF_x bi'_muF_x
-              ixi_muF_x_xi <- app' ixi vf vx vxi
-              ixi'_muF_x_xi <- app' ixi' vf vx vxi
+              ixi_muF_x_xi <- app ixi vf vx vxi
+              ixi'_muF_x_xi <- app ixi' vf vx vxi
               conv' (ns :> Name f :> x :> xi) (ns' :> Name f' :> x' :> xi') (lvl + 3) ixi_muF_x_xi ixi'_muF_x_xi
           | otherwise =
               -- TODO: consider allowing reordering of constructors in definitional equality
               throw (ConstructorMismatch ci ci' pos)
         convFunctor :: VFunctorInstance -> VFunctorInstance -> Checker (Variant e) ()
         convFunctor (VFunctorInstance a b g p x t) (VFunctorInstance a' b' g' p' x' t') = do
-          t_f_a_b_g_p_x <- app' t (var lvl) (var (lvl + 1)) (var (lvl + 2)) (var (lvl + 3)) (var (lvl + 4)) (var (lvl + 5))
-          t'_f_a_b_g_p_x <- app' t' (var lvl) (var (lvl + 1)) (var (lvl + 2)) (var (lvl + 3)) (var (lvl + 4)) (var (lvl + 5))
+          t_f_a_b_g_p_x <- app t (varR lvl) (varR (lvl + 1)) (varR (lvl + 2)) (varR (lvl + 3)) (varR (lvl + 4)) (varR (lvl + 5))
+          t'_f_a_b_g_p_x <- app t' (varR lvl) (varR (lvl + 1)) (varR (lvl + 2)) (varR (lvl + 3)) (varR (lvl + 4)) (varR (lvl + 5))
           conv' (ns :> Name f :> a :> b :> g :> p :> x) (ns' :> Name f' :> a' :> b' :> g' :> p' :> x') (lvl + 6) t_f_a_b_g_p_x t'_f_a_b_g_p_x
-    conv' _ _ _ (VBoxProof _) (VBoxProof _) = pure ()
-    conv' ns ns' lvl (VBox a) (VBox a') = conv' ns ns' lvl a a'
     conv' ns ns' lvl a b = do
       aTS <- TS . prettyPrintTerm ns <$> quote lvl a
       bTS <- TS . prettyPrintTerm ns' <$> quote lvl b

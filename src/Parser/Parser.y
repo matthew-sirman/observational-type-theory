@@ -69,6 +69,8 @@ import qualified Error.Diagnose as Err
   Box                   { L _ SymBox }
   Diamond               { L _ SymDiamond }
   Boxelim               { L _ KWBoxElim }
+  '!'                   { L _ SymROne }
+  '1'                   { L _ SymRUnit }
   match                 { L _ KWMatch }
   as                    { L _ KWAs }
   return                { L _ KWReturn }
@@ -102,26 +104,17 @@ exp :: { Raw }
   : '\\' binder '.' exp                                             { rloc (LambdaF $2 $4) $1 $> }
   | let binder ':' exp '=' exp in exp                               { rloc (LetF $2 $4 $6 $8) $1 $> }
   | match exp as binder return exp with branches                    { rloc (MatchF $2 $4 $6 $8) $1 $7 }
-  | fix '[' exp ']' binder binder binder ':' exp '=' exp            { rloc (FixedPointF $3 Hole Hole $5 (Just $6) $7 $9 $11) $1 $> }
-  | fix '[' exp as binder ']' binder binder binder ':' exp '=' exp  { rloc (FixedPointF $3 $5 Hole $7 (Just $8) $9 $11 $13) $1 $> }
+  | fix '[' exp ']' binder binder binder ':' exp '=' exp            { rloc (FixedPointF $3 Hole Hole $5 $6 $7 $9 $11) $1 $> }
+  | fix '[' exp as binder ']' binder binder binder ':' exp '=' exp  { rloc (FixedPointF $3 $5 Hole $7 $8 $9 $11 $13) $1 $> }
   | fix '[' exp as binder view binder ']'
-         binder binder binder ':' exp '=' exp                       { rloc (FixedPointF $3 $5 $7 $9 (Just $10) $11 $13 $15) $1 $> }
-  | fix '[' exp ']' binder binder ':' exp '=' exp                   { rloc (FixedPointF $3 Hole Hole $5 Nothing $6 $8 $10) $1 $> }
-  | fix '[' exp as binder ']' binder binder ':' exp '=' exp         { rloc (FixedPointF $3 $5 Hole $7 Nothing $8 $10 $12) $1 $> }
-  | fix '[' exp as binder view binder ']'
-         binder binder ':' exp '=' exp                              { rloc (FixedPointF $3 $5 $7 $9 Nothing $10 $12 $14) $1 $> }
-  | mu var ':' term '.' '\\' binder '.' '[' constructors ']'        { rloc (MuF () (syntax $2) $4 $7 $10 Nothing) $1 $> }
-  | mu var ':' term '.' '\\' binder '.' '[' constructors ']'
-       functor_inst                                                 { rloc (MuF () (syntax $2) $4 $7 $10 (Just (syntax $12))) $1 $> }
-  | mu var '.' '[' uniform_constructors ']'                         { rloc (MuUniformF () (syntax $2) $5 Nothing) $1 $> }
-  | mu var '.' '[' uniform_constructors ']' uniform_functor_inst    { rloc (MuUniformF () (syntax $2) $5 (Just (syntax $7))) $1 $> }
+         binder binder binder ':' exp '=' exp                       { rloc (FixedPointF $3 $5 $7 $9 $10 $11 $13 $15) $1 $> }
+  | mu var ':' apps '->' U '.' '\\' binder '.' '[' constructors ']' { rloc (MuF () (syntax $2) $4 $9 $12 Nothing) $1 $> }
+  | mu var ':' apps '->' U '.' '\\' binder '.' '[' constructors ']'
+       functor_inst                                                 { rloc (MuF () (syntax $2) $4 $9 $12 (Just (syntax $14))) $1 $> }
   | term                                                            { $1 }
 
 functor_inst :: { Loc (FunctorInstanceF Raw) }
   : functor binder binder binder binder binder '=' exp              { loc (FunctorInstanceF $2 $3 $4 $5 $6 $8) $1 $> }
-
-uniform_functor_inst :: { Loc (FunctorInstanceUniformF Raw) }
-  : functor binder binder binder binder '=' exp                     { loc (FunctorInstanceUniformF $2 $3 $4 $5 $7) $1 $> }
 
 term :: { Raw }
   : '(' binder ':' rel exp ')' '->' term                            { rloc (PiF (syntax $4) $2 $5 $8) $1 $> }
@@ -176,8 +169,7 @@ apps :: { Raw }
   | cons '(' exp ',' exp ')'                                        { rloc (ConsF (syntax $1) $3 $5) $1 $> }
   | in atom                                                         { rloc (InF $2) $1 $> }
   | lift '[' exp ']' atom                                           { rloc (FLiftF $3 $5) $1 $> }
-  | fmap '[' exp ']' '(' exp ',' exp ',' exp ',' exp ',' exp ')'    { rloc (FmapF $3 $6 $8 $10 (Just $12) $14) $1 $> }
-  | fmap '[' exp ']' '(' exp ',' exp ',' exp ',' exp ')'            { rloc (FmapF $3 $6 $8 $10 Nothing $12) $1 $> }
+  | fmap '[' exp ']' '(' exp ',' exp ',' exp ',' exp ',' exp ')'    { rloc (FmapF $3 $6 $8 $10 $12 $14) $1 $> }
   | Box atom                                                        { rloc (BoxF $2) $1 $> }
   | Diamond atom                                                    { rloc (BoxProofF $2) $1 $> }
   | Boxelim '(' exp ')'                                             { rloc (BoxElimF $3) $1 $> }
@@ -199,32 +191,26 @@ atom :: { Raw }
   | Empty                                                           { rloc EmptyF $1 $> }
   | '*'                                                             { rloc OneF $1 $> }
   | Unit                                                            { rloc UnitF $1 $> }
+  | '!'                                                             { rloc ROneF $1 $> }
+  | '1'                                                             { rloc RUnitF $1 $> }
   | '(' exp ';' exp ')'                                             { rloc (PairF $2 $4) $1 $> }
   | '(' exp ':' exp ')'                                             { rloc (AnnotationF $2 $4) $1 $>}
   | '[' exp ']'                                                     { rloc (BoxF $2) $1 $> }
   | '<' exp '>'                                                     { rloc (BoxProofF $2) $1 $> }
   | '(' exp ')'                                                     { uloc $2 $1 $> }
 
-branches :: { [(Name, Binder, Maybe Binder, Raw)] }
+branches :: { [(Name, Binder, Binder, Raw)] }
   : {-# empty #-}                                                   { [] }
-  | '|' cons '(' binder ',' binder ')' '->' exp branches            { (syntax $2, $4, Just $6, $9) : $10 }
+  | '|' cons '(' binder ',' binder ')' '->' exp branches            { (syntax $2, $4, $6, $9) : $10 }
 
-constructors :: { [(Name, RelevanceF (), Binder, Raw, Name, Raw)] }
+constructors :: { [(Name, Binder, Raw, Name, Raw)] }
   : {-# empty #-}                                                   { [] }
   | constructor                                                     { [$1] }
   | constructor ';' constructors                                    { $1 : $3 }
 
-constructor :: { (Name, RelevanceF (), Binder, Raw, Name, Raw) }
-  : cons ':' '(' binder ':' rel exp ')' '->' var atom               { (syntax $1, syntax $6, $4, $7, syntax $10, $11) }
-  | cons ':' apps '->' var atom                                     { (syntax $1, SortHole, Hole, $3, syntax $5, $6) }
-
-uniform_constructors :: { [(Name, Raw, Name)] }
-  : {-# empty #-}                                                   { [] }
-  | uniform_constructor                                             { [$1] }
-  | uniform_constructor ';' uniform_constructors                    { $1 : $3 }
-
-uniform_constructor :: { (Name, Raw, Name) }
-  : cons ':' apps '->' var                                          { (syntax $1, $3, syntax $5) }
+constructor :: { (Name, Binder, Raw, Name, Raw) }
+  : cons ':' '(' binder ':' exp ')' '->' var atom                   { (syntax $1, $4, $6, syntax $9, $10) }
+  | cons ':' apps '->' var atom                                     { (syntax $1, Hole, $3, syntax $5, $6) }
 
 binder :: { Binder }
   : var                                                             {% addComposite (syntax $1) >>

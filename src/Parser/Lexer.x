@@ -75,6 +75,8 @@ tokens :-
        "◇"                      { symbol SymDiamond }
        "▢-elim"                 { keyword KWBoxElim }
        "Box-elim"               { keyword KWBoxElim }
+       "1"                      { symbol SymRUnit }
+       "!"                      { symbol SymROne }
        "match"                  { keyword KWMatch }
        "as"                     { keyword KWAs }
        "return"                 { keyword KWReturn }
@@ -142,6 +144,8 @@ data Token
   | SymBox
   | SymDiamond
   | KWBoxElim
+  | SymRUnit
+  | SymROne
   | KWMatch
   | KWAs
   | KWReturn

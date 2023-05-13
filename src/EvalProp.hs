@@ -9,7 +9,7 @@
 module EvalProp (
   evalProp,
   propClosure,
-  valToVProp,
+  freeze,
   closureToVProp,
   quoteProp,
 ) where
@@ -58,6 +58,17 @@ instance MonadEvaluator m => ClosureEval m VProp where
     b_a <- app b (Prop va)
     b'_a' <- app b' va'
     pure (PCast b_a b'_a' (PApp (PPropSnd e) (prop va')) (PApp f va))
+  closureDefunEval (ClosureNaturalTransformation a b) vp = do
+    let a_p = PApp a (prop vp)
+        b_p = PApp b (prop vp)
+    pure (PPi Relevant Hole a_p (Lift b_p))
+  closureDefunEval (ClosureFixFType x g env c) vp = do
+    let g_p = PApp g (prop vp)
+    pure (PPi Relevant x g_p (Closure (env :> (Bound, vp)) c))
+  closureDefunEval (ClosureLiftViewInner t muF g view vp) vx = do
+    app t muF g muF view vp vx
+  closureDefunEval (ClosureLiftView x t muF g view) vp =
+    pure (PLambda x (Defun (ClosureLiftViewInner t muF g view vp)))
 
 evalProp :: forall m. MonadEvaluator m => Env -> Term Ix -> m VProp
 evalProp env (Var (Ix x)) = evalVar env x
@@ -141,26 +152,28 @@ evalProp env (Id a t u) = PId <$> evalProp env a <*> evalProp env t <*> evalProp
 evalProp env (BoxProof t) = PBoxProof <$> evalProp env t
 evalProp env (BoxElim t) = PBoxElim <$> evalProp env t
 evalProp env (Box a) = PBox <$> evalProp env a
+evalProp _ ROne = pure PROne
+evalProp _ RUnit = pure PRUnit
 evalProp env (Cons c t e) = PCons c <$> evalProp env t <*> evalProp env e
 evalProp env (In t) = PIn <$> evalProp env t
 evalProp env (FLift f a) = PFLift <$> evalProp env f <*> evalProp env a
-evalProp env (FmapAny f a b g p x) = do
+evalProp env (Fmap f a b g p x) = do
   f <- evalProp env f
   a <- evalProp env a
   b <- evalProp env b
   g <- evalProp env g
-  p <- traverse (evalProp env) p
+  p <- evalProp env p
   x <- evalProp env x
   pure (PFmap f a b g p x)
-evalProp env (MatchAny t x p bs) = do
+evalProp env (Match t x p bs) = do
   t <- evalProp env t
   p <- propClosure env p
   bs <- mapM evalBranch bs
   pure (PMatch t x p bs)
   where
-    evalBranch :: (Name, Binder, Maybe Binder, Term Ix) -> m (Name, Binder, Maybe Binder, PropClosure (A 2))
+    evalBranch :: (Name, Binder, Binder, Term Ix) -> m (Name, Binder, Binder, PropClosure (A 2))
     evalBranch (c, x, e, t) = (c,x,e,) <$> propClosure env t
-evalProp env (FixedPointAny i g v f p x c t) = do
+evalProp env (FixedPoint i g v f p x c t) = do
   i <- evalProp env i
   c <- propClosure env c
   t <- propClosure env t
@@ -172,12 +185,12 @@ evalProp env (Mu tag f t x cs functor) = do
   pure (PMu tag f t x cs functor)
   where
     evalCons
-      :: (Name, Relevance, Binder, Term Ix, Name, Term Ix)
-      -> m (Name, Relevance, Binder, PropClosure (A 2), PropClosure (A 3))
-    evalCons (ci, si, xi, bi, _, ixi) = do
+      :: (Name, Binder, Term Ix, Name, Term Ix)
+      -> m (Name, Binder, PropClosure (A 2), PropClosure (A 3))
+    evalCons (ci, xi, bi, _, ixi) = do
       bi <- propClosure env bi
       ixi <- propClosure env ixi
-      pure (ci, si, xi, bi, ixi)
+      pure (ci, xi, bi, ixi)
 
     evalFunctor :: FunctorInstance Ix -> m PFunctorInstance
     evalFunctor (FunctorInstanceF a b f p x t) =
@@ -188,7 +201,11 @@ evalProp env (Let x a t u) = do
   u <- propClosure env u
   pure (PLet x a t u)
 evalProp env (Annotation t a) = PAnnotation <$> evalProp env t <*> evalProp env a
-evalProp env (Meta m) = pure (PMeta m env)
+evalProp env (Meta mv) = do
+  t <- lookupMeta mv
+  case t of
+    Nothing -> pure (PMeta mv env)
+    Just solved -> evalProp env solved
 
 propClosure :: MonadEvaluator m => Env -> Term Ix -> m (PropClosure n)
 propClosure env t = pure (Closure env t)
@@ -197,7 +214,7 @@ spineToVProp :: forall m. MonadEvaluator m => VProp -> VSpine -> m VProp
 spineToVProp base [] = pure base
 spineToVProp base (sp :> VApp v) = do
   sp <- spineToVProp base sp
-  v <- valToVProp v
+  v <- freeze v
   pure (PApp sp v)
 spineToVProp base (sp :> VAppProp v) = do
   sp <- spineToVProp base sp
@@ -205,7 +222,7 @@ spineToVProp base (sp :> VAppProp v) = do
 spineToVProp base (sp :> VNElim z a t0 x ih ts) = do
   sp <- spineToVProp base sp
   a <- closureToVProp a
-  t0 <- valToVProp t0
+  t0 <- freeze t0
   ts <- closureToVProp ts
   pure (PNElim z a t0 x ih ts sp)
 spineToVProp base (sp :> VFst) = PFst <$> spineToVProp base sp
@@ -217,11 +234,11 @@ spineToVProp base (sp :> VQElim z b x tpi px py pe p) = do
   pure (PQElim z b x tpi px py pe p sp)
 spineToVProp base (sp :> VJ a t x pf b u t') = do
   sp <- spineToVProp base sp
-  a <- valToVProp a
-  t <- valToVProp t
+  a <- freeze a
+  t <- freeze t
   b <- closureToVProp b
-  u <- valToVProp u
-  t' <- valToVProp t'
+  u <- freeze u
+  t' <- freeze t'
   pure (PJ a t x pf b u t' sp)
 spineToVProp base (sp :> VBoxElim) = PBoxElim <$> spineToVProp base sp
 spineToVProp base (sp :> VMatch x p bs) = do
@@ -234,106 +251,104 @@ spineToVProp base (sp :> VMatch x p bs) = do
       :: (Name, Binder, Binder, ValClosure (A 2))
       -> m (Name, Binder, Binder, PropClosure (A 2))
     branchToVProp (c, x, e, t) = (c,x,e,) <$> closureToVProp t
-spineToVProp base (sp :> VMatchUniform x p bs) = do
-  sp <- spineToVProp base sp
-  p <- closureToVProp p
-  bs <- mapM branchToVProp bs
-  pure (PMatchUniform sp x p bs)
-  where
-    branchToVProp
-      :: (Name, Binder, ValClosure (A 1))
-      -> m (Name, Binder, PropClosure (A 1))
-    branchToVProp (c, x, t) = (c,x,) <$> closureToVProp t
 
-valToVProp :: forall m. MonadEvaluator m => Val -> m VProp
-valToVProp (VNeutral ne sp) = do
-  ne <- valToVProp ne
+freeze :: forall m. MonadEvaluator m => Val -> m VProp
+freeze (VNeutral ne sp) = do
+  ne <- freeze ne
   spineToVProp ne sp
-valToVProp (VRigid x) = pure (PVar x)
-valToVProp (VFlex mv env) = pure (PMeta mv env)
-valToVProp (VU s) = pure (PU s)
-valToVProp (VLambda x t) = PLambda x <$> closureToVProp t
-valToVProp (VPi s x a b) = PPi s x <$> valToVProp a <*> closureToVProp b
-valToVProp VZero = pure PZero
-valToVProp (VSucc n) = PSucc <$> valToVProp n
-valToVProp VNat = pure PNat
-valToVProp (VExists x a b) = PExists x <$> valToVProp a <*> closureToVProp b
-valToVProp (VAbort a t) = PAbort <$> valToVProp a <*> pure t
-valToVProp VEmpty = pure PEmpty
-valToVProp VUnit = pure PUnit
-valToVProp (VEq t a u) = PEq <$> valToVProp t <*> valToVProp a <*> valToVProp u
-valToVProp (VCast a b e t) = PCast <$> valToVProp a <*> valToVProp b <*> pure e <*> valToVProp t
-valToVProp (VPair t u) = PPair <$> valToVProp t <*> valToVProp u
-valToVProp (VSigma x a b) = PSigma x <$> valToVProp a <*> closureToVProp b
-valToVProp (VQuotient a x y r rx rr sx sy sxy rs tx ty tz txy tyz rt) = do
-  a <- valToVProp a
+freeze (VRigid x) = pure (PVar x)
+freeze (VFlex mv env) = pure (PMeta mv env)
+freeze (VU s) = pure (PU s)
+freeze (VLambda x t) = PLambda x <$> closureToVProp t
+freeze (VPi s x a b) = PPi s x <$> freeze a <*> closureToVProp b
+freeze VZero = pure PZero
+freeze (VSucc n) = PSucc <$> freeze n
+freeze VNat = pure PNat
+freeze (VExists x a b) = PExists x <$> freeze a <*> closureToVProp b
+freeze (VAbort a t) = PAbort <$> freeze a <*> pure t
+freeze VEmpty = pure PEmpty
+freeze VUnit = pure PUnit
+freeze (VEq t a u) = PEq <$> freeze t <*> freeze a <*> freeze u
+freeze (VCast a b e t) = PCast <$> freeze a <*> freeze b <*> pure e <*> freeze t
+freeze (VPair t u) = PPair <$> freeze t <*> freeze u
+freeze (VSigma x a b) = PSigma x <$> freeze a <*> closureToVProp b
+freeze (VQuotient a x y r rx rr sx sy sxy rs tx ty tz txy tyz rt) = do
+  a <- freeze a
   r <- closureToVProp r
   pure (PQuotient a x y r rx rr sx sy sxy rs tx ty tz txy tyz rt)
-valToVProp (VQProj t) = PQProj <$> valToVProp t
-valToVProp (VIdRefl t) = PIdRefl <$> valToVProp t
-valToVProp (VIdPath e) = pure (PIdPath e)
-valToVProp (VId a t u) = PId <$> valToVProp a <*> valToVProp t <*> valToVProp u
-valToVProp (VCons c t e) = PCons c <$> valToVProp t <*> pure e
-valToVProp (VFLift f a) = PFLift <$> valToVProp f <*> valToVProp a
-valToVProp (VFmap f a b g p x) =
-  PFmap <$> valToVProp f <*> valToVProp a <*> valToVProp b <*> valToVProp g <*> traverse valToVProp p <*> valToVProp x
-valToVProp (VFixedPoint i g v f p x c t a) = do
-  i <- valToVProp i
+freeze (VQProj t) = PQProj <$> freeze t
+freeze (VIdRefl t) = PIdRefl <$> freeze t
+freeze (VIdPath e) = pure (PIdPath e)
+freeze (VId a t u) = PId <$> freeze a <*> freeze t <*> freeze u
+freeze (VBoxProof p) = pure (PBoxProof p)
+freeze (VBox a) = PBox <$> freeze a
+freeze VROne = pure PROne
+freeze VRUnit = pure PRUnit
+freeze (VCons c t e) = PCons c <$> freeze t <*> pure e
+freeze (VFLift f a) = PFLift <$> freeze f <*> freeze a
+freeze (VFmap f a b g p x) =
+  PFmap <$> freeze f <*> freeze a <*> freeze b <*> freeze g <*> freeze p <*> freeze x
+freeze (VFixedPoint i g v f p x c t a) = do
+  i <- freeze i
   c <- closureToVProp c
   t <- closureToVProp t
   let fp = PFixedPoint i g v f p x c t
   case a of
     Nothing -> pure fp
-    Just (VAppR a) -> PApp fp <$> valToVProp a
-    Just (VAppP a) -> pure (PApp fp a)
-valToVProp (VMu tag f t x cs functor a) = do
-  t <- valToVProp t
+    Just a -> PApp fp <$> freeze a
+freeze (VMu tag f t x cs functor a) = do
+  t <- freeze t
   cs <- mapM consToVProp cs
   functor <- mapM vFunctorToPFunctor functor
   let muF = PMu tag f t x cs functor
   case a of
     Nothing -> pure muF
-    Just (VAppR a) -> PApp muF <$> valToVProp a
-    Just (VAppP a) -> pure (PApp muF a)
+    Just a -> PApp muF <$> freeze a
   where
     consToVProp
-      :: (Name, (Relevance, Binder, ValClosure (A 2), ValClosure (A 3)))
-      -> m (Name, Relevance, Binder, PropClosure (A 2), PropClosure (A 3))
-    consToVProp (ci, (si, xi, bi, ixi)) = do
+      :: (Name, (Binder, ValClosure (A 2), ValClosure (A 3)))
+      -> m (Name, Binder, PropClosure (A 2), PropClosure (A 3))
+    consToVProp (ci, (xi, bi, ixi)) = do
       bi <- closureToVProp bi
       ixi <- closureToVProp ixi
-      pure (ci, si, xi, bi, ixi)
+      pure (ci, xi, bi, ixi)
 
     vFunctorToPFunctor :: VFunctorInstance -> m PFunctorInstance
     vFunctorToPFunctor (VFunctorInstance a b f p x t) =
       PFunctorInstance a b f p x <$> closureToVProp t
-valToVProp (VBoxProof p) = pure (PBoxProof p)
-valToVProp (VBox a) = PBox <$> valToVProp a
 
 defunToVProp :: MonadEvaluator m => Defun Val -> m (Defun VProp)
-defunToVProp (ClosureEqFun f b g) = ClosureEqFun <$> valToVProp f <*> closureToVProp b <*> valToVProp g
+defunToVProp (ClosureEqFun f b g) = ClosureEqFun <$> freeze f <*> closureToVProp b <*> freeze g
 defunToVProp (ClosureEqPiFamily ve a a' b b') =
-  ClosureEqPiFamily ve <$> valToVProp a <*> valToVProp a' <*> closureToVProp b <*> closureToVProp b'
+  ClosureEqPiFamily ve <$> freeze a <*> freeze a' <*> closureToVProp b <*> closureToVProp b'
 defunToVProp (ClosureEqPi s x a a' b b') =
-  ClosureEqPi s x <$> valToVProp a <*> valToVProp a' <*> closureToVProp b <*> closureToVProp b'
+  ClosureEqPi s x <$> freeze a <*> freeze a' <*> closureToVProp b <*> closureToVProp b'
 defunToVProp (ClosureEqSigmaFamily ve a a' b b') =
-  ClosureEqSigmaFamily ve <$> valToVProp a <*> valToVProp a' <*> closureToVProp b <*> closureToVProp b'
+  ClosureEqSigmaFamily ve <$> freeze a <*> freeze a' <*> closureToVProp b <*> closureToVProp b'
 defunToVProp (ClosureEqSigma x a a' b b') =
-  ClosureEqSigma x <$> valToVProp a <*> valToVProp a' <*> closureToVProp b <*> closureToVProp b'
+  ClosureEqSigma x <$> freeze a <*> freeze a' <*> closureToVProp b <*> closureToVProp b'
 defunToVProp (ClosureEqQuotientY ve vx a a' r r') =
-  ClosureEqQuotientY ve vx <$> valToVProp a <*> valToVProp a' <*> closureToVProp r <*> closureToVProp r'
+  ClosureEqQuotientY ve vx <$> freeze a <*> freeze a' <*> closureToVProp r <*> closureToVProp r'
 defunToVProp (ClosureEqQuotientX ve y a a' r r') =
-  ClosureEqQuotientX ve y <$> valToVProp a <*> valToVProp a' <*> closureToVProp r <*> closureToVProp r'
+  ClosureEqQuotientX ve y <$> freeze a <*> freeze a' <*> closureToVProp r <*> closureToVProp r'
 defunToVProp (ClosureEqQuotient x y a a' r r') =
-  ClosureEqQuotient x y <$> valToVProp a <*> valToVProp a' <*> closureToVProp r <*> closureToVProp r'
+  ClosureEqQuotient x y <$> freeze a <*> freeze a' <*> closureToVProp r <*> closureToVProp r'
 defunToVProp (ClosureEqPair x b t t' u u') =
-  ClosureEqPair x <$> closureToVProp b <*> pure t <*> pure t' <*> valToVProp u <*> valToVProp u'
+  ClosureEqPair x <$> closureToVProp b <*> pure t <*> pure t' <*> freeze u <*> freeze u'
 defunToVProp (ClosureCastPi a a' b b' e f) =
-  ClosureCastPi <$> valToVProp a <*> valToVProp a' <*> closureToVProp b <*> closureToVProp b' <*> pure e <*> valToVProp f
+  ClosureCastPi <$> freeze a <*> freeze a' <*> closureToVProp b <*> closureToVProp b' <*> pure e <*> freeze f
+defunToVProp (ClosureNaturalTransformation a b) =
+  ClosureNaturalTransformation <$> freeze a <*> freeze b
+defunToVProp (ClosureFixFType x g env c) =
+  ClosureFixFType x <$> freeze g <*> pure env <*> pure c
+defunToVProp (ClosureLiftViewInner t muF g view vp) =
+  ClosureLiftViewInner <$> closureToVProp t <*> pure muF <*> pure g <*> pure view <*> pure vp
+defunToVProp (ClosureLiftView x t muF g view) =
+  ClosureLiftView x <$> closureToVProp t <*> pure muF <*> pure g <*> pure view
 
 closureToVProp :: forall m n. MonadEvaluator m => ValClosure n -> m (PropClosure n)
 closureToVProp (Closure env t) = pure (Closure env t)
-closureToVProp (Lift v) = Lift <$> valToVProp v
+closureToVProp (Lift v) = Lift <$> freeze v
 closureToVProp (SubstClosure v cl) = SubstClosure v <$> closureToVProp cl
 closureToVProp (DefunBase v defun) = DefunBase v <$> defunToVProp defun
 closureToVProp (Defun defun) = Defun <$> defunToVProp defun
@@ -419,11 +434,12 @@ quoteProp lvl (PId a t u) = Id <$> quoteProp lvl a <*> quoteProp lvl t <*> quote
 quoteProp lvl (PBoxProof e) = BoxProof <$> quoteProp lvl e
 quoteProp lvl (PBoxElim t) = BoxElim <$> quoteProp lvl t
 quoteProp lvl (PBox a) = Box <$> quoteProp lvl a
+quoteProp _ PROne = pure ROne
+quoteProp _ PRUnit = pure RUnit
 quoteProp lvl (PCons c t e) = Cons c <$> quoteProp lvl t <*> quoteProp lvl e
 quoteProp lvl (PIn t) = In <$> quoteProp lvl t
-quoteProp lvl (POut t) = Out <$> quoteProp lvl t
 quoteProp lvl (PFLift f a) = FLift <$> quoteProp lvl f <*> quoteProp lvl a
-quoteProp lvl (PFmap f a b g (Just p) x) = do
+quoteProp lvl (PFmap f a b g p x) = do
   f <- quoteProp lvl f
   a <- quoteProp lvl a
   b <- quoteProp lvl b
@@ -431,13 +447,6 @@ quoteProp lvl (PFmap f a b g (Just p) x) = do
   p <- quoteProp lvl p
   x <- quoteProp lvl x
   pure (Fmap f a b g p x)
-quoteProp lvl (PFmap f a b g Nothing x) = do
-  f <- quoteProp lvl f
-  a <- quoteProp lvl a
-  b <- quoteProp lvl b
-  g <- quoteProp lvl g
-  x <- quoteProp lvl x
-  pure (FmapUniform f a b g x)
 quoteProp lvl (PMatch t x p bs) = do
   t <- quoteProp lvl t
   p <- quoteProp (lvl + 1) =<< app p (varP lvl)
@@ -460,12 +469,12 @@ quoteProp lvl (PMu tag f t x cs functor) = do
   pure (Mu tag f t x cs functor)
   where
     quoteCons
-      :: (Name, Relevance, Binder, PropClosure (A 2), PropClosure (A 3))
-      -> m (Name, Relevance, Binder, Term Ix, Name, Term Ix)
-    quoteCons (ci, si, xi, bi, ixi) = do
+      :: (Name, Binder, PropClosure (A 2), PropClosure (A 3))
+      -> m (Name, Binder, Term Ix, Name, Term Ix)
+    quoteCons (ci, xi, bi, ixi) = do
       bi <- quoteProp (lvl + 2) =<< app bi (varP lvl) (varP (lvl + 1))
       ixi <- quoteProp (lvl + 3) =<< app ixi (varP lvl) (varP (lvl + 1)) (varP (lvl + 2))
-      pure (ci, si, xi, bi, f, ixi)
+      pure (ci, xi, bi, f, ixi)
 
     quoteFunctor :: PFunctorInstance -> m (FunctorInstance Ix)
     quoteFunctor (PFunctorInstance a b f p x t) = do

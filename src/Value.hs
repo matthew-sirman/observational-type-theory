@@ -11,10 +11,7 @@
 {-# LANGUAGE UndecidableInstances #-}
 
 module Value (
-  VAppElim (..),
   VElim (..),
-  pattern VApp,
-  pattern VAppProp,
   VSpine,
   Val (..),
   VFunctorInstance (..),
@@ -25,7 +22,6 @@ module Value (
   VTy,
   VProp (..),
   PFunctorInstance (..),
-  PFunctorInstanceUniform (..),
   Closure (..),
   Defun (..),
   PropClosure,
@@ -38,6 +34,8 @@ module Value (
   EnvEntry (..),
   prop,
   val,
+  restrict,
+  applyEntry,
   level,
   extend,
   var,
@@ -67,6 +65,14 @@ val :: EnvEntry -> Val
 val (Val v _) = v
 val (Prop _) = error "BUG: Tried to project value from prop entry"
 
+restrict :: EnvEntry -> EnvEntry
+restrict (Prop p) = Prop p
+restrict (Val _ p) = Prop p
+
+applyEntry :: (Val -> Val) -> (VProp -> VProp) -> EnvEntry -> EnvEntry
+applyEntry _ g (Prop p) = Prop (g p)
+applyEntry f g (Val v p) = Val (f v) (g p)
+
 type Env = [(BD, EnvEntry)]
 
 level :: Env -> Lvl
@@ -86,6 +92,10 @@ data Defun cod
   | ClosureEqQuotient Binder Binder cod cod (Closure (A 2) cod) (Closure (A 2) cod)
   | ClosureEqPair Binder (Closure (A 1) cod) EnvEntry EnvEntry cod cod
   | ClosureCastPi cod cod (Closure (A 1) cod) (Closure (A 1) cod) VProp cod
+  | ClosureNaturalTransformation cod cod
+  | ClosureFixFType Binder cod Env (Term Ix)
+  | ClosureLiftViewInner (Closure (A 6) cod) EnvEntry EnvEntry EnvEntry EnvEntry
+  | ClosureLiftView Binder (Closure (A 6) cod) EnvEntry EnvEntry EnvEntry
 
 data Closure (n :: Nat) cod where
   Closure :: forall n cod. Env -> Term Ix -> Closure n cod
@@ -131,15 +141,12 @@ type ValClosure n = Closure n Val
 
 type PropClosure n = Closure n VProp
 
-data VAppElim
-  = VAppR Val
-  | VAppP VProp
-
 -- Note that [~] is an eliminator for the universe, however it does not
 -- have a single point on which it might block. Therefore, it cannot be an
 -- eliminator in a spine
 data VElim
-  = VAppElim VAppElim
+  = VApp Val
+  | VAppProp VProp
   | VNElim Binder (ValClosure (A 1)) Val Binder Binder (ValClosure (A 2))
   | VFst
   | VSnd
@@ -147,18 +154,10 @@ data VElim
   | VJ VTy Val Binder Binder (ValClosure (A 2)) Val Val
   | VBoxElim
   | VMatch Binder (ValClosure (A 1)) [(Name, Binder, Binder, ValClosure (A 2))]
-  | VMatchUniform Binder (ValClosure (A 1)) [(Name, Binder, ValClosure (A 1))]
-
-pattern VApp :: Val -> VElim
-pattern VApp v = VAppElim (VAppR v)
-
-pattern VAppProp :: VProp -> VElim
-pattern VAppProp v = VAppElim (VAppP v)
-
-{-# COMPLETE VApp, VAppProp, VNElim, VFst, VSnd, VQElim, VJ, VBoxElim, VMatch, VMatchUniform #-}
 
 showElimHead :: VElim -> String
-showElimHead (VAppElim {}) = "<application>"
+showElimHead (VApp {}) = "<application>"
+showElimHead (VAppProp {}) = "<prop-application>"
 showElimHead (VNElim {}) = "<ℕ-elim>"
 showElimHead VFst = "<fst>"
 showElimHead VSnd = "<snd>"
@@ -166,7 +165,6 @@ showElimHead (VQElim {}) = "<Q-elim>"
 showElimHead (VJ {}) = "<J>"
 showElimHead VBoxElim = "<▢-elim>"
 showElimHead (VMatch {}) = "<match>"
-showElimHead (VMatchUniform {}) = "<match>"
 
 type VSpine = [VElim]
 
@@ -209,13 +207,15 @@ data Val
   | VIdRefl Val
   | VIdPath VProp
   | VId VTy Val Val
-  | VCons Name Val VProp
-  | VFLift Val Val
-  | VFmap Val Val Val Val (Maybe Val) Val
-  | VFixedPoint VTy Binder Binder Binder Binder Binder (ValClosure (A 4)) (ValClosure (A 5)) (Maybe VAppElim)
-  | VMu Tag Name VTy Binder [(Name, (Relevance, Binder, ValClosure (A 2), ValClosure (A 3)))] (Maybe VFunctorInstance) (Maybe VAppElim)
   | VBoxProof VProp
   | VBox Val
+  | VROne
+  | VRUnit
+  | VCons Name Val VProp
+  | VFLift Val Val
+  | VFmap Val Val Val Val Val Val
+  | VFixedPoint VTy Binder Binder Binder Binder Binder (ValClosure (A 4)) (ValClosure (A 5)) (Maybe Val)
+  | VMu Tag Name VTy Binder [(Name, (Binder, ValClosure (A 2), ValClosure (A 3)))] (Maybe VFunctorInstance) (Maybe Val)
 
 data VFunctorInstance = VFunctorInstance Binder Binder Binder Binder Binder (ValClosure (A 6))
 
@@ -271,18 +271,16 @@ data VProp
   | PBoxProof VProp
   | PBoxElim VProp
   | PBox VProp
+  | PROne
+  | PRUnit
   | PCons Name VProp VProp
   | PIn VProp
-  | POut VProp
   | PFLift VProp VProp
-  | PFmap VProp VProp VProp VProp (Maybe VProp) VProp
+  | PFmap VProp VProp VProp VProp VProp VProp
   | PMatch VProp Binder (PropClosure (A 1)) [(Name, Binder, Binder, PropClosure (A 2))]
-  | PMatchUniform VProp Binder (PropClosure (A 1)) [(Name, Binder, PropClosure (A 1))]
-  | PFixedPoint VProp Binder Binder Binder (Maybe Binder) Binder (PropClosure (A 4)) (PropClosure (A 5))
-  | PMu Tag Name VProp Binder [(Name, Relevance, Binder, PropClosure (A 2), PropClosure (A 3))] (Maybe PFunctorInstance)
-  | PMuUniform Tag Name [(Name, PropClosure (A 2))] (Maybe PFunctorInstanceUniform)
+  | PFixedPoint VProp Binder Binder Binder Binder Binder (PropClosure (A 4)) (PropClosure (A 5))
+  | PMu Tag Name VProp Binder [(Name, Binder, PropClosure (A 2), PropClosure (A 3))] (Maybe PFunctorInstance)
   | PLet Binder VProp VProp (PropClosure (A 1))
   | PAnnotation VProp VProp
 
 data PFunctorInstance = PFunctorInstance Binder Binder Binder Binder Binder (PropClosure (A 6))
-data PFunctorInstanceUniform = PFunctorInstanceUniform Binder Binder Binder Binder (PropClosure (A 5))

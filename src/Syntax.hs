@@ -2,7 +2,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE TupleSections #-}
-{-# LANGUAGE ViewPatterns #-}
 
 module Syntax (
   pattern (:>),
@@ -21,11 +20,9 @@ module Syntax (
   ULevel,
   TermF (..),
   FunctorInstanceF (..),
-  FunctorInstanceUniformF (..),
   Term,
   Type,
   FunctorInstance,
-  FunctorInstanceUniform,
   RawF (..),
   Raw,
   pattern R,
@@ -68,20 +65,15 @@ module Syntax (
   pattern BoxProof,
   pattern BoxElim,
   pattern Box,
+  pattern ROne,
+  pattern RUnit,
   pattern Cons,
   pattern In,
   pattern FLift,
-  pattern FmapAny,
   pattern Fmap,
-  pattern FmapUniform,
-  pattern MatchAny,
   pattern Match,
-  pattern MatchUniform,
-  pattern FixedPointAny,
   pattern FixedPoint,
-  pattern FixedPointUniform,
   pattern Mu,
-  pattern MuUniform,
   pattern Let,
   pattern Annotation,
   pattern Meta,
@@ -228,22 +220,21 @@ data TermF sort meta tag v t
   | BoxProofF t
   | BoxElimF t
   | BoxF t
+  | ROneF
+  | RUnitF
   | ConsF Name t t
   | InF t
   | FLiftF t t
-  | FmapF t t t t (Maybe t) t
-  | MatchF t Binder t [(Name, Binder, Maybe Binder, t)]
-  | FixedPointF t Binder Binder Binder (Maybe Binder) Binder t t
-  | MuF tag Name t Binder [(Name, RelevanceF meta, Binder, t, Name, t)] (Maybe (FunctorInstanceF t))
-  | MuUniformF tag Name [(Name, t, Name)] (Maybe (FunctorInstanceUniformF t))
+  | FmapF t t t t t t
+  | MatchF t Binder t [(Name, Binder, Binder, t)]
+  | FixedPointF t Binder Binder Binder Binder Binder t t
+  | MuF tag Name t Binder [(Name, Binder, t, Name, t)] (Maybe (FunctorInstanceF t))
   | -- Annotations
     LetF Binder t t t
   | AnnotationF t t
   | MetaF meta
 
 data FunctorInstanceF t = FunctorInstanceF Binder Binder Binder Binder Binder t
-
-data FunctorInstanceUniformF t = FunctorInstanceUniformF Binder Binder Binder Binder t
 
 newtype RawF t = RawF (Loc (TermF () () () Name t))
 
@@ -262,8 +253,6 @@ type Term v = Fix (TermF Sort MetaVar Tag v)
 type Type v = Term v
 
 type FunctorInstance v = FunctorInstanceF (Term v)
-
-type FunctorInstanceUniform v = FunctorInstanceUniformF (Term v)
 
 pattern Var :: v -> Term v
 pattern Var x = Fix (VarF x)
@@ -407,6 +396,12 @@ pattern BoxElim t = Fix (BoxElimF t)
 pattern Box :: Type v -> Type v
 pattern Box a = Fix (BoxF a)
 
+pattern ROne :: Term v
+pattern ROne = Fix ROneF
+
+pattern RUnit :: Type v
+pattern RUnit = Fix RUnitF
+
 pattern Cons :: Name -> Term v -> Term v -> Term v
 pattern Cons c t e = Fix (ConsF c t e)
 
@@ -416,50 +411,17 @@ pattern In t = Fix (InF t)
 pattern FLift :: Type v -> Type v -> Term v
 pattern FLift f a = Fix (FLiftF f a)
 
-pattern FmapAny :: Type v -> Type v -> Type v -> Term v -> Maybe (Term v) -> Term v -> Term v
-pattern FmapAny f a b g p x = Fix (FmapF f a b g p x)
-
 pattern Fmap :: Type v -> Type v -> Type v -> Term v -> Term v -> Term v -> Term v
-pattern Fmap f a b g p x = Fix (FmapF f a b g (Just p) x)
-
-pattern FmapUniform :: Type v -> Type v -> Type v -> Term v -> Term v -> Term v
-pattern FmapUniform f a b g x = Fix (FmapF f a b g Nothing x)
-
-pattern MatchAny :: Term v -> Binder -> Type v -> [(Name, Binder, Maybe Binder, Term v)] -> Term v
-pattern MatchAny t x p bs = Fix (MatchF t x p bs)
-
-sequenceConstructor :: (Name, Binder, Maybe Binder, Term v) -> Maybe (Name, Binder, Binder, Term v)
-sequenceConstructor (c, x, Just e, t) = Just (c, x, e, t)
-sequenceConstructor (_, _, Nothing, _) = Nothing
+pattern Fmap f a b g p x = Fix (FmapF f a b g p x)
 
 pattern Match :: Term v -> Binder -> Type v -> [(Name, Binder, Binder, Term v)] -> Term v
-pattern Match t x p bs <- Fix (MatchF t x p (traverse sequenceConstructor -> Just bs))
-  where
-    Match t x p bs = Fix (MatchF t x p (map (\(c, x, e, t) -> (c, x, Just e, t)) bs))
-
-ignoreParameter :: (Name, Binder, Maybe Binder, Term v) -> Maybe (Name, Binder, Term v)
-ignoreParameter (c, x, Nothing, t) = Just (c, x, t)
-ignoreParameter (_, _, Just _, _) = Nothing
-
-pattern MatchUniform :: Term v -> Binder -> Type v -> [(Name, Binder, Term v)] -> Term v
-pattern MatchUniform t x p bs <- Fix (MatchF t x p (traverse ignoreParameter -> Just bs))
-  where
-    MatchUniform t x p bs = Fix (MatchF t x p (map (\(c, x, t) -> (c, x, Nothing, t)) bs))
-
-pattern FixedPointAny :: Type v -> Binder -> Binder -> Binder -> Maybe Binder -> Binder -> Type v -> Term v -> Term v
-pattern FixedPointAny i g v f p x c t = Fix (FixedPointF i g v f p x c t)
+pattern Match t x p bs = Fix (MatchF t x p bs)
 
 pattern FixedPoint :: Type v -> Binder -> Binder -> Binder -> Binder -> Binder -> Type v -> Term v -> Term v
-pattern FixedPoint i g v f p x c t = Fix (FixedPointF i g v f (Just p) x c t)
+pattern FixedPoint i g v f p x c t = Fix (FixedPointF i g v f p x c t)
 
-pattern FixedPointUniform :: Type v -> Binder -> Binder -> Binder -> Binder -> Type v -> Term v -> Term v
-pattern FixedPointUniform i g v f x c t = Fix (FixedPointF i g v f Nothing x c t)
-
-pattern Mu :: Tag -> Name -> Type v -> Binder -> [(Name, Relevance, Binder, Type v, Name, Term v)] -> Maybe (FunctorInstance v) -> Type v
+pattern Mu :: Tag -> Name -> Type v -> Binder -> [(Name, Binder, Type v, Name, Term v)] -> Maybe (FunctorInstance v) -> Type v
 pattern Mu tag f t x cs functor = Fix (MuF tag f t x cs functor)
-
-pattern MuUniform :: Tag -> Name -> [(Name, Type v, Name)] -> Maybe (FunctorInstanceUniform v) -> Type v
-pattern MuUniform tag f cs functor = Fix (MuUniformF tag f cs functor)
 
 pattern Let :: Binder -> Type v -> Term v -> Term v -> Term v
 pattern Let x a t u = Fix (LetF x a t u)
@@ -509,17 +471,15 @@ pattern Meta v = Fix (MetaF v)
   , BoxProof
   , BoxElim
   , Box
+  , ROne
+  , RUnit
   , Cons
   , In
   , FLift
   , Fmap
-  , FmapUniform
   , Match
-  , MatchUniform
   , FixedPoint
-  , FixedPointUniform
   , Mu
-  , MuUniform
   , Let
   , Annotation
   , Meta
@@ -527,9 +487,6 @@ pattern Meta v = Fix (MetaF v)
 
 instance Functor FunctorInstanceF where
   fmap f (FunctorInstanceF a b f' p x t) = FunctorInstanceF a b f' p x (f t)
-
-instance Functor FunctorInstanceUniformF where
-  fmap f (FunctorInstanceUniformF a b f' x t) = FunctorInstanceUniformF a b f' x (f t)
 
 instance Functor (TermF p m t v) where
   fmap _ (VarF x) = VarF x
@@ -569,23 +526,21 @@ instance Functor (TermF p m t v) where
   fmap f (BoxProofF e) = BoxProofF (f e)
   fmap f (BoxElimF t) = BoxElimF (f t)
   fmap f (BoxF a) = BoxF (f a)
+  fmap _ ROneF = ROneF
+  fmap _ RUnitF = RUnitF
   fmap f (ConsF c t e) = ConsF c (f t) (f e)
   fmap f (InF t) = InF (f t)
   fmap f (FLiftF f' a) = FLiftF (f f') (f a)
-  fmap f (FmapF f' a b g p x) = FmapF (f f') (f a) (f b) (f g) (fmap f p) (f x)
+  fmap f (FmapF f' a b g p x) = FmapF (f f') (f a) (f b) (f g) (f p) (f x)
   fmap f (MatchF t x p bs) = MatchF (f t) x (f p) (fmap (fmap f) bs)
   fmap f (FixedPointF i g v f' p x c t) = FixedPointF (f i) g v f' p x (f c) (f t)
-  fmap f (MuF tag g t x cs functor) = MuF tag g (f t) x (fmap (\(ci, si, xi, ti, gi, ixi) -> (ci, si, xi, f ti, gi, f ixi)) cs) (fmap (fmap f) functor)
-  fmap f (MuUniformF tag g cs functor) = MuUniformF tag g (fmap (\(ci, ti, gi) -> (ci, f ti, gi)) cs) (fmap (fmap f) functor)
+  fmap f (MuF tag g t x cs functor) = MuF tag g (f t) x (fmap (\(ci, xi, ti, gi, ixi) -> (ci, xi, f ti, gi, f ixi)) cs) (fmap (fmap f) functor)
   fmap f (LetF x a t u) = LetF x (f a) (f t) (f u)
   fmap f (AnnotationF t a) = AnnotationF (f t) (f a)
   fmap _ (MetaF m) = MetaF m
 
 instance Foldable FunctorInstanceF where
   foldr f e (FunctorInstanceF _ _ _ _ _ t) = f t e
-
-instance Foldable FunctorInstanceUniformF where
-  foldr f e (FunctorInstanceUniformF _ _ _ _ t) = f t e
 
 instance Foldable (TermF p m t v) where
   foldr _ e (VarF _) = e
@@ -624,23 +579,21 @@ instance Foldable (TermF p m t v) where
   foldr f e (BoxProofF t) = f t e
   foldr f e (BoxElimF t) = f t e
   foldr f e (BoxF a) = f a e
+  foldr _ e ROneF = e
+  foldr _ e RUnitF = e
   foldr f e (ConsF _ t p) = (f t . f p) e
   foldr f e (InF t) = f t e
   foldr f e (FLiftF f' a) = (f f' . f a) e
-  foldr f e (FmapF f' a b g p x) = (f f' . f a . f b . f g . flip (foldr f) p . f x) e
+  foldr f e (FmapF f' a b g p x) = (f f' . f a . f b . f g . f p . f x) e
   foldr f e (MatchF t _ p bs) = (f t . f p) (foldr (\(_, _, _, b) e -> f b e) e bs)
   foldr f e (FixedPointF i _ _ _ _ _ c t) = (f i . f c . f t) e
-  foldr f e (MuF _ _ t _ cs functor) = f t (foldr (\(_, _, _, bi, _, ixi) e -> (f bi . f ixi) e) (foldr (flip (foldr f)) e functor) cs)
-  foldr f e (MuUniformF _ _ cs functor) = foldr (\(_, bi, _) e -> f bi e) (foldr (flip (foldr f)) e functor) cs
+  foldr f e (MuF _ _ t _ cs functor) = f t (foldr (\(_, _, bi, _, ixi) e -> (f bi . f ixi) e) (foldr (flip (foldr f)) e functor) cs)
   foldr f e (LetF _ a t u) = (f a . f t . f u) e
   foldr f e (AnnotationF t a) = (f t . f a) e
   foldr _ e (MetaF _) = e
 
 instance Traversable FunctorInstanceF where
   traverse f (FunctorInstanceF a b f' p x t) = FunctorInstanceF a b f' p x <$> f t
-
-instance Traversable FunctorInstanceUniformF where
-  traverse f (FunctorInstanceUniformF a b f' x t) = FunctorInstanceUniformF a b f' x <$> f t
 
 instance Traversable (TermF p m t v) where
   traverse _ (VarF x) = pure (VarF x)
@@ -683,16 +636,16 @@ instance Traversable (TermF p m t v) where
   traverse f (BoxProofF e) = BoxProofF <$> f e
   traverse f (BoxElimF t) = BoxElimF <$> f t
   traverse f (BoxF a) = BoxF <$> f a
+  traverse _ ROneF = pure ROneF
+  traverse _ RUnitF = pure RUnitF
   traverse f (ConsF c t e) = ConsF c <$> f t <*> f e
   traverse f (InF t) = InF <$> f t
   traverse f (FLiftF f' a) = FLiftF <$> f f' <*> f a
-  traverse f (FmapF f' a b g p x) = FmapF <$> f f' <*> f a <*> f b <*> f g <*> traverse f p <*> f x
+  traverse f (FmapF f' a b g p x) = FmapF <$> f f' <*> f a <*> f b <*> f g <*> f p <*> f x
   traverse f (MatchF t x p bs) = MatchF <$> f t <*> pure x <*> f p <*> traverse (\(c, x, e, t) -> (c,x,e,) <$> f t) bs
   traverse f (FixedPointF i g v f' p x c t) = FixedPointF <$> f i <*> pure g <*> pure v <*> pure f' <*> pure p <*> pure x <*> f c <*> f t
   traverse f (MuF tag g t x cs functor) =
-    MuF tag g <$> f t <*> pure x <*> traverse (\(ci, si, xi, bi, gi, ixi) -> (ci,si,xi,,gi,) <$> f bi <*> f ixi) cs <*> traverse (traverse f) functor
-  traverse f (MuUniformF tag g cs functor) =
-    MuUniformF tag g <$> traverse (\(ci, bi, gi) -> (ci,,gi) <$> f bi) cs <*> traverse (traverse f) functor
+    MuF tag g <$> f t <*> pure x <*> traverse (\(ci, xi, bi, gi, ixi) -> (ci,xi,,gi,) <$> f bi <*> f ixi) cs <*> traverse (traverse f) functor
   traverse f (LetF x a t u) = LetF x <$> f a <*> f t <*> f u
   traverse f (AnnotationF t a) = AnnotationF <$> f t <*> f a
   traverse _ (MetaF m) = pure (MetaF m)
