@@ -98,12 +98,13 @@ conv pos names = conv' names names
       conv' ns ns' lvl u u'
       conv' ns ns' lvl v v'
     convSp ns ns' lvl (sp :> VBoxElim) (sp' :> VBoxElim) = convSp ns ns' lvl sp sp'
-    convSp ns ns' lvl (sp :> VMatch x p bs) (sp' :> VMatch x' p' bs') = do
+    convSp ns ns' lvl (sp :> VMatch p x c bs) (sp' :> VMatch p' x' c' bs') = do
       convSp ns ns' lvl sp sp'
-      let vx = varR lvl
-      p_x <- app p vx
-      p'_x <- app p' vx
-      conv' (ns :> x) (ns' :> x') (lvl + 1) p_x p'_x
+      let vp = varR lvl
+          vx = varR (lvl + 1)
+      c_p_x <- app c vp vx
+      c'_p_x <- app c' vp vx
+      conv' (ns :> p :> x) (ns' :> p' :> x') (lvl + 1) c_p_x c'_p_x
       zipWithM_ convBranch bs bs'
       where
         -- TODO: don't assume same ordering

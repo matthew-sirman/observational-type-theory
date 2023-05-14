@@ -420,52 +420,54 @@ infer gamma (R _ (FmapF f@(R pos _) a b g p x)) = do
       f_lift_b_p <- f_lift_b $$ VApp vp
       pure (Fmap f a b g p x, f_lift_b_p, Relevant)
     _ -> throw (FmapNeedsFunctorInstance pos)
-infer gamma (R pos (MatchF t@(R argPos _) x p bs)) = do
-  (t, a, s) <- infer gamma t
-  (p, s') <- checkType (gamma & bind x s a) p
+infer gamma (R pos (MatchF p x c t@(R argPos _) bs)) = do
+  (t, a, _) <- infer gamma t
   case a of
     -- We must have [Just a], otherwise this is not a type. Also, [fty] is
     -- a type family by induction.
     VMu tag f aty xs constructors functor (Just a) -> do
+      let pVar = VVar (lvl gamma)
+          vmuF_p = VMu tag f aty xs constructors functor (Just pVar)
+      (c, s) <- checkType (gamma & bindR p aty & bindR x vmuF_p) c
+
+      let muF_val = VMu tag f aty xs constructors functor Nothing
+      muF <- embedVal muF_val
+      a_entry <- embedVal a
       let
-        muF = VMu tag f aty xs constructors functor Nothing
         -- checkBranches returns a set of remaining constructors.
         -- Each step we check if the constructor is in the remaining set,
         -- and then remove it. This allows us to check for totality.
         checkBranches [] = pure ([], M.fromList constructors)
-        checkBranches (brs :> (c, x, e, t)) = do
+        checkBranches (brs :> (ci, xi, ei, ti)) = do
           (brs, cs) <- checkBranches brs
-          case M.lookup c cs of
+          case M.lookup ci cs of
             Nothing -> do
-              muFTS <- ppVal gamma muF
-              throw (ConstructorNotInTypeMatch c muFTS pos)
+              muFTS <- ppVal gamma muF_val
+              throw (ConstructorNotInTypeMatch ci muFTS pos)
             Just (_, bi, ixi) -> do
-              muF <- embedVal muF
-              a_entry <- embedVal a
               b_muF_a <- app bi muF a_entry
               let xVar = VVar (lvl gamma)
                   eVar = PVar (lvl gamma + 1)
 
               vx <- embedVal xVar
-              ixi_muF_a_x <- app ixi muF a_entry vx
+              (ixi_entry, ixi_muF_a_x) <- app ixi muF a_entry vx >>= embedVal'
 
-              let gamma' = gamma & bindR x b_muF_a
               ixi_eq_a <- eqReduce ixi_muF_a_x aty a
 
-              let gamma'' = gamma' & bindP e ixi_eq_a
+              let gamma'' = gamma & bindR xi b_muF_a & bindP ei ixi_eq_a
 
-              vCx <- embedVal (VCons c xVar eVar)
-              pCx <- eval (env gamma :> (Bound, vCx)) p
-              t <- check gamma'' t pCx
+              vCx <- embedVal (VCons ci xVar eVar)
+              cCx <- eval (env gamma :> (Bound, ixi_entry) :> (Bound, vCx)) c
+              ti <- check gamma'' ti cCx
 
-              pure (brs :> (c, x, e, t), M.delete c cs)
+              pure (brs :> (ci, xi, ei, ti), M.delete ci cs)
 
       (bs, remaining) <- checkBranches bs
       unless (M.null remaining) (throw (NonTotalMatch (M.keys remaining) pos))
       vt_val <- eval (env gamma) t
       vt <- embedVal vt_val
-      vp_t <- eval (env gamma :> (Bound, vt)) p
-      pure (Match t x p bs, vp_t, s')
+      vc_t <- eval (env gamma :> (Bound, a_entry) :> (Bound, vt)) c
+      pure (Match x p c t bs, vc_t, s)
     a -> do
       aTS <- ppVal gamma a
       throw (MatchHead aTS argPos)

@@ -165,11 +165,11 @@ evalProp env (Fmap f a b g p x) = do
   p <- evalProp env p
   x <- evalProp env x
   pure (PFmap f a b g p x)
-evalProp env (Match t x p bs) = do
+evalProp env (Match p x c t bs) = do
+  c <- propClosure env c
   t <- evalProp env t
-  p <- propClosure env p
   bs <- mapM evalBranch bs
-  pure (PMatch t x p bs)
+  pure (PMatch p x c t bs)
   where
     evalBranch :: (Name, Binder, Binder, Term Ix) -> m (Name, Binder, Binder, PropClosure (A 2))
     evalBranch (c, x, e, t) = (c,x,e,) <$> propClosure env t
@@ -241,11 +241,11 @@ spineToVProp base (sp :> VJ a t x pf b u t') = do
   t' <- freeze t'
   pure (PJ a t x pf b u t' sp)
 spineToVProp base (sp :> VBoxElim) = PBoxElim <$> spineToVProp base sp
-spineToVProp base (sp :> VMatch x p bs) = do
+spineToVProp base (sp :> VMatch p x c bs) = do
   sp <- spineToVProp base sp
-  p <- closureToVProp p
+  c <- closureToVProp c
   bs <- mapM branchToVProp bs
-  pure (PMatch sp x p bs)
+  pure (PMatch p x c sp bs)
   where
     branchToVProp
       :: (Name, Binder, Binder, ValClosure (A 2))
@@ -447,11 +447,11 @@ quoteProp lvl (PFmap f a b g p x) = do
   p <- quoteProp lvl p
   x <- quoteProp lvl x
   pure (Fmap f a b g p x)
-quoteProp lvl (PMatch t x p bs) = do
+quoteProp lvl (PMatch p x c t bs) = do
+  c <- quoteProp (lvl + 2) =<< app c (varP lvl) (varP (lvl + 1))
   t <- quoteProp lvl t
-  p <- quoteProp (lvl + 1) =<< app p (varP lvl)
   bs <- mapM quoteBranch bs
-  pure (Match t x p bs)
+  pure (Match p x c t bs)
   where
     quoteBranch
       :: (Name, Binder, Binder, PropClosure (A 2))

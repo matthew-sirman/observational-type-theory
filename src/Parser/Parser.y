@@ -73,7 +73,6 @@ import qualified Error.Diagnose as Err
   '1'                   { L _ SymRUnit }
   match                 { L _ KWMatch }
   as                    { L _ KWAs }
-  return                { L _ KWReturn }
   with                  { L _ KWWith }
   '|'                   { L _ TokPipe }
   mu                    { L _ SymMu }
@@ -103,7 +102,7 @@ rel :: { Loc (RelevanceF ()) }
 exp :: { Raw }
   : '\\' binder '.' exp                                             { rloc (LambdaF $2 $4) $1 $> }
   | let binder ':' exp '=' exp in exp                               { rloc (LetF $2 $4 $6 $8) $1 $> }
-  | match exp as binder return exp with branches                    { rloc (MatchF $2 $4 $6 $8) $1 $7 }
+  | match '[' binder binder '.' exp ']' exp with branches           { rloc (MatchF $3 $4 $6 $8 $10) $1 $7 }
   | fix '[' exp ']' binder binder binder ':' exp '=' exp            { rloc (FixedPointF $3 Hole Hole $5 $6 $7 $9 $11) $1 $> }
   | fix '[' exp as binder ']' binder binder binder ':' exp '=' exp  { rloc (FixedPointF $3 $5 Hole $7 $8 $9 $11 $13) $1 $> }
   | fix '[' exp as binder view binder ']'

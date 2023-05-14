@@ -78,11 +78,10 @@ tokens :-
        "1"                      { symbol SymRUnit }
        "!"                      { symbol SymROne }
        "match"                  { keyword KWMatch }
-       "as"                     { keyword KWAs }
-       "return"                 { keyword KWReturn }
        "with"                   { keyword KWWith }
        "|"                      { symbol TokPipe }
        "fix"                    { symbol TokFix }
+       "as"                     { keyword KWAs }
        "view"                   { keyword KWView }
        "mu"                     { symbol SymMu }
        "μ"                      { symbol SymMu }
@@ -148,7 +147,6 @@ data Token
   | SymROne
   | KWMatch
   | KWAs
-  | KWReturn
   | KWWith
   | TokPipe
   | TokFix

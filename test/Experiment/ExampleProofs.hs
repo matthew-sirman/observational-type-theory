@@ -128,7 +128,7 @@ stlcNbE =
         ; 'Function : (Ty ! × Ty !) → Ty !
         ]
       functor A B f _ x =
-        match x as _ return (lift [Ty] B) ! with
+        match [_ _. (lift [Ty] B) !] x with
         | 'Unit (_, _) → 'Unit (!, *)
         | 'Product (τ₁-τ₂, _) → 'Product ((f ! (fst τ₁-τ₂); f ! (snd τ₁-τ₂)), *)
         | 'Function (τ₁-τ₂, _) → 'Function ((f ! (fst τ₁-τ₂); f ! (snd τ₁-τ₂)), *)
@@ -146,7 +146,7 @@ stlcNbE =
         ; 'Extend : (Ctx ! × Type !) → Ctx !
         ]
       functor A B f _ x =
-        match x as _ return (lift [Ctx] B) ! with
+        match [_ _. (lift [Ctx] B) !] x with
         | 'Empty (_, _) → 'Empty (!, *)
         | 'Extend (Γ-τ, _) → 'Extend ((f ! (fst Γ-τ); snd Γ-τ), *)
     in
@@ -206,7 +206,7 @@ stlcNbE =
         let τ' : Type ! = fst (snd f-τ'-Δ') in
         let Δ' : 𝔽↓T ! = snd (snd f-τ'-Δ') in
         λΓ. λρ.
-          match v as _ return Normal (f; (τ'; Γ)) with
+          match [_ _. Normal (f; (τ'; Γ))] v with
           | 'VVar (ix, pf) → 'VVar (ρ τ' ix, <fst pf, <fst (snd pf), refl Γ>>)
           | 'VOne (_, pf) → 'VOne (!, <fst pf, <fst (snd pf), refl Γ>>)
           | 'VPair (τ₁-τ₂-t-u, pf) →
@@ -229,7 +229,7 @@ stlcNbE =
             let t : N (Nf; (τ₂; Δ' ∷ τ₁)) = snd (snd τ₁-τ₂-t) in
             let ρ' : 𝔽↓̃τ (Δ' ∷ τ₁; Γ ∷ τ₁) =
               λτ. λix.
-                match ix as _ return Ix (τ; Γ ∷ τ₁) with
+                match [_ _. Ix (τ; Γ ∷ τ₁)] ix with
                 | 'Ix0 (Δ'', pf) → 'Ix0 (Γ, <refl τ, <refl Γ, snd (snd pf)>>)
                 | 'IxS (τ'-Δ''-ix, pf) →
                   let τ' : Type ! = fst τ'-Δ''-ix in
@@ -250,7 +250,7 @@ stlcNbE =
     in
     let ⟦_⟧_ : Type ! → 𝔽↓T ! → U =
       (fix [Type as Ty] SemTy _ ty : 𝔽↓T ! → U = λΓ.
-        match ty as _ return U with
+        match [_ _. U] ty with
         | 'Unit (_, _) → 1
         | 'Product (p, _) →
           let τ₁ : Ty ! = fst p in
@@ -263,7 +263,7 @@ stlcNbE =
     in
     let Π : 𝔽↓T ! → 𝔽↓T ! → U =
       (fix [𝔽↓T as Ctx] Env _ Γ : 𝔽↓T ! → U = λΔ.
-        match Γ as _ return U with
+        match [_ _. U] Γ with
         | 'Empty (_, _) → 1
         | 'Extend (Γ-τ, _) →
           let Γ : Ctx ! = fst Γ-τ in
@@ -273,9 +273,8 @@ stlcNbE =
     let rn : (Γ :U 𝔽↓T !) → (Δ :U 𝔽↓T !) → 𝔽↓̃τ (Δ; Γ) → (τ :U Type !) → ⟦ τ ⟧ Δ → ⟦ τ ⟧ Γ =
       λΓ. λΔ. λρ.
         (fix [Type as Ty view ι] rn _ τ : ⟦ (ι ! τ) ⟧ Δ → ⟦ (ι ! τ) ⟧ Γ =
-          match τ as τ' return
-            let τ' : Type ! = in (fmap[Type](Ty, Type, ι, !, τ')) in
-            ⟦ τ' ⟧ Δ → ⟦ τ' ⟧ Γ
+          match [_ τ'. let τ' : Type ! = in (fmap[Type](Ty, Type, ι, !, τ')) in
+                       ⟦ τ' ⟧ Δ → ⟦ τ' ⟧ Γ] τ
           with
           | 'Unit (_, _) → λ_. !
           | 'Product (τ₁-τ₂, _) →
@@ -299,7 +298,7 @@ stlcNbE =
         let τ : Type ! = fst τ-Γ in
         let Γ : 𝔽↓T ! = snd τ-Γ in
         λΔ. λenv.
-          match ix as _ return ⟦ τ ⟧ Δ with
+          match [_ _. ⟦ τ ⟧ Δ] ix with
           | 'Ix0 (Γ', pf) →
             let env-cast : Π (Γ' ∷ τ) Δ =
               cast(Π Γ Δ, Π (Γ' ∷ τ) Δ, Π-eq-Π Γ (Γ' ∷ τ) Δ (sym(_, _, snd pf)), env)
@@ -320,7 +319,7 @@ stlcNbE =
         let τ : Type ! = fst τ-Γ in
         let Γ : 𝔽↓T ! = snd τ-Γ in
         λΔ. λenv.
-          match tm as _ return ⟦ τ ⟧ Δ with
+          match [_ _. ⟦ τ ⟧ Δ] tm with
           | 'Var (ix, _) → lookup τ Γ ix Δ env
           | 'One (_, pf) → cast(1, ⟦ τ ⟧ Δ, ap(U, τ'. ⟦ τ' ⟧ Δ, 𝟙, τ, fst pf), !)
           | 'Pair (t-u, pf) →
@@ -357,9 +356,8 @@ stlcNbE =
               λΔ'. λf. λχ.
                 let rn-env : (Ξ :U 𝔽↓T !) → Π Ξ Δ → 𝔽↓̃τ (Δ; Δ') → Π Ξ Δ' =
                   (fix [𝔽↓T as Ctx view ι] rn-env _ Ξ : Π (ι ! Ξ) Δ → 𝔽↓̃τ (Δ; Δ') → Π (ι ! Ξ) Δ' =
-                    match Ξ as Ξ' return
-                      let Ξ'' : 𝔽↓T ! = in (fmap[𝔽↓T](Ctx, 𝔽↓T, ι, !, Ξ')) in
-                      Π Ξ'' Δ → 𝔽↓̃τ (Δ; Δ') → Π Ξ'' Δ'
+                    match [_ Ξ'. let Ξ'' : 𝔽↓T ! = in (fmap[𝔽↓T](Ctx, 𝔽↓T, ι, !, Ξ')) in
+                                 Π Ξ'' Δ → 𝔽↓̃τ (Δ; Δ') → Π Ξ'' Δ'] Ξ
                     with
                     | 'Empty (_, _) → λ_. λ_. !
                     | 'Extend (Ξ'-τ', _) →
@@ -380,12 +378,12 @@ stlcNbE =
     in
     let q-u : (τ :U Type !) →
           (f :U Form !) → (Γ :U 𝔽↓T !) →
-          (match f as _ return U with
+          (match [_ _. U] f with
           | 'Ne (_, _) → ℳ τ Γ → ⟦ τ ⟧ Γ
           | 'Nf (_, _) → ⟦ τ ⟧ Γ → 𝒩 τ Γ) =
       λτ. (fix [Type as Ty view ι] q-u _ τ :
           (f :U Form !) → (Γ :U 𝔽↓T !) →
-          (match f as _ return U with
+          (match [_ _. U] f with
           | 'Ne (_, _) → ℳ (ι ! τ) Γ → ⟦ (ι ! τ) ⟧ Γ
           | 'Nf (_, _) → ⟦ (ι ! τ) ⟧ Γ → 𝒩 (ι ! τ) Γ) =
         let q : (τ' :U Ty !) → (Γ' :U 𝔽↓T !) → ⟦ (ι ! τ') ⟧ Γ' → 𝒩 (ι ! τ') Γ' =
@@ -395,17 +393,15 @@ stlcNbE =
           λτ'. q-u ! τ' Ne
         in
         λf. λΓ.
-          match f as f return
-            let τ' : Type ! = in (fmap[Type](Ty, Type, ι, !, τ)) in
-            match f as _ return U with
-            | 'Ne (_, _) → ℳ τ' Γ → ⟦ τ' ⟧ Γ
-            | 'Nf (_, _) → ⟦ τ' ⟧ Γ → 𝒩 τ' Γ
+          match [_ f. let τ' : Type ! = in (fmap[Type](Ty, Type, ι, !, τ)) in
+                      match [_ _. U] f with
+                      | 'Ne (_, _) → ℳ τ' Γ → ⟦ τ' ⟧ Γ
+                      | 'Nf (_, _) → ⟦ τ' ⟧ Γ → 𝒩 τ' Γ] f
           with
           -- Unquote
           | 'Ne (_, _) →
-            (match τ as τ' return
-              let τ' : Type ! = in (fmap[Type](Ty, Type, ι, !, τ')) in
-              ℳ τ' Γ → ⟦ τ' ⟧ Γ
+            (match [_ τ'. let τ' : Type ! = in (fmap[Type](Ty, Type, ι, !, τ')) in
+                          ℳ τ' Γ → ⟦ τ' ⟧ Γ] τ
             with
             | 'Unit (_, _) → λ_. !
             | 'Product (τ₁-τ₂, _) →
@@ -422,9 +418,8 @@ stlcNbE =
             )
           -- Quote
           | 'Nf (_, _) →
-            (match τ as τ return
-              let τ' : Type ! = in (fmap[Type](Ty, Type, ι, !, τ)) in
-              ⟦ τ' ⟧ Γ → 𝒩 τ' Γ
+            (match [_ τ. let τ' : Type ! = in (fmap[Type](Ty, Type, ι, !, τ)) in
+                         ⟦ τ' ⟧ Γ → 𝒩 τ' Γ] τ
             with
             | 'Unit (_, _) → λ_. 'VOne (!, <*, <*, refl Γ>>)
             | 'Product (τ₁-τ₂, _) →
@@ -460,9 +455,8 @@ stlcNbE =
       λτ. λΓ. λt.
         let xs : Π Γ Γ =
           (fix [𝔽↓T as Ctx view ι] xs _ Γ : Π (ι ! Γ) (ι ! Γ) =
-            match Γ as Γ return
-              let Γ' : 𝔽↓T ! = in (fmap[𝔽↓T](Ctx, 𝔽↓T, ι, !, Γ)) in
-              Π Γ' Γ'
+            match [_ Γ. let Γ' : 𝔽↓T ! = in (fmap[𝔽↓T](Ctx, 𝔽↓T, ι, !, Γ)) in
+                        Π Γ' Γ'] Γ
             with
             | 'Empty (_, _) → !
             | 'Extend (Γ'-τ, _) →
@@ -474,9 +468,8 @@ stlcNbE =
               in
               let shift : (Δ :U 𝔽↓T !) → Π Δ Γ'' → Π Δ (Γ'' ∷ τ) =
                 (fix [𝔽↓T as Ctx view ι] shift _ Δ : Π (ι ! Δ) Γ'' → Π (ι ! Δ) (Γ'' ∷ τ) =
-                  match Δ as Δ return
-                    let Δ' : 𝔽↓T ! = in (fmap[𝔽↓T](Ctx, 𝔽↓T, ι, !, Δ)) in
-                    Π Δ' Γ'' → Π Δ' (Γ'' ∷ τ)
+                  match [_ Δ. let Δ' : 𝔽↓T ! = in (fmap[𝔽↓T](Ctx, 𝔽↓T, ι, !, Δ)) in
+                              Π Δ' Γ'' → Π Δ' (Γ'' ∷ τ)] Δ
                   with
                   | 'Empty (_, _) → λ_. !
                   | 'Extend (Δ'-τ', _) →

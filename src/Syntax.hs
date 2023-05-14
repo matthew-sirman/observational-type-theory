@@ -226,7 +226,7 @@ data TermF sort meta tag v t
   | InF t
   | FLiftF t t
   | FmapF t t t t t t
-  | MatchF t Binder t [(Name, Binder, Binder, t)]
+  | MatchF Binder Binder t t [(Name, Binder, Binder, t)]
   | FixedPointF t Binder Binder Binder Binder Binder t t
   | MuF tag Name t Binder [(Name, Binder, t, Name, t)] (Maybe (FunctorInstanceF t))
   | -- Annotations
@@ -414,8 +414,8 @@ pattern FLift f a = Fix (FLiftF f a)
 pattern Fmap :: Type v -> Type v -> Type v -> Term v -> Term v -> Term v -> Term v
 pattern Fmap f a b g p x = Fix (FmapF f a b g p x)
 
-pattern Match :: Term v -> Binder -> Type v -> [(Name, Binder, Binder, Term v)] -> Term v
-pattern Match t x p bs = Fix (MatchF t x p bs)
+pattern Match :: Binder -> Binder -> Type v -> Term v -> [(Name, Binder, Binder, Term v)] -> Term v
+pattern Match p x c t bs = Fix (MatchF p x c t bs)
 
 pattern FixedPoint :: Type v -> Binder -> Binder -> Binder -> Binder -> Binder -> Type v -> Term v -> Term v
 pattern FixedPoint i g v f p x c t = Fix (FixedPointF i g v f p x c t)
@@ -532,7 +532,7 @@ instance Functor (TermF p m t v) where
   fmap f (InF t) = InF (f t)
   fmap f (FLiftF f' a) = FLiftF (f f') (f a)
   fmap f (FmapF f' a b g p x) = FmapF (f f') (f a) (f b) (f g) (f p) (f x)
-  fmap f (MatchF t x p bs) = MatchF (f t) x (f p) (fmap (fmap f) bs)
+  fmap f (MatchF p x c t bs) = MatchF p x (f c) (f t) (fmap (fmap f) bs)
   fmap f (FixedPointF i g v f' p x c t) = FixedPointF (f i) g v f' p x (f c) (f t)
   fmap f (MuF tag g t x cs functor) = MuF tag g (f t) x (fmap (\(ci, xi, ti, gi, ixi) -> (ci, xi, f ti, gi, f ixi)) cs) (fmap (fmap f) functor)
   fmap f (LetF x a t u) = LetF x (f a) (f t) (f u)
@@ -585,7 +585,7 @@ instance Foldable (TermF p m t v) where
   foldr f e (InF t) = f t e
   foldr f e (FLiftF f' a) = (f f' . f a) e
   foldr f e (FmapF f' a b g p x) = (f f' . f a . f b . f g . f p . f x) e
-  foldr f e (MatchF t _ p bs) = (f t . f p) (foldr (\(_, _, _, b) e -> f b e) e bs)
+  foldr f e (MatchF _ _ c t bs) = (f c . f t) (foldr (\(_, _, _, b) e -> f b e) e bs)
   foldr f e (FixedPointF i _ _ _ _ _ c t) = (f i . f c . f t) e
   foldr f e (MuF _ _ t _ cs functor) = f t (foldr (\(_, _, bi, _, ixi) e -> (f bi . f ixi) e) (foldr (flip (foldr f)) e functor) cs)
   foldr f e (LetF _ a t u) = (f a . f t . f u) e
@@ -642,7 +642,7 @@ instance Traversable (TermF p m t v) where
   traverse f (InF t) = InF <$> f t
   traverse f (FLiftF f' a) = FLiftF <$> f f' <*> f a
   traverse f (FmapF f' a b g p x) = FmapF <$> f f' <*> f a <*> f b <*> f g <*> f p <*> f x
-  traverse f (MatchF t x p bs) = MatchF <$> f t <*> pure x <*> f p <*> traverse (\(c, x, e, t) -> (c,x,e,) <$> f t) bs
+  traverse f (MatchF p x c t bs) = MatchF p x <$> f c <*> f t <*> traverse (\(c, x, e, t) -> (c,x,e,) <$> f t) bs
   traverse f (FixedPointF i g v f' p x c t) = FixedPointF <$> f i <*> pure g <*> pure v <*> pure f' <*> pure p <*> pure x <*> f c <*> f t
   traverse f (MuF tag g t x cs functor) =
     MuF tag g <$> f t <*> pure x <*> traverse (\(ci, xi, bi, gi, ixi) -> (ci,xi,,gi,) <$> f bi <*> f ixi) cs <*> traverse (traverse f) functor

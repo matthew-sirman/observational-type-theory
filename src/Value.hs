@@ -153,7 +153,7 @@ data VElim
   | VQElim Binder (ValClosure (A 1)) Binder (ValClosure (A 1)) Binder Binder Binder (PropClosure (A 3))
   | VJ VTy Val Binder Binder (ValClosure (A 2)) Val Val
   | VBoxElim
-  | VMatch Binder (ValClosure (A 1)) [(Name, Binder, Binder, ValClosure (A 2))]
+  | VMatch Binder Binder (ValClosure (A 2)) [(Name, Binder, Binder, ValClosure (A 2))]
 
 showElimHead :: VElim -> String
 showElimHead (VApp {}) = "<application>"
@@ -277,7 +277,7 @@ data VProp
   | PIn VProp
   | PFLift VProp VProp
   | PFmap VProp VProp VProp VProp VProp VProp
-  | PMatch VProp Binder (PropClosure (A 1)) [(Name, Binder, Binder, PropClosure (A 2))]
+  | PMatch Binder Binder (PropClosure (A 2)) VProp [(Name, Binder, Binder, PropClosure (A 2))]
   | PFixedPoint VProp Binder Binder Binder Binder Binder (PropClosure (A 4)) (PropClosure (A 5))
   | PMu Tag Name VProp Binder [(Name, Binder, PropClosure (A 2), PropClosure (A 3))] (Maybe PFunctorInstance)
   | PLet Binder VProp VProp (PropClosure (A 1))

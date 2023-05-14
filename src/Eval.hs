@@ -397,11 +397,11 @@ eval env (Fmap f a b g p x) = do
     VMu _ _ _ _ _ (Just (VFunctorInstance _ _ _ _ _ t)) Nothing ->
       app t f_entry a_entry b_entry g_entry p_entry x_entry
     _ -> pure (VFmap f a b g p x)
-eval env (Match t x p bs) = do
+eval env (Match p x c t bs) = do
   t <- eval env t
-  p <- closure env p
+  c <- closure env c
   bs <- mapM (branch env) bs
-  t $$ VMatch x p bs
+  t $$ VMatch p x c bs
 eval env (FixedPoint i g v f p x c t) = do
   i <- eval env i
   c <- closure env c
@@ -446,18 +446,19 @@ functorLift tag f aty x cs functor a =
 
 match
   :: MonadEvaluator m
-  => Val
+  => Binder
   -> Binder
-  -> ValClosure (A 1)
+  -> ValClosure (A 2)
+  -> Val
   -> [(Name, Binder, Binder, ValClosure (A 2))]
   -> m Val
-match (VCons c u e) _ _ ((c', _, _, t) : _)
+match _ _ _ (VCons c u e) ((c', _, _, t) : _)
   | c == c' = do
       u <- embedVal u
       app t u (Prop e)
-match t@(VCons {}) x p (_ : bs) = match t x p bs
-match (VNeutral ne sp) x p bs = pure (VNeutral ne (sp :> VMatch x p bs))
-match t x p bs = pure (neElim t (VMatch x p bs))
+match p x c t@(VCons {}) (_ : bs) = match x p c t bs
+match p x c (VNeutral ne sp) bs = pure (VNeutral ne (sp :> VMatch p x c bs))
+match p x c t bs = pure (neElim t (VMatch p x c bs))
 
 valIdentity :: MonadEvaluator m => Binder -> m Val
 valIdentity x = do
@@ -509,7 +510,7 @@ VZero $$ (VNElim _ _ t0 _ _ _) = pure t0
 --       tm_t' = quote lvl t'
 --       eqJ = Transp tm_t (Name "x") Hole (quote (lvl + 2) (app))
 --   cast b_t_idrefl_t b_t'_idpath_e (VProp env eqJ) u
-t $$ (VMatch x p bs) = match t x p bs
+t $$ (VMatch p x c bs) = match p x c t bs
 ne $$ u = pure (neElim ne u)
 
 elimM :: MonadEvaluator m => m Val -> m VElim -> m Val
@@ -547,11 +548,11 @@ quoteSp l base (sp :> VJ a t x pf b u v) = do
   v <- quote l v
   J a t x pf b u v <$> quoteSp l base sp
 quoteSp l base (sp :> VBoxElim) = BoxElim <$> quoteSp l base sp
-quoteSp l base (sp :> VMatch x p bs) = do
-  p <- quote (l + 1) =<< app p (varR l)
+quoteSp l base (sp :> VMatch p x c bs) = do
+  c <- quote (l + 2) =<< app c (varR l) (varR (l + 1))
   bs <- mapM quoteBranch bs
   sp <- quoteSp l base sp
-  pure (Match sp x p bs)
+  pure (Match p x c sp bs)
   where
     quoteBranch :: (Name, Binder, Binder, ValClosure (A 2)) -> m (Name, Binder, Binder, Term Ix)
     quoteBranch (c, x, e, t) = (c,x,e,) <$> (quote (l + 2) =<< app t (varR l) (varR (l + 1)))
