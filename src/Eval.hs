@@ -100,6 +100,32 @@ instance MonadEvaluator m => ClosureEval m Val where
   closureDefunEval (ClosureLiftView x t muF g view) vp =
     pure (VLambda x (Defun (ClosureLiftViewInner t muF g view vp)))
 
+-- Test if two known head constructors are different
+headNeq :: VTy -> VTy -> Bool
+headNeq VNat VNat = False
+headNeq (VPi {}) (VPi {}) = False
+headNeq (VU {}) (VU {}) = False
+headNeq (VSigma {}) (VSigma {}) = False
+headNeq (VQuotient {}) (VQuotient {}) = False
+headNeq (VId {}) (VId {}) = False
+headNeq (VBox {}) (VBox {}) = False
+headNeq VRUnit VRUnit = False
+headNeq (VMu {}) (VMu {}) = False
+headNeq t u = hasTypeHead t && hasTypeHead u
+  where
+    -- Test if type has reduced to know its head constructor
+    hasTypeHead :: VTy -> Bool
+    hasTypeHead VNat = True
+    hasTypeHead (VPi {}) = True
+    hasTypeHead (VU {}) = True
+    hasTypeHead (VSigma {}) = True
+    hasTypeHead (VQuotient {}) = True
+    hasTypeHead (VId {}) = True
+    hasTypeHead (VBox {}) = True
+    hasTypeHead VRUnit = True
+    hasTypeHead (VMu {}) = True
+    hasTypeHead _ = False
+
 eqReduce :: forall m. MonadEvaluator m => Val -> VTy -> Val -> m Val
 eqReduce vt va vu = eqReduceType va
   where
@@ -205,26 +231,6 @@ eqReduce vt va vu = eqReduceType va
     -- No reduction rule
     eqReduceAll t a u = pure (VEq t a u)
 
-    -- Test if type has reduced to know its head constructor
-    hasTypeHead :: VTy -> Bool
-    hasTypeHead VNat = True
-    hasTypeHead (VPi {}) = True
-    hasTypeHead (VU {}) = True
-    hasTypeHead (VSigma {}) = True
-    hasTypeHead (VQuotient {}) = True
-    hasTypeHead (VId {}) = True
-    hasTypeHead _ = False
-
-    -- Test if two known head constructors are different
-    headNeq :: VTy -> VTy -> Bool
-    headNeq VNat VNat = False
-    headNeq (VPi {}) (VPi {}) = False
-    headNeq (VU {}) (VU {}) = False
-    headNeq (VSigma {}) (VSigma {}) = False
-    headNeq (VQuotient {}) (VQuotient {}) = False
-    headNeq (VId {}) (VId {}) = False
-    headNeq t u = hasTypeHead t && hasTypeHead u
-
 cast :: forall m. MonadEvaluator m => VTy -> VTy -> VProp -> Val -> m Val
 -- Rule Cast-Zero
 cast VNat VNat _ VZero = pure VZero
@@ -262,6 +268,11 @@ cast (VId {}) (VId {}) _ (VIdPath _) = undefined
 --     u_eq_u' = Snd (Snd e')
 --     t'_eq_u' = Trans t'_eq_t (Trans t_eq_u u_eq_u')
 -- pure (VIdPath (VProp env t'_eq_u'))
+cast (VBox a) (VBox b) e (VBoxProof t) = do
+  a_prop <- freeze a
+  b_prop <- freeze b
+  pure (VBoxProof (PCast a_prop b_prop e t))
+cast VRUnit VRUnit _ t = pure t
 cast (VMu tag f aty x cs functor (Just a)) (VMu _ _ _ _ _ _ (Just a')) e (VCons ci t e') =
   case lookup ci cs of
     Nothing -> error "BUG: Impossible"
@@ -274,12 +285,9 @@ cast (VMu tag f aty x cs functor (Just a)) (VMu _ _ _ _ _ _ (Just a')) e (VCons 
       ixi_muF_a_t <- app ixi muF a t_entry
       ixi_prop <- freeze ixi_muF_a_t
       pure (VCons ci t (PTrans ixi_prop (prop a) (prop a') e' e))
-cast (VBox a) (VBox b) e (VBoxProof t) = do
-  a_prop <- freeze a
-  b_prop <- freeze b
-  pure (VBoxProof (PCast a_prop b_prop e t))
-cast VRUnit VRUnit _ t = pure t
-cast a b e t = pure (VCast a b e t)
+cast a b e t
+  | headNeq a b = pure (VAbort b e)
+  | otherwise = pure (VCast a b e t)
 
 closure :: forall n m. MonadEvaluator m => Env -> Term Ix -> m (ValClosure n)
 closure env t = pure (Closure env t)

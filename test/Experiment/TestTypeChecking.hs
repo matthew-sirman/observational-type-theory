@@ -856,6 +856,15 @@ tm42 =
     | 'Cons (ls, pf) → abort(Vec ℕ (S (fst ls)), pf)
   |]
 
+tm43 :: String
+tm43 =
+  [r|
+    let f : (1 ~ ℕ) → ℕ =
+      λp. cast(1, ℕ, p, !)
+    in
+    f
+  |]
+
 test :: String -> IO ()
 test input = do
   (result, mctx) <-
@@ -873,7 +882,8 @@ test input = do
   case result of
     Right (t, tty, knownSort -> Just s) -> do
       putStrLn "Program:"
-      putStrLn (prettyPrintTerm [] t)
+      -- Hack to sub in meta solutions!
+      putStrLn (prettyPrintTerm [] (runEvaluator (nbe Irrelevant [] t) (_metaCtx mctx)))
       putStrLn "\nHas type:"
       putStrLn (prettyPrintTerm [] (runEvaluator (quote 0 tty) (_metaCtx mctx)))
       putStrLn "\nReduces to:"
