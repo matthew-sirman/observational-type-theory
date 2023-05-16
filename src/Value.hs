@@ -91,7 +91,7 @@ data Defun cod
   | ClosureEqQuotientX EnvEntry Binder cod cod (Closure (A 2) cod) (Closure (A 2) cod)
   | ClosureEqQuotient Binder Binder cod cod (Closure (A 2) cod) (Closure (A 2) cod)
   | ClosureEqPair Binder (Closure (A 1) cod) EnvEntry EnvEntry cod cod
-  | ClosureCastPi cod cod (Closure (A 1) cod) (Closure (A 1) cod) VProp cod
+  | ClosureCastPi Sort cod cod (Closure (A 1) cod) (Closure (A 1) cod) VProp cod
   | ClosureNaturalTransformation cod cod
   | ClosureFixFType Binder cod Env (Term Ix)
   | ClosureLiftViewInner (Closure (A 6) cod) EnvEntry EnvEntry EnvEntry EnvEntry

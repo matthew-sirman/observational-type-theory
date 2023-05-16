@@ -65,7 +65,7 @@ instance MonadEvaluator m => ClosureEval m VProp where
     b_t' <- app b t'
     let cast_b_t_b_t'_u = PCast b_t b_t' ap_B_e u
     pure (PEq cast_b_t_b_t'_u b_t' u')
-  closureDefunEval (ClosureCastPi a a' b b' e f) va' = do
+  closureDefunEval (ClosureCastPi _ a a' b b' e f) va' = do
     let va = PCast a' a (PPropFst e) (prop va')
     b_a <- app b (Prop va)
     b'_a' <- app b' va'
@@ -347,8 +347,8 @@ defunToVProp (ClosureEqQuotient x y a a' r r') =
   ClosureEqQuotient x y <$> freeze a <*> freeze a' <*> closureToVProp r <*> closureToVProp r'
 defunToVProp (ClosureEqPair x b t t' u u') =
   ClosureEqPair x <$> closureToVProp b <*> pure t <*> pure t' <*> freeze u <*> freeze u'
-defunToVProp (ClosureCastPi a a' b b' e f) =
-  ClosureCastPi <$> freeze a <*> freeze a' <*> closureToVProp b <*> closureToVProp b' <*> pure e <*> freeze f
+defunToVProp (ClosureCastPi s a a' b b' e f) =
+  ClosureCastPi s <$> freeze a <*> freeze a' <*> closureToVProp b <*> closureToVProp b' <*> pure e <*> freeze f
 defunToVProp (ClosureNaturalTransformation a b) =
   ClosureNaturalTransformation <$> freeze a <*> freeze b
 defunToVProp (ClosureFixFType x g env c) =

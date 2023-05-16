@@ -94,9 +94,20 @@ instance MonadEvaluator m => ClosureEval m Val where
     let ap_B_e = PAp (PU Relevant) x b_prop (prop t) (prop t') (prop ve)
     cast_b_t_b_t'_u <- cast b_t b_t' ap_B_e u
     eqReduce cast_b_t_b_t'_u b_t' u'
-  closureDefunEval (ClosureCastPi a a' b b' e f) va' = do
-    va <- cast a' a (PPropFst e) (val va') >>= embedVal
-    bindM4 cast (app b va) (app b' va') (pure (PApp (PPropSnd e) (prop va'))) (f $$ VApp (val va))
+  closureDefunEval (ClosureCastPi s a a' b b' e f) va' = do
+    (va, f_a) <- case s of
+      Relevant -> do
+        va_val <- cast a' a (PPropFst e) (val va')
+        f_a <- f $$ VApp va_val
+        (,f_a) <$> embedVal va_val
+      Irrelevant -> do
+        a'_prop <- freeze a'
+        a_prop <- freeze a
+        let va_prop = PCast a'_prop a_prop (PPropFst e) (prop va')
+        f_a <- f $$ VAppProp va_prop
+        pure (Prop va_prop, f_a)
+      SortMeta s -> absurd s
+    bindM4 cast (app b va) (app b' va') (pure (PApp (PPropSnd e) (prop va'))) (pure f_a)
   closureDefunEval (ClosureNaturalTransformation a b) vp = do
     a_p <- a $$ VApp (val vp)
     b_p <- b $$ VApp (val vp)
@@ -144,8 +155,8 @@ eqReduce vt va vu = eqReduceType va
     eqReduceType (VPi s x a b) = do
       -- Γ ⊢ f ~[Π(x : A). B] g => Π(x : A). f x ~[B] g x
       -- Γ, x : A ⊢ f x ~[B] g x
-      s' <- resolveSort s
-      pure (VPi s x a (Defun (ClosureEqFun s' vt b vu)))
+      s_res <- resolveSort s
+      pure (VPi s x a (Defun (ClosureEqFun s_res vt b vu)))
     -- Rule Eq-Ω
     eqReduceType (VU Irrelevant) =
       let t_to_u = VFun Irrelevant vt vu
@@ -251,8 +262,9 @@ cast VNat VNat e (VSucc n) = VSucc <$> cast VNat VNat e n
 cast (VU s) (VU s') _ a
   | s == s' = pure a
 -- Rule Cast-Pi
-cast (VPi _ _ a b) (VPi _ x' a' b') e f =
-  pure (VLambda x' (Defun (ClosureCastPi a a' b b' e f)))
+cast (VPi s _ a b) (VPi _ x' a' b') e f = do
+  s <- resolveSort s
+  pure (VLambda x' (Defun (ClosureCastPi s a a' b b' e f)))
 cast (VSigma _ a b) (VSigma _ a' b') e (VPair t u) = do
   t'_val <- cast a a' (PPropFst e) t
   t' <- embedVal t'_val
