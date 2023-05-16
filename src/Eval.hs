@@ -52,10 +52,23 @@ eval' Relevant env t = embedVal =<< eval env t
 eval' Irrelevant env t = Prop <$> evalProp env t
 eval' (SortMeta m) _ _ = absurd m
 
+resolveSort :: MonadEvaluator m => Relevance -> m Sort
+resolveSort Relevant = pure Relevant
+resolveSort Irrelevant = pure Irrelevant
+resolveSort (SortMeta m) = do
+  s <- lookupSortMeta m
+  case s of
+    Just s -> resolveSort s
+    Nothing -> error "BUG"
+
 instance MonadEvaluator m => ClosureEval m Val where
   closureEval = eval
-  closureDefunEval (ClosureEqFun f b g) v =
+
+  closureDefunEval (ClosureEqFun Relevant f b g) v =
     bindM3 eqReduce (f $$ VApp (val v)) (app b v) (g $$ VApp (val v))
+  closureDefunEval (ClosureEqFun Irrelevant f b g) v =
+    bindM3 eqReduce (f $$ VAppProp (prop v)) (app b v) (g $$ VAppProp (prop v))
+  closureDefunEval (ClosureEqFun (SortMeta s) _ _ _) _ = absurd s
   closureDefunEval (ClosureEqPiFamily ve a a' b b') va' = do
     va_val <- cast a' a (prop ve) (val va')
     va <- embedVal va_val
@@ -135,7 +148,8 @@ eqReduce vt va vu = eqReduceType va
     eqReduceType (VPi s x a b) = do
       -- Γ ⊢ f ~[Π(x : A). B] g => Π(x : A). f x ~[B] g x
       -- Γ, x : A ⊢ f x ~[B] g x
-      pure (VPi s x a (Defun (ClosureEqFun vt b vu)))
+      s' <- resolveSort s
+      pure (VPi s x a (Defun (ClosureEqFun s' vt b vu)))
     -- Rule Eq-Ω
     eqReduceType (VU Irrelevant) =
       let t_to_u = VFun Irrelevant vt vu

@@ -82,7 +82,7 @@ extend :: Sort -> Lvl -> Env -> Env
 extend sort lvl env = env :> (Bound, var sort lvl)
 
 data Defun cod
-  = ClosureEqFun cod (Closure (A 1) cod) cod
+  = ClosureEqFun Sort cod (Closure (A 1) cod) cod
   | ClosureEqPiFamily EnvEntry cod cod (Closure (A 1) cod) (Closure (A 1) cod)
   | ClosureEqPi Relevance Binder cod cod (Closure (A 1) cod) (Closure (A 1) cod)
   | ClosureEqSigmaFamily EnvEntry cod cod (Closure (A 1) cod) (Closure (A 1) cod)

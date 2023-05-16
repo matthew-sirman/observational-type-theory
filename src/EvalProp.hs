@@ -20,7 +20,7 @@ import Value
 
 instance MonadEvaluator m => ClosureEval m VProp where
   closureEval = evalProp
-  closureDefunEval (ClosureEqFun f b g) v = do
+  closureDefunEval (ClosureEqFun _ f b g) v = do
     b_v <- app b v
     pure (PEq (PApp f (prop v)) b_v (PApp g (prop v)))
   closureDefunEval (ClosureEqPiFamily ve a a' b b') va' = do
@@ -318,7 +318,7 @@ freeze (VMu tag f t x cs functor a) = do
       PFunctorInstance a b f p x <$> closureToVProp t
 
 defunToVProp :: MonadEvaluator m => Defun Val -> m (Defun VProp)
-defunToVProp (ClosureEqFun f b g) = ClosureEqFun <$> freeze f <*> closureToVProp b <*> freeze g
+defunToVProp (ClosureEqFun s f b g) = ClosureEqFun s <$> freeze f <*> closureToVProp b <*> freeze g
 defunToVProp (ClosureEqPiFamily ve a a' b b') =
   ClosureEqPiFamily ve <$> freeze a <*> freeze a' <*> closureToVProp b <*> closureToVProp b'
 defunToVProp (ClosureEqPi s x a a' b b') =
