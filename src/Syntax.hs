@@ -162,6 +162,11 @@ instance Show meta => Show (RelevanceF meta) where
   show Irrelevant = "Ω"
   show (SortMeta m) = show m
 
+instance Functor RelevanceF where
+  fmap _ Relevant = Relevant
+  fmap _ Irrelevant = Irrelevant
+  fmap f (SortMeta s) = SortMeta (f s)
+
 pattern SortHole :: RelevanceF ()
 pattern SortHole = SortMeta ()
 

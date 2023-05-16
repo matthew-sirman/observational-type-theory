@@ -52,15 +52,6 @@ eval' Relevant env t = embedVal =<< eval env t
 eval' Irrelevant env t = Prop <$> evalProp env t
 eval' (SortMeta m) _ _ = absurd m
 
-resolveSort :: MonadEvaluator m => Relevance -> m Sort
-resolveSort Relevant = pure Relevant
-resolveSort Irrelevant = pure Irrelevant
-resolveSort (SortMeta m) = do
-  s <- lookupSortMeta m
-  case s of
-    Just s -> resolveSort s
-    Nothing -> error "BUG"
-
 instance MonadEvaluator m => ClosureEval m Val where
   closureEval = eval
 
@@ -69,12 +60,17 @@ instance MonadEvaluator m => ClosureEval m Val where
   closureDefunEval (ClosureEqFun Irrelevant f b g) v =
     bindM3 eqReduce (f $$ VAppProp (prop v)) (app b v) (g $$ VAppProp (prop v))
   closureDefunEval (ClosureEqFun (SortMeta s) _ _ _) _ = absurd s
-  closureDefunEval (ClosureEqPiFamily ve a a' b b') va' = do
-    va_val <- cast a' a (prop ve) (val va')
-    va <- embedVal va_val
+  closureDefunEval (ClosureEqPiFamily s ve a a' b b') va' = do
+    va <- case s of
+      Relevant -> cast a' a (prop ve) (val va') >>= embedVal
+      Irrelevant -> do
+        a_prop <- freeze a
+        a'_prop <- freeze a'
+        pure (Prop (PCast a_prop a'_prop (prop ve) (prop va')))
+      SortMeta s -> absurd s
     bindM3 eqReduce (app b va) (pure (VU Relevant)) (app b' va')
   closureDefunEval (ClosureEqPi s x a a' b b') ve =
-    pure (VPi s x a' (Defun (ClosureEqPiFamily ve a a' b b')))
+    pure (VPi (fmap absurd s) x a' (Defun (ClosureEqPiFamily s ve a a' b b')))
   closureDefunEval (ClosureEqSigmaFamily ve a a' b b') va = do
     va'_val <- cast a a' (prop ve) (val va)
     va' <- embedVal va'_val
@@ -176,7 +172,8 @@ eqReduce vt va vu = eqReduceType va
     eqReduceAll (VPi s _ a b) (VU Relevant) (VPi s' x' a' b')
       | s == s' = do
           a'_eq_a <- eqReduce a' (VU s) a
-          pure (VExists (Name "$e") a'_eq_a (Defun (ClosureEqPi s x' a a' b b')))
+          s_res <- resolveSort s
+          pure (VExists (Name "$e") a'_eq_a (Defun (ClosureEqPi s_res x' a a' b b')))
     -- Rule Eq-Σ
     eqReduceAll (VSigma x a b) (VU Relevant) (VSigma _ a' b') = do
       a_eq_a' <- eqReduce a (VU Relevant) a'

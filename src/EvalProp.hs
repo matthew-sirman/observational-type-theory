@@ -12,24 +12,36 @@ module EvalProp (
   freeze,
   closureToVProp,
   quoteProp,
+  resolveSort,
 ) where
 
 import MonadEvaluator
 import Syntax
 import Value
 
+import Data.Void
+
+resolveSort :: MonadEvaluator m => Relevance -> m Sort
+resolveSort Relevant = pure Relevant
+resolveSort Irrelevant = pure Irrelevant
+resolveSort (SortMeta m) = do
+  s <- lookupSortMeta m
+  case s of
+    Just s -> resolveSort s
+    Nothing -> error "BUG"
+
 instance MonadEvaluator m => ClosureEval m VProp where
   closureEval = evalProp
   closureDefunEval (ClosureEqFun _ f b g) v = do
     b_v <- app b v
     pure (PEq (PApp f (prop v)) b_v (PApp g (prop v)))
-  closureDefunEval (ClosureEqPiFamily ve a a' b b') va' = do
+  closureDefunEval (ClosureEqPiFamily _ ve a a' b b') va' = do
     let va = PCast a' a (prop ve) (prop va')
     b_a <- app b (Prop va)
     b'_a' <- app b' va'
     pure (PEq b_a (PU Relevant) b'_a')
   closureDefunEval (ClosureEqPi s x a a' b b') ve =
-    pure (PPi s x a' (Defun (ClosureEqPiFamily ve a a' b b')))
+    pure (PPi (fmap absurd s) x a' (Defun (ClosureEqPiFamily s ve a a' b b')))
   closureDefunEval (ClosureEqSigmaFamily ve a a' b b') va = do
     let va' = PCast a a' (prop ve) (prop va)
     b_a <- app b va
@@ -319,8 +331,8 @@ freeze (VMu tag f t x cs functor a) = do
 
 defunToVProp :: MonadEvaluator m => Defun Val -> m (Defun VProp)
 defunToVProp (ClosureEqFun s f b g) = ClosureEqFun s <$> freeze f <*> closureToVProp b <*> freeze g
-defunToVProp (ClosureEqPiFamily ve a a' b b') =
-  ClosureEqPiFamily ve <$> freeze a <*> freeze a' <*> closureToVProp b <*> closureToVProp b'
+defunToVProp (ClosureEqPiFamily s ve a a' b b') =
+  ClosureEqPiFamily s ve <$> freeze a <*> freeze a' <*> closureToVProp b <*> closureToVProp b'
 defunToVProp (ClosureEqPi s x a a' b b') =
   ClosureEqPi s x <$> freeze a <*> freeze a' <*> closureToVProp b <*> closureToVProp b'
 defunToVProp (ClosureEqSigmaFamily ve a a' b b') =
