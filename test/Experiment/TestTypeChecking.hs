@@ -599,7 +599,7 @@ tm30 =
     let ls : Vec ℕ (S 0) =
       'Cons ((0; (S (S 0); 'Nil (!, *))), *)
     in
-    match [_ _. ℕ] ls with
+    match ls as _ return ℕ with
       | 'Cons (x, _) -> fst x
       | 'Nil (_, _) -> 0
   |]
@@ -661,7 +661,7 @@ tm34 =
     in
     let length : (A :U U) → List A ! → ℕ =
       λA. (fix [List A as G] length _ x : ℕ =
-        match [_ _. ℕ] x with
+        match x as _ return ℕ with
           | 'Nil (_, _) → 0
           | 'Cons (ls, _) →
             let tl : G ! = snd ls in
@@ -669,7 +669,7 @@ tm34 =
     in
     let map : (A :U U) → (B :U U) → (A → B) → List A ! → List B ! =
       λA. λB. λf. (fix [List A as G] mapf _ x : List B ! =
-        match [_ _. List B !] x with
+        match x as _ return List B ! with
           | 'Nil (_, _) → 'Nil (!, *)
           | 'Cons (ls, _) →
             let a : A = fst ls in
@@ -678,7 +678,7 @@ tm34 =
     in
     let foldr : (A :U U) → (B :U U) → B → (A → B → B) → List A ! → B =
       λA. λB. λnil. λcons. (fix [List A as G] fold _ x : B =
-        match [_ _. B] x with
+        match x as _ return B with
           | 'Nil (_, _) → nil
           | 'Cons (ls, _) →
             let a : A = fst ls in
@@ -707,7 +707,7 @@ tm35 =
     in
     let map : (A :U U) → (B :U U) → (A → B) → (n :U ℕ) → Vec A n → Vec B n =
       λA. λB. λf. fix [Vec A as G] mapf n x : Vec B n =
-        match [_ _. Vec B n] x with
+        match x as _ return Vec B n with
           | 'Nil (_, pf) → 'Nil (!, pf)
           | 'Cons (ls, pf) →
             let m : ℕ = fst ls in
@@ -717,7 +717,7 @@ tm35 =
     in
     let foldr : (A :U U) → (B :U U) → B → (A → B → B) → (n :U ℕ) → Vec A n → B =
       λA. λB. λnil. λcons. fix [Vec A as G] fold n x : B =
-        match [_ _. B] x with
+        match x as _ return B with
           | 'Nil (_, _) → nil
           | 'Cons (ls, _) →
             let m : ℕ = fst ls in
@@ -771,7 +771,7 @@ tm38 =
         ; 'Cons : (A × List !) → List !
         ]
         functor X Y f _ x =
-          match [_ _. (lift [List] Y) !] x with
+          match x as _ return (lift [List] Y) ! with
           | 'Nil (_, _) → 'Nil (!, *)
           | 'Cons (xs, _) → 'Cons ((fst xs; f ! (snd xs)), *)
     in
@@ -780,13 +780,13 @@ tm38 =
     in
     let length : (A :U U) → (p :U 1) → List A p → ℕ =
       λA. fix [List A] length _ xs : ℕ =
-        match [_ _. ℕ] xs with
+        match xs as _ return ℕ with
         | 'Nil (_, _) → 0
         | 'Cons (xs, _) → S (length ! (snd xs))
     in
     let range : (A :U U) → (p :U 1) → List A p → List ℕ p =
       λA. fix [List A as ListA view ι] range p xs : List ℕ p =
-        match [_ _. List ℕ p] xs with
+        match xs as _ return List ℕ p with
         | 'Nil (_, _) → 'Nil (!, *)
         | 'Cons (xs, _) → 'Cons ((length A p (ι p (snd xs)); range p (snd xs)), *)
     in
@@ -802,18 +802,18 @@ tm39 =
         ; 'Cons : (X × List !) → List !
         ]
         functor A B f _ x =
-          match [_ _. (lift [List] B) !] x with
+          match x as _ return (lift [List] B) ! with
           | 'Nil (_, _) → 'Nil (!, *)
           | 'Cons (ls, _) → 'Cons ((fst ls; f ! (snd ls)), *)
     in
     let F : List ℕ ! → U =
       (fix [List ℕ as ListN] F _ ls : U =
-        match [_ _. U] ls with
+        match ls as _ return U with
         | 'Nil (_, _) → 1
         | 'Cons (ls, _) → ℕ × F ! (snd ls)) !
     in
     fix [List ℕ as ListN view ι] f _ ls : F (ι ! ls) =
-      match [_ ls. F (in (fmap [List ℕ](ListN, List ℕ, ι, !, ls)))] ls with
+      match ls as ls return F (in (fmap [List ℕ](ListN, List ℕ, ι, !, ls))) with
       | 'Nil (_, _) → !
       | 'Cons (ls, _) → (fst ls; f ! (snd ls))
   |]
@@ -851,9 +851,9 @@ tm42 =
     let ls : Vec ℕ 0 =
       'Nil (!, *)
     in
-    match [n _. Vec ℕ n] ls with
+    match ls as _ return Vec ℕ 0 with
     | 'Nil (_, _) → 'Nil (!, *)
-    | 'Cons (ls, pf) → abort(Vec ℕ (S (fst ls)), pf)
+    | 'Cons (ls, pf) → abort(Vec ℕ 0, pf)
   |]
 
 tm43 :: String

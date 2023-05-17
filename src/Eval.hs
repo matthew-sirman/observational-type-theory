@@ -315,13 +315,6 @@ cast a b e t
 closure :: forall n m. MonadEvaluator m => Env -> Term Ix -> m (ValClosure n)
 closure env t = pure (Closure env t)
 
-branch
-  :: MonadEvaluator m
-  => Env
-  -> (Name, Binder, Binder, Term Ix)
-  -> m (Name, Binder, Binder, ValClosure (A 2))
-branch env (c, x, e, t) = (c,x,e,) <$> closure env t
-
 evalSort :: MonadEvaluator m => Relevance -> m Relevance
 evalSort Relevant = pure Relevant
 evalSort Irrelevant = pure Irrelevant
@@ -428,11 +421,14 @@ eval env (Fmap f a b g p x) = do
     VMu _ _ _ _ _ (Just (VFunctorInstance _ _ _ _ _ t)) Nothing ->
       app t f_entry a_entry b_entry g_entry p_entry x_entry
     _ -> pure (VFmap f a b g p x)
-eval env (Match p x c t bs) = do
+eval env (Match t x c bs) = do
   t <- eval env t
   c <- closure env c
   bs <- mapM (branch env) bs
-  t $$ VMatch p x c bs
+  t $$ VMatch x c bs
+  where
+    branch :: Env -> (Name, Binder, Binder, Term Ix) -> m (Name, Binder, Binder, ValClosure (A 2))
+    branch env (c, x, e, t) = (c,x,e,) <$> closure env t
 eval env (FixedPoint i g v f p x c t) = do
   i <- eval env i
   c <- closure env c
@@ -478,18 +474,17 @@ functorLift tag f aty x cs functor a =
 match
   :: MonadEvaluator m
   => Binder
-  -> Binder
-  -> ValClosure (A 2)
+  -> ValClosure (A 1)
   -> Val
   -> [(Name, Binder, Binder, ValClosure (A 2))]
   -> m Val
-match _ _ _ (VCons c u e) ((c', _, _, t) : _)
+match _ _ (VCons c u e) ((c', _, _, t) : _)
   | c == c' = do
       u <- embedVal u
       app t u (Prop e)
-match p x c t@(VCons {}) (_ : bs) = match x p c t bs
-match p x c (VNeutral ne sp) bs = pure (VNeutral ne (sp :> VMatch p x c bs))
-match p x c t bs = pure (neElim t (VMatch p x c bs))
+match x c t@(VCons {}) (_ : bs) = match x c t bs
+match x c (VNeutral ne sp) bs = pure (VNeutral ne (sp :> VMatch x c bs))
+match x c t bs = pure (neElim t (VMatch x c bs))
 
 valIdentity :: MonadEvaluator m => Binder -> m Val
 valIdentity x = do
@@ -541,7 +536,7 @@ VZero $$ (VNElim _ _ t0 _ _ _) = pure t0
 --       tm_t' = quote lvl t'
 --       eqJ = Transp tm_t (Name "x") Hole (quote (lvl + 2) (app))
 --   cast b_t_idrefl_t b_t'_idpath_e (VProp env eqJ) u
-t $$ (VMatch p x c bs) = match p x c t bs
+t $$ (VMatch x c bs) = match x c t bs
 ne $$ u = pure (neElim ne u)
 
 elimM :: MonadEvaluator m => m Val -> m VElim -> m Val
@@ -579,11 +574,11 @@ quoteSp l base (sp :> VJ a t x pf b u v) = do
   v <- quote l v
   J a t x pf b u v <$> quoteSp l base sp
 quoteSp l base (sp :> VBoxElim) = BoxElim <$> quoteSp l base sp
-quoteSp l base (sp :> VMatch p x c bs) = do
-  c <- quote (l + 2) =<< app c (varR l) (varR (l + 1))
+quoteSp l base (sp :> VMatch x c bs) = do
+  c <- quote (l + 1) =<< app c (varR l)
   bs <- mapM quoteBranch bs
   sp <- quoteSp l base sp
-  pure (Match p x c sp bs)
+  pure (Match sp x c bs)
   where
     quoteBranch :: (Name, Binder, Binder, ValClosure (A 2)) -> m (Name, Binder, Binder, Term Ix)
     quoteBranch (c, x, e, t) = (c,x,e,) <$> (quote (l + 2) =<< app t (varR l) (varR (l + 1)))

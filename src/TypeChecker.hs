@@ -420,15 +420,14 @@ infer gamma (R _ (FmapF f@(R pos _) a b g p x)) = do
       f_lift_b_p <- f_lift_b $$ VApp vp
       pure (Fmap f a b g p x, f_lift_b_p, Relevant)
     _ -> throw (FmapNeedsFunctorInstance pos)
-infer gamma (R pos (MatchF p x c t@(R argPos _) bs)) = do
+infer gamma (R pos (MatchF t@(R argPos _) x c bs)) = do
   (t, a, _) <- infer gamma t
   case a of
-    -- We must have [Just a], otherwise this is not a type. Also, [fty] is
-    -- a type family by induction.
+    -- We must have [Just a], otherwise this is not a type.
     VMu tag f aty xs constructors functor (Just a) -> do
       let pVar = VVar (lvl gamma)
           vmuF_p = VMu tag f aty xs constructors functor (Just pVar)
-      (c, s) <- checkType (gamma & bindR p aty & bindR x vmuF_p) c
+      (c, s) <- checkType (gamma & bindR x vmuF_p) c
 
       let muF_val = VMu tag f aty xs constructors functor Nothing
       muF <- embedVal muF_val
@@ -450,14 +449,14 @@ infer gamma (R pos (MatchF p x c t@(R argPos _) bs)) = do
                   eVar = PVar (lvl gamma + 1)
 
               vx <- embedVal xVar
-              (ixi_entry, ixi_muF_a_x) <- app ixi muF a_entry vx >>= embedVal'
+              ixi_muF_a_x <- app ixi muF a_entry vx
 
               ixi_eq_a <- eqReduce ixi_muF_a_x aty a
 
               let gamma'' = gamma & bindR xi b_muF_a & bindP ei ixi_eq_a
 
               vCx <- embedVal (VCons ci xVar eVar)
-              cCx <- eval (env gamma :> (Bound, ixi_entry) :> (Bound, vCx)) c
+              cCx <- eval (env gamma :> (Bound, vCx)) c
               ti <- check gamma'' ti cCx
 
               pure (brs :> (ci, xi, ei, ti), M.delete ci cs)
@@ -466,8 +465,8 @@ infer gamma (R pos (MatchF p x c t@(R argPos _) bs)) = do
       unless (M.null remaining) (throw (NonTotalMatch (M.keys remaining) pos))
       vt_val <- eval (env gamma) t
       vt <- embedVal vt_val
-      vc_t <- eval (env gamma :> (Bound, a_entry) :> (Bound, vt)) c
-      pure (Match x p c t bs, vc_t, s)
+      vc_t <- eval (env gamma :> (Bound, vt)) c
+      pure (Match t x c bs, vc_t, s)
     a -> do
       aTS <- ppVal gamma a
       throw (MatchHead aTS argPos)

@@ -194,11 +194,12 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
           x' = go precLet ns x
           args = showParen True (sep comma [a', b', g', p', x'])
        in par prec precApp (str "fmap [" . go precLet ns f . str "]" . args)
-    go prec ns (Match x p c t bs) =
-      let c' = binder x . space . binder p . dot . go precLet (ns :> x :> p) c
-          t' = go precLet ns t
+    go prec ns (Match t x c bs) =
+      let t' = go precLet ns t
+          x' = str " as " . binder x
+          c' = str " return " . go precLet (ns :> x) c
           bs' = foldr ((.) . (str "\n" .) . branch) id bs
-       in par prec precLet (str "match [" . c' . str "] " . t' . str " with" . bs')
+       in par prec precLet (str "match " . t' . x' . c' . str " with" . bs')
       where
         branch :: (Name, Binder, Binder, Term v) -> ShowS
         branch (cons, x, e, t) =

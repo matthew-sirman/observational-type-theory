@@ -184,11 +184,11 @@ renameProp pos ns m sub (PFmap f a b g p x) = do
   p <- renameProp pos ns m sub p
   x <- renameProp pos ns m sub x
   pure (Fmap f a b g p x)
-renameProp pos ns m sub (PMatch p x c t bs) = do
-  c <- renameProp pos (ns :> p :> x) m (liftRenaming 2 sub) =<< app c (varP (cod sub)) (varP (cod sub + 1))
+renameProp pos ns m sub (PMatch t x c bs) = do
+  c <- renameProp pos (ns :> x) m (liftRenaming 1 sub) =<< app c (varP (cod sub))
   t <- renameProp pos ns m sub t
   bs <- mapM quoteBranch bs
-  pure (Match p x c t bs)
+  pure (Match t x c bs)
   where
     quoteBranch
       :: (Name, Binder, Binder, PropClosure (A 2))
@@ -274,11 +274,11 @@ renameSp pos ns m sub base (sp :> VJ a t x pf b u v) = do
 renameSp pos ns m sub base (sp :> VBoxElim) = do
   sp <- renameSp pos ns m sub base sp
   pure (BoxElim sp)
-renameSp pos ns m sub base (sp :> VMatch p x c bs) = do
+renameSp pos ns m sub base (sp :> VMatch x c bs) = do
   sp <- renameSp pos ns m sub base sp
-  c <- rename pos (ns :> p :> x) m (liftRenaming 2 sub) =<< app c (varR (cod sub)) (varR (cod sub + 1))
+  c <- rename pos (ns :> x) m (liftRenaming 1 sub) =<< app c (varR (cod sub))
   bs <- mapM renameBranch bs
-  pure (Match p x c sp bs)
+  pure (Match sp x c bs)
   where
     renameBranch
       :: (Name, Binder, Binder, ValClosure (A 2))
