@@ -178,7 +178,7 @@ data TermF sort meta tag v t
   = VarF v
   | -- Universe terms have a relevance and a level
     UF (RelevanceF meta)
-  | LambdaF Binder t
+  | LambdaF sort Binder t
   | AppF sort t t
   | -- Pi types are annotated with their domain type's relevance and level, and the co-domain level
     PiF (RelevanceF meta) Binder t t
@@ -265,8 +265,8 @@ pattern Var x = Fix (VarF x)
 pattern U :: Relevance -> Term v
 pattern U s = Fix (UF s)
 
-pattern Lambda :: Binder -> Term v -> Term v
-pattern Lambda x e = Fix (LambdaF x e)
+pattern Lambda :: Sort -> Binder -> Term v -> Term v
+pattern Lambda s x e = Fix (LambdaF s x e)
 
 pattern App :: Sort -> Term v -> Term v -> Term v
 pattern App s t u = Fix (AppF s t u)
@@ -496,7 +496,7 @@ instance Functor FunctorInstanceF where
 instance Functor (TermF p m t v) where
   fmap _ (VarF x) = VarF x
   fmap _ (UF s) = UF s
-  fmap f (LambdaF x e) = LambdaF x (f e)
+  fmap f (LambdaF s x e) = LambdaF s x (f e)
   fmap f (AppF s t u) = AppF s (f t) (f u)
   fmap f (PiF s x a b) = PiF s x (f a) (f b)
   fmap _ ZeroF = ZeroF
@@ -550,7 +550,7 @@ instance Foldable FunctorInstanceF where
 instance Foldable (TermF p m t v) where
   foldr _ e (VarF _) = e
   foldr _ e (UF _) = e
-  foldr f e (LambdaF _ t) = f t e
+  foldr f e (LambdaF _ _ t) = f t e
   foldr f e (AppF _ t u) = (f t . f u) e
   foldr f e (PiF _ _ a b) = (f a . f b) e
   foldr _ e ZeroF = e
@@ -603,7 +603,7 @@ instance Traversable FunctorInstanceF where
 instance Traversable (TermF p m t v) where
   traverse _ (VarF x) = pure (VarF x)
   traverse _ (UF s) = pure (UF s)
-  traverse f (LambdaF x e) = LambdaF x <$> f e
+  traverse f (LambdaF s x e) = LambdaF s x <$> f e
   traverse f (AppF s t u) = AppF s <$> f t <*> f u
   traverse f (PiF s x a b) = PiF s x <$> f a <*> f b
   traverse _ ZeroF = pure ZeroF

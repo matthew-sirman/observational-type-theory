@@ -173,7 +173,7 @@ data Val
   | VRigid Lvl
   | VFlex MetaVar Env
   | VU Relevance
-  | VLambda Binder (ValClosure (A 1))
+  | VLambda Sort Binder (ValClosure (A 1))
   | VPi Relevance Binder VTy (ValClosure (A 1))
   | VZero
   | VSucc Val
@@ -236,7 +236,7 @@ data VProp
   = PVar Lvl
   | PMeta MetaVar Env
   | PU Relevance
-  | PLambda Binder (PropClosure (A 1))
+  | PLambda Sort Binder (PropClosure (A 1))
   | PApp VProp VProp
   | PPi Relevance Binder VProp (PropClosure (A 1))
   | PZero

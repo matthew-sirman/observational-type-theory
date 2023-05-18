@@ -69,7 +69,7 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
     go :: Int -> [Binder] -> Term v -> ShowS
     go _ ns (Var x) = tag "V" . showsVar x ns
     go _ _ (U s) = shows s
-    go prec ns (Lambda x e) =
+    go prec ns (Lambda _ x e) =
       let domain = chr 'λ' . binder x
        in par prec precLet (domain . dot . go precLet (ns :> x) e)
     go prec ns (App _ t u) =

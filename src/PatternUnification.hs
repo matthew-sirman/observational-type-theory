@@ -83,9 +83,9 @@ renameProp pos _ m _ (PMeta m' _)
   | m == m' = throw (OccursCheck m pos)
   | otherwise = pure (Meta m')
 renameProp _ _ _ _ (PU s) = pure (U s)
-renameProp pos ns m sub (PLambda x t) = do
+renameProp pos ns m sub (PLambda s x t) = do
   t <- renameProp pos (ns :> x) m (liftRenaming 1 sub) =<< app t (varP (cod sub))
-  pure (Lambda x t)
+  pure (Lambda s x t)
 renameProp pos ns m sub (PApp t u) = App Irrelevant <$> renameProp pos ns m sub t <*> renameProp pos ns m sub u
 renameProp pos ns m sub (PPi s x a b) = do
   a <- renameProp pos ns m sub a
@@ -312,8 +312,8 @@ rename pos _ m _ (VFlex m' _)
   | m == m' = throw (OccursCheck m pos)
   | otherwise = pure (Meta m')
 rename _ _ _ _ (VU s) = pure (U s)
-rename pos ns m sub (VLambda x t) =
-  Lambda x <$> (rename pos (ns :> x) m (liftRenaming 1 sub) =<< app t (varR (cod sub)))
+rename pos ns m sub (VLambda s x t) =
+  Lambda s x <$> (rename pos (ns :> x) m (liftRenaming 1 sub) =<< app t (var s (cod sub)))
 rename pos ns m sub (VPi s x a b) = do
   a <- rename pos ns m sub a
   b <- rename pos (ns :> x) m (liftRenaming 1 sub) =<< app b (varR (cod sub))
@@ -454,11 +454,11 @@ solve pos names lvl mv sub (sp :> VApp u@(VVar (Lvl x))) t = do
   body <- freshMeta names
   u <- embedVal u
   solve pos names lvl body (sub :> (Bound, u)) sp t
-  addSolution mv (Lambda (names !! x) (Meta body))
+  addSolution mv (Lambda Relevant (names !! x) (Meta body))
 solve pos names lvl mv sub (sp :> VAppProp p@(PVar (Lvl x))) t = do
   body <- freshMeta names
   solve pos names lvl body (sub :> (Bound, Prop p)) sp t
-  addSolution mv (Lambda (names !! x) (Meta body))
+  addSolution mv (Lambda Irrelevant (names !! x) (Meta body))
 solve pos names lvl _ _ (_ :> VApp u) _ = do
   tm <- quote lvl u
   throw (NonLinearSpineNonVariable (TS (prettyPrintTerm names tm)) pos)

@@ -118,7 +118,7 @@ instance MonadEvaluator m => ClosureEval m Val where
   closureDefunEval (ClosureLiftViewInner t muF g view vp) vx = do
     app t muF g muF view vp vx
   closureDefunEval (ClosureLiftView x t muF g view) vp =
-    pure (VLambda x (Defun (ClosureLiftViewInner t muF g view vp)))
+    pure (VLambda Relevant x (Defun (ClosureLiftViewInner t muF g view vp)))
 
 -- Test if two known head constructors are different
 headNeq :: VTy -> VTy -> Bool
@@ -264,7 +264,7 @@ cast (VU s) (VU s') _ a
 -- Rule Cast-Pi
 cast (VPi s _ a b) (VPi _ x' a' b') e f = do
   s <- resolveSort s
-  pure (VLambda x' (Defun (ClosureCastPi s a a' b b' e f)))
+  pure (VLambda s x' (Defun (ClosureCastPi s a a' b b' e f)))
 cast (VSigma _ a b) (VSigma _ a' b') e (VPair t u) = do
   t'_val <- cast a a' (PPropFst e) t
   t' <- embedVal t'_val
@@ -331,7 +331,7 @@ eval env (Var (Ix x)) = evalVar env x
     evalVar (env :> _) x = evalVar env (x - 1)
     evalVar _ _ = error "BUG: Impossible"
 eval _ (U s) = VU <$> evalSort s
-eval env (Lambda x e) = pure (VLambda x (Closure env e))
+eval env (Lambda s x e) = pure (VLambda s x (Closure env e))
 eval env (App Relevant t u) = elimM (eval env t) (VApp <$> eval env u)
 eval env (App Irrelevant t u) = elimM (eval env t) (VAppProp <$> evalProp env u)
 eval _ (App (SortMeta m) _ _) = absurd m
@@ -493,14 +493,14 @@ match x c t bs = pure (neElim t (VMatch x c bs))
 
 valIdentity :: MonadEvaluator m => Binder -> m Val
 valIdentity x = do
-  let idTm = Lambda Hole (Lambda x (Var 0))
+  let idTm = Lambda Relevant Hole (Lambda Relevant x (Var 0))
   eval [] idTm
 
 infixl 8 $$
 
 ($$) :: MonadEvaluator m => Val -> VElim -> m Val
-(VLambda _ c) $$ (VApp u) = app c =<< embedVal u
-(VLambda _ c) $$ (VAppProp p) = app c (Prop p)
+(VLambda Relevant _ c) $$ (VApp u) = app c =<< embedVal u
+(VLambda Irrelevant _ c) $$ (VAppProp p) = app c (Prop p)
 -- Only reduce a fixed point [(fix f) ps a => f (fix f) ps a] when
 -- [a] is a normal form; i.e. a constructor. This avoids the risk of
 -- infinitely looping.
@@ -595,7 +595,7 @@ quote lvl (VNeutral ne sp) = do
 quote lvl (VRigid x) = pure (Var (lvl2ix lvl x))
 quote _ (VFlex mv _) = pure (Meta mv)
 quote _ (VU s) = pure (U s)
-quote lvl (VLambda x t) = Lambda x <$> (quote (lvl + 1) =<< app t (varR lvl))
+quote lvl (VLambda s x t) = Lambda s x <$> (quote (lvl + 1) =<< app t (var s lvl))
 quote lvl (VPi s x a b) = Pi s x <$> quote lvl a <*> (quote (lvl + 1) =<< app b (varR lvl))
 quote _ VZero = pure Zero
 quote lvl (VSucc t) = Succ <$> quote lvl t

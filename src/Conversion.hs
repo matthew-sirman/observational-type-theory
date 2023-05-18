@@ -20,6 +20,7 @@ import Value
 
 import Control.Monad (liftM2, zipWithM_)
 import Control.Monad.Oops
+import Data.Void
 import Error.Diagnose
 
 convSort
@@ -139,18 +140,24 @@ conv pos names = conv' names names
     conv' _ _ _ (VRigid x) (VRigid x')
       | x == x' = pure ()
     conv' _ _ _ (VU s) (VU s') = convSort pos s s'
-    conv' ns ns' lvl (VLambda x t) (VLambda x' t') = do
-      let vx = varR lvl
+    conv' ns ns' lvl (VLambda s x t) (VLambda _ x' t') = do
+      let vx = var s lvl
       t_x <- app t vx
       t'_x <- app t' vx
       conv' (ns :> x) (ns' :> x') (lvl + 1) t_x t'_x
-    conv' ns ns' lvl (VLambda x t) t' = do
-      t_x <- app t (varR lvl)
-      t'_x <- t' $$ VApp (VVar lvl)
+    conv' ns ns' lvl (VLambda s x t) t' = do
+      t_x <- app t (var s lvl)
+      t'_x <- case s of
+        Relevant -> t' $$ VApp (VVar lvl)
+        Irrelevant -> t' $$ VAppProp (PVar lvl)
+        SortMeta s -> absurd s
       conv' (ns :> x) (ns' :> x) (lvl + 1) t_x t'_x
-    conv' ns ns' lvl t (VLambda x' t') = do
-      t_x <- t $$ VApp (VVar lvl)
-      t'_x <- app t' (varR lvl)
+    conv' ns ns' lvl t (VLambda s' x' t') = do
+      t_x <- case s' of
+        Relevant -> t $$ VApp (VVar lvl)
+        Irrelevant -> t $$ VAppProp (PVar lvl)
+        SortMeta s -> absurd s
+      t'_x <- app t' (var s' lvl)
       conv' (ns :> x') (ns' :> x') (lvl + 1) t_x t'_x
     conv' ns ns' lvl (VPi s x a b) (VPi s' x' a' b') = do
       convSort pos s s'

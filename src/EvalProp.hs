@@ -80,7 +80,7 @@ instance MonadEvaluator m => ClosureEval m VProp where
   closureDefunEval (ClosureLiftViewInner t muF g view vp) vx = do
     app t muF g muF view vp vx
   closureDefunEval (ClosureLiftView x t muF g view) vp =
-    pure (PLambda x (Defun (ClosureLiftViewInner t muF g view vp)))
+    pure (PLambda Relevant x (Defun (ClosureLiftViewInner t muF g view vp)))
 
 evalProp :: forall m. MonadEvaluator m => Env -> Term Ix -> m VProp
 evalProp env (Var (Ix x)) = evalVar env x
@@ -89,7 +89,7 @@ evalProp env (Var (Ix x)) = evalVar env x
     evalVar (env :> _) x = evalVar env (x - 1)
     evalVar _ _ = error "BUG: Impossible"
 evalProp _ (U s) = pure (PU s)
-evalProp env (Lambda x t) = PLambda x <$> propClosure env t
+evalProp env (Lambda s x t) = PLambda s x <$> propClosure env t
 -- For evaluating applications with prop codomain, we don't care whether the argument
 -- is a prop or not; we always compute a prop
 evalProp env (App _ t u) = PApp <$> evalProp env t <*> evalProp env u
@@ -271,7 +271,7 @@ freeze (VNeutral ne sp) = do
 freeze (VRigid x) = pure (PVar x)
 freeze (VFlex mv env) = pure (PMeta mv env)
 freeze (VU s) = pure (PU s)
-freeze (VLambda x t) = PLambda x <$> closureToVProp t
+freeze (VLambda s x t) = PLambda s x <$> closureToVProp t
 freeze (VPi s x a b) = PPi s x <$> freeze a <*> closureToVProp b
 freeze VZero = pure PZero
 freeze (VSucc n) = PSucc <$> freeze n
@@ -370,7 +370,7 @@ quoteProp :: forall m. MonadEvaluator m => Lvl -> VProp -> m (Term Ix)
 quoteProp lvl (PVar x) = pure (Var (lvl2ix lvl x))
 quoteProp _ (PMeta mv _) = pure (Meta mv)
 quoteProp _ (PU s) = pure (U s)
-quoteProp lvl (PLambda x t) = Lambda x <$> (quoteProp (lvl + 1) =<< app t (varP lvl))
+quoteProp lvl (PLambda s x t) = Lambda s x <$> (quoteProp (lvl + 1) =<< app t (varP lvl))
 quoteProp lvl (PApp t u) = App Irrelevant <$> quoteProp lvl t <*> quoteProp lvl u
 quoteProp lvl (PPi s x a b) = Pi s x <$> quoteProp lvl a <*> (quoteProp (lvl + 1) =<< app b (varP lvl))
 quoteProp _ PZero = pure Zero

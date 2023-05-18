@@ -526,7 +526,7 @@ infer gamma (R _ (FixedPointF i@(R pos _) g v f p x c t)) = do
       -- Lifts ι : (p : X) → G p → μF p
       -- to F[ι] : (p : X) → F[G] p → F[μF] p
       -- and then applies the isomorphism F[μF] p ≅ μF p (semantically this is the identity)
-      pure (VLambda p (Defun (ClosureLiftView x t vmuF vg view)))
+      pure (VLambda Relevant p (Defun (ClosureLiftView x t vmuF vg view)))
     liftView _ _ _ _ _ = throw (FixViewWithNoFunctor pos)
 infer gamma (R muPos (MuF () f a x cs functor)) = do
   a <- check gamma a (VU Relevant)
@@ -645,11 +645,11 @@ check
   -> Raw
   -> VTy
   -> Checker (Variant e) (Term Ix)
-check gamma (R _ (LambdaF x t)) (VPi s _ a b) = do
+check gamma (R _ (LambdaF () x t)) (VPi s _ a b) = do
   s' <- checkSortKnown s
   b' <- app b (var s' (lvl gamma))
   t <- check (bind x s a gamma) t b'
-  pure (Lambda x t)
+  pure (Lambda s' x t)
 check gamma (R pos (LambdaF {})) tty = do
   tTS <- ppVal gamma tty
   throw (CheckLambda tTS pos)

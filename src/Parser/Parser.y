@@ -101,7 +101,7 @@ rel :: { Loc (RelevanceF ()) }
   | '_'                                                             { loc SortHole $1 $> }
 
 exp :: { Raw }
-  : '\\' binder '.' exp                                             { rloc (LambdaF $2 $4) $1 $> }
+  : '\\' binder '.' exp                                             { rloc (LambdaF () $2 $4) $1 $> }
   | let binder ':' exp '=' exp in exp                               { rloc (LetF $2 () $4 $6 $8) $1 $> }
   | match exp as binder return exp with branches                    { rloc (MatchF $2 $4 $6 $8) $1 $7 }
   | fix '[' exp ']' binder binder binder ':' exp '=' exp            { rloc (FixedPointF $3 Hole Hole $5 $6 $7 $9 $11) $1 $> }
