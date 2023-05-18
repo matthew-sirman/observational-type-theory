@@ -18,7 +18,7 @@ import PrettyPrinter
 import Syntax
 import Value
 
-import Control.Monad (liftM2, zipWithM_)
+import Control.Monad.Except
 import Control.Monad.Oops
 import Data.Void
 import Error.Diagnose
@@ -128,8 +128,7 @@ conv pos names = conv' names names
         safeHead (hd : _) = Just hd
 
     -- Conversion checking
-    conv'
-      :: [Binder] -> [Binder] -> Lvl -> Val -> Val -> Checker (Variant e) ()
+    conv' :: [Binder] -> [Binder] -> Lvl -> Val -> Val -> Checker (Variant e) ()
     -- Flex conversion: attempt to unify
     conv' ns _ lvl (VNeutral (VFlex m env) sp) t = solve pos ns lvl m env sp t
     conv' _ ns lvl t (VNeutral (VFlex m env) sp) = solve pos ns lvl m env sp t
@@ -184,11 +183,23 @@ conv pos names = conv' names names
       conv' ns ns' lvl t t'
       conv' ns ns' lvl a a'
       conv' ns ns' lvl u u'
-    conv' ns ns' lvl (VCast a b _ t) (VCast a' b' _ t') = do
-      conv' ns ns' lvl a a'
-      conv' ns ns' lvl b b'
-      -- [e ≡ e'] follows from proof irrelevance, given [a ≡ a'] and [b ≡ b']
-      conv' ns ns' lvl t t'
+    conv' ns ns' lvl cast@(VCast a b _ t) cast'@(VCast a' b' _ t') = do
+      -- First try to compare [a ≡ b]. If success, compare [t ≡ cast(a', b', e', t')]
+      -- Else, try to compare [a' ≡ b']. If success, compare [cast(a, b, e, t) ≡ t']
+      -- Otherwise, compare casts structurally.
+      tryChoice
+        (conv' ns ns lvl a b)
+        (conv' ns ns' lvl t cast')
+        ( tryChoice
+            (conv' ns' ns' lvl a' b')
+            (conv' ns ns' lvl cast t')
+            ( do
+                conv' ns ns' lvl a a'
+                conv' ns ns' lvl b b'
+                -- [e ≡ e'] follows from proof irrelevance, given [a ≡ a'] and [b ≡ b']
+                conv' ns ns' lvl t t'
+            )
+        )
     -- These rules implement definitional castrefl. Instead of a propositional
     -- constant [castrefl : cast(A, A, e, t) ~ t], we make this hold definitionally.
     -- Note that it does _not_ reduce in general, and is only handled in the conversion
@@ -295,3 +306,12 @@ conv pos names = conv' names names
       aTS <- TS . prettyPrintTerm ns <$> quote lvl a
       bTS <- TS . prettyPrintTerm ns' <$> quote lvl b
       throw (ConversionFailure aTS bTS pos)
+
+    tryChoice
+      :: Checker (Variant e) ()
+      -> Checker (Variant e) ()
+      -> Checker (Variant e) ()
+      -> Checker (Variant e) ()
+    tryChoice b ifTrue ifFalse = do
+      b <- catchError (b >> pure True) (const (pure False))
+      if b then ifTrue else ifFalse

@@ -18,6 +18,7 @@ import MonadEvaluator
 import PrettyPrinter
 import Syntax
 
+import Control.Applicative
 import Control.Lens hiding (Context, Empty, Refl, (:>))
 import Control.Monad.Except
 import Control.Monad.Oops
@@ -25,7 +26,7 @@ import Control.Monad.State
 import Data.IntMap qualified as IM
 
 newtype Checker e a = Checker {runChecker :: ExceptT e (State CheckState) a}
-  deriving (Functor, Applicative, Monad, MonadState CheckState, MonadError e)
+  deriving (Functor, Applicative, Alternative, Monad, MonadState CheckState, MonadError e)
 
 instance MonadEvaluator (Checker e) where
   evaluate e = gets (runEvaluator e . _metaCtx)
