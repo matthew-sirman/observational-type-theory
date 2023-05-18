@@ -378,6 +378,7 @@ rename pos ns m sub (VCons c t e) = do
   t <- rename pos ns m sub t
   e <- renameProp pos ns m sub e
   pure (Cons c t e)
+rename pos ns m sub (VIn t) = In <$> rename pos ns m sub t
 rename pos ns m sub (VFLift f a) = do
   f <- rename pos ns m sub f
   a <- rename pos ns m sub a

@@ -398,9 +398,14 @@ eval env (Box a) = VBox <$> eval env a
 eval _ ROne = pure VROne
 eval _ RUnit = pure VRUnit
 eval env (Cons c t e) = VCons c <$> eval env t <*> evalProp env e
--- [In] and [Out] witness the isomorphism [μF ≅ F[μF]] for inductive types.
--- Semantically, they both operate as the identity
-eval env (In t) = eval env t
+-- [In] and witnesses the isomorphism [μF ≅ F[μF]] for inductive types.
+-- Semantically, this is the identity, but must block when its argument is
+-- neutral
+eval env (In t) = do
+  t <- eval env t
+  case t of
+    VCons c t e -> pure (VCons c t e)
+    t -> pure (VIn t)
 eval env (FLift f a) = do
   f <- eval env f
   a <- eval env a
@@ -617,6 +622,7 @@ quote lvl (VIdRefl t) = IdRefl <$> quote lvl t
 quote lvl (VIdPath e) = IdPath <$> quoteProp lvl e
 quote lvl (VId a t u) = Id <$> quote lvl a <*> quote lvl t <*> quote lvl u
 quote lvl (VCons c t e) = Cons c <$> quote lvl t <*> quoteProp lvl e
+quote lvl (VIn t) = In <$> quote lvl t
 quote lvl (VBoxProof e) = BoxProof <$> quoteProp lvl e
 quote lvl (VBox a) = Box <$> quote lvl a
 quote _ VROne = pure ROne

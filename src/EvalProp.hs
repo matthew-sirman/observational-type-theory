@@ -297,6 +297,7 @@ freeze (VBox a) = PBox <$> freeze a
 freeze VROne = pure PROne
 freeze VRUnit = pure PRUnit
 freeze (VCons c t e) = PCons c <$> freeze t <*> pure e
+freeze (VIn t) = PIn <$> freeze t
 freeze (VFLift f a) = PFLift <$> freeze f <*> freeze a
 freeze (VFmap f a b g p x) =
   PFmap <$> freeze f <*> freeze a <*> freeze b <*> freeze g <*> freeze p <*> freeze x

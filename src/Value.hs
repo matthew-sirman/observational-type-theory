@@ -212,6 +212,7 @@ data Val
   | VROne
   | VRUnit
   | VCons Name Val VProp
+  | VIn Val
   | VFLift Val Val
   | VFmap Val Val Val Val Val Val
   | VFixedPoint VTy Binder Binder Binder Binder Binder (ValClosure (A 4)) (ValClosure (A 5)) (Maybe Val)

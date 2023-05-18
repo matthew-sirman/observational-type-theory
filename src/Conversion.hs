@@ -234,6 +234,7 @@ conv pos names = conv' names names
     conv' ns ns' lvl (VCons c t _) (VCons c' t' _)
       | c == c' = do
           conv' ns ns' lvl t t'
+    conv' ns ns' lvl (VIn t) (VIn t') = conv' ns ns' lvl t t'
     conv' ns ns' lvl (VFLift f a) (VFLift f' a') = do
       conv' ns ns' lvl f f'
       conv' ns ns' lvl a a'
