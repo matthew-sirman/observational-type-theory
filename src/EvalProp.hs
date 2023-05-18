@@ -207,11 +207,11 @@ evalProp env (Mu tag f t x cs functor) = do
     evalFunctor :: FunctorInstance Ix -> m PFunctorInstance
     evalFunctor (FunctorInstanceF a b f p x t) =
       PFunctorInstance a b f p x <$> propClosure env t
-evalProp env (Let x a t u) = do
+evalProp env (Let x s a t u) = do
   a <- evalProp env a
   t <- evalProp env t
   u <- propClosure env u
-  pure (PLet x a t u)
+  pure (PLet x s a t u)
 evalProp env (Annotation t a) = PAnnotation <$> evalProp env t <*> evalProp env a
 evalProp env (Meta mv) = do
   t <- lookupMeta mv
@@ -492,9 +492,9 @@ quoteProp lvl (PMu tag f t x cs functor) = do
     quoteFunctor (PFunctorInstance a b f p x t) = do
       t <- quoteProp (lvl + 6) =<< app t (varP lvl) (varP (lvl + 1)) (varP (lvl + 2)) (varP (lvl + 3)) (varP (lvl + 4)) (varP (lvl + 5))
       pure (FunctorInstanceF a b f p x t)
-quoteProp lvl (PLet x a t u) = do
+quoteProp lvl (PLet x s a t u) = do
   a <- quoteProp lvl a
   t <- quoteProp lvl t
   u <- quoteProp (lvl + 1) =<< app u (varP lvl)
-  pure (Let x a t u)
+  pure (Let x s a t u)
 quoteProp lvl (PAnnotation t a) = Annotation <$> quoteProp lvl t <*> quoteProp lvl a

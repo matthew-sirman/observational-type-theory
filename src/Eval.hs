@@ -443,8 +443,8 @@ eval env (Mu tag f t x cs functor) = do
     evalFunctor :: FunctorInstance Ix -> m VFunctorInstance
     evalFunctor (FunctorInstanceF a b f p x t) =
       VFunctorInstance a b f p x <$> closure env t
-eval env (Let _ _ t u) = do
-  t <- eval env t >>= embedVal
+eval env (Let _ s _ t u) = do
+  t <- eval' s env t
   eval (env :> (Defined, t)) u
 eval env (Annotation t _) = eval env t
 eval env (Meta mv) = do

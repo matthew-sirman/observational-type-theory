@@ -235,7 +235,7 @@ data TermF sort meta tag v t
   | FixedPointF t Binder Binder Binder Binder Binder t t
   | MuF tag Name t Binder [(Name, Binder, t, Name, t)] (Maybe (FunctorInstanceF t))
   | -- Annotations
-    LetF Binder t t t
+    LetF Binder sort t t t
   | AnnotationF t t
   | MetaF meta
 
@@ -428,8 +428,8 @@ pattern FixedPoint i g v f p x c t = Fix (FixedPointF i g v f p x c t)
 pattern Mu :: Tag -> Name -> Type v -> Binder -> [(Name, Binder, Type v, Name, Term v)] -> Maybe (FunctorInstance v) -> Type v
 pattern Mu tag f t x cs functor = Fix (MuF tag f t x cs functor)
 
-pattern Let :: Binder -> Type v -> Term v -> Term v -> Term v
-pattern Let x a t u = Fix (LetF x a t u)
+pattern Let :: Binder -> Sort -> Type v -> Term v -> Term v -> Term v
+pattern Let x s a t u = Fix (LetF x s a t u)
 
 pattern Annotation :: Term v -> Type v -> Term v
 pattern Annotation t a = Fix (AnnotationF t a)
@@ -540,7 +540,7 @@ instance Functor (TermF p m t v) where
   fmap f (MatchF t x c bs) = MatchF (f t) x (f c) (fmap (fmap f) bs)
   fmap f (FixedPointF i g v f' p x c t) = FixedPointF (f i) g v f' p x (f c) (f t)
   fmap f (MuF tag g t x cs functor) = MuF tag g (f t) x (fmap (\(ci, xi, ti, gi, ixi) -> (ci, xi, f ti, gi, f ixi)) cs) (fmap (fmap f) functor)
-  fmap f (LetF x a t u) = LetF x (f a) (f t) (f u)
+  fmap f (LetF x s a t u) = LetF x s (f a) (f t) (f u)
   fmap f (AnnotationF t a) = AnnotationF (f t) (f a)
   fmap _ (MetaF m) = MetaF m
 
@@ -593,7 +593,7 @@ instance Foldable (TermF p m t v) where
   foldr f e (MatchF t _ c bs) = (f t . f c) (foldr (\(_, _, _, b) e -> f b e) e bs)
   foldr f e (FixedPointF i _ _ _ _ _ c t) = (f i . f c . f t) e
   foldr f e (MuF _ _ t _ cs functor) = f t (foldr (\(_, _, bi, _, ixi) e -> (f bi . f ixi) e) (foldr (flip (foldr f)) e functor) cs)
-  foldr f e (LetF _ a t u) = (f a . f t . f u) e
+  foldr f e (LetF _ _ a t u) = (f a . f t . f u) e
   foldr f e (AnnotationF t a) = (f t . f a) e
   foldr _ e (MetaF _) = e
 
@@ -651,7 +651,7 @@ instance Traversable (TermF p m t v) where
   traverse f (FixedPointF i g v f' p x c t) = FixedPointF <$> f i <*> pure g <*> pure v <*> pure f' <*> pure p <*> pure x <*> f c <*> f t
   traverse f (MuF tag g t x cs functor) =
     MuF tag g <$> f t <*> pure x <*> traverse (\(ci, xi, bi, gi, ixi) -> (ci,xi,,gi,) <$> f bi <*> f ixi) cs <*> traverse (traverse f) functor
-  traverse f (LetF x a t u) = LetF x <$> f a <*> f t <*> f u
+  traverse f (LetF x s a t u) = LetF x s <$> f a <*> f t <*> f u
   traverse f (AnnotationF t a) = AnnotationF <$> f t <*> f a
   traverse _ (MetaF m) = pure (MetaF m)
 

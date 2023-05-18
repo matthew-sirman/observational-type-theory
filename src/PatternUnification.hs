@@ -219,11 +219,11 @@ renameProp pos ns m sub (PMu tag f t x cs functor) = do
     renameFunctor (PFunctorInstance a b g p x t) = do
       t <- renameProp pos (ns :> Name f :> a :> b :> g :> p :> x) m (liftRenaming 6 sub) =<< app t (varP (cod sub)) (varP (cod sub + 1)) (varP (cod sub + 2)) (varP (cod sub + 3)) (varP (cod sub + 4)) (varP (cod sub + 5))
       pure (FunctorInstanceF a b g p x t)
-renameProp pos ns m sub (PLet x a t u) = do
+renameProp pos ns m sub (PLet x s a t u) = do
   a <- renameProp pos ns m sub a
   t <- renameProp pos ns m sub t
   u <- renameProp pos (ns :> x) m (liftRenaming 1 sub) =<< app u (varP (cod sub))
-  pure (Let x a t u)
+  pure (Let x s a t u)
 renameProp pos ns m sub (PAnnotation t a) = Annotation <$> renameProp pos ns m sub t <*> renameProp pos ns m sub a
 
 renameSp

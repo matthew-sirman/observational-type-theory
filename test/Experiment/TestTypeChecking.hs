@@ -865,6 +865,13 @@ tm43 =
     f
   |]
 
+tm44 :: String
+tm44 =
+  [r|
+    let x : ⊤ = * in
+    !
+  |]
+
 test :: String -> IO ()
 test input = do
   (result, mctx) <-
