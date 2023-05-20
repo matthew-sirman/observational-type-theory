@@ -40,7 +40,7 @@ liftRenaming n = lift . liftRenaming (n - 1)
 
 -- Γ -> Γ ⊢ σ : Δ -> Δ ⊢ σ' : Γ
 invert
-  :: e `CouldBe` UnificationError
+  :: e `CouldBe` ErrorDuringUnification
   => Position
   -> [Binder]
   -> Lvl
@@ -50,7 +50,7 @@ invert pos names gamma sub = do
   (dom, renaming) <- inv sub
   pure (PRen {renaming = renaming, dom = dom, cod = gamma})
   where
-    inv :: e `CouldBe` UnificationError => Env -> Checker (Variant e) (Lvl, IM.IntMap Lvl)
+    inv :: e `CouldBe` ErrorDuringUnification => Env -> Checker (Variant e) (Lvl, IM.IntMap Lvl)
     inv [] = pure (0, IM.empty)
     inv (sub :> (Defined, _)) = do
       (dom, renaming) <- inv sub
@@ -68,7 +68,7 @@ invert pos names gamma sub = do
 
 renameProp
   :: forall e
-   . e `CouldBe` UnificationError
+   . e `CouldBe` ErrorDuringUnification
   => Position
   -> [Binder]
   -> MetaVar
@@ -201,18 +201,18 @@ renameProp pos ns m sub (PFixedPoint i g v f p x c t) = do
   c <- renameProp pos (ns :> g :> v :> p :> x) m (liftRenaming 4 sub) =<< app c (varP (cod sub)) (varP (cod sub + 1)) (varP (cod sub + 2)) (varP (cod sub + 3))
   t <- renameProp pos (ns :> g :> v :> f :> p :> x) m (liftRenaming 5 sub) =<< app t (varP (cod sub)) (varP (cod sub + 1)) (varP (cod sub + 2)) (varP (cod sub + 3)) (varP (cod sub + 4))
   pure (FixedPoint i g v f p x c t)
-renameProp pos ns m sub (PMu tag f t x cs functor) = do
+renameProp pos ns m sub (PMu tag f t cs functor) = do
   t <- renameProp pos ns m sub t
   cs <- mapM renameCons cs
   functor <- mapM renameFunctor functor
-  pure (Mu tag f t x cs functor)
+  pure (Mu tag f t cs functor)
   where
     renameCons
-      :: (Name, Binder, PropClosure (A 2), PropClosure (A 3))
+      :: (Name, Binder, PropClosure (A 1), PropClosure (A 2))
       -> Checker (Variant e) (Name, Binder, Term Ix, Name, Term Ix)
     renameCons (ci, xi, bi, ixi) = do
-      bi <- renameProp pos (ns :> Name f :> x) m (liftRenaming 2 sub) =<< app bi (varP (cod sub)) (varP (cod sub + 1))
-      ixi <- renameProp pos (ns :> Name f :> x :> xi) m (liftRenaming 3 sub) =<< app ixi (varP (cod sub)) (varP (cod sub + 1)) (varP (cod sub + 2))
+      bi <- renameProp pos (ns :> Name f) m (liftRenaming 1 sub) =<< app bi (varP (cod sub))
+      ixi <- renameProp pos (ns :> Name f :> xi) m (liftRenaming 2 sub) =<< app ixi (varP (cod sub)) (varP (cod sub + 1))
       pure (ci, xi, bi, f, ixi)
 
     renameFunctor :: PFunctorInstance -> Checker (Variant e) (FunctorInstance Ix)
@@ -228,7 +228,7 @@ renameProp pos ns m sub (PAnnotation t a) = Annotation <$> renameProp pos ns m s
 
 renameSp
   :: forall e
-   . e `CouldBe` UnificationError
+   . e `CouldBe` ErrorDuringUnification
   => Position
   -> [Binder]
   -> MetaVar
@@ -288,7 +288,7 @@ renameSp pos ns m sub base (sp :> VMatch x c bs) = do
 
 rename
   :: forall e
-   . e `CouldBe` UnificationError
+   . e `CouldBe` ErrorDuringUnification
   => Position
   -> [Binder]
   -> MetaVar
@@ -401,23 +401,23 @@ rename pos ns m sub (VFixedPoint i g v f p x c t a) = do
   case a of
     Nothing -> pure fix_f
     Just a -> App Relevant fix_f <$> rename pos ns m sub a
-rename pos ns m sub (VMu tag f aty x cs functor a) = do
+rename pos ns m sub (VMu tag f aty cs functor a) = do
   fty <- rename pos ns m sub aty
   cs <- mapM renameCons cs
   functor <- mapM renameFunctor functor
-  let muF = Mu tag f fty x cs functor
+  let muF = Mu tag f fty cs functor
   case a of
     Nothing -> pure muF
     Just a -> App Relevant muF <$> rename pos ns m sub a
   where
     renameCons
-      :: (Name, (Binder, ValClosure (A 2), ValClosure (A 3)))
+      :: (Name, (Binder, ValClosure (A 1), ValClosure (A 2)))
       -> Checker (Variant e) (Name, Binder, Type Ix, Name, Type Ix)
     renameCons (ci, (xi, bi, ixi)) = do
-      bi_f_x <- app bi (varR (cod sub)) (varR (cod sub + 1))
-      bi <- rename pos (ns :> Name f :> x) m (liftRenaming 2 sub) bi_f_x
-      ixi_f_x_xi <- app ixi (varR (cod sub)) (varR (cod sub + 1)) (varR (cod sub + 2))
-      ixi <- rename pos (ns :> Name f :> x :> xi) m (liftRenaming 3 sub) ixi_f_x_xi
+      bi_f <- app bi (varR (cod sub))
+      bi <- rename pos (ns :> Name f) m (liftRenaming 1 sub) bi_f
+      ixi_f_xi <- app ixi (varR (cod sub)) (varR (cod sub + 1))
+      ixi <- rename pos (ns :> Name f :> xi) m (liftRenaming 2 sub) ixi_f_xi
       pure (ci, xi, bi, f, ixi)
 
     renameFunctor :: VFunctorInstance -> Checker (Variant e) (FunctorInstance Ix)
@@ -428,7 +428,7 @@ rename pos ns m sub (VMu tag f aty x cs functor a) = do
 
 -- Solve a metavariable, possibly applied to a spine of eliminators
 solve
-  :: e `CouldBe` UnificationError
+  :: e `CouldBe` ErrorDuringUnification
   => Position
   -> [Binder]
   -> Lvl

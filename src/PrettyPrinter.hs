@@ -211,19 +211,18 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
           c' = go precLet (ns :> g :> v :> p :> x) c
           t' = go precLet (ns :> g :> v :> f :> p :> x) t
        in par prec precLet (str "fix [" . i' . str "] " . args . str " : " . c' . str " = " . t')
-    go prec ns (Mu _ f t x cs functor) =
-      let x' = str "λ" . binder x
-          cs' = chr '[' . sep (str "; ") (fmap showCons cs) . chr ']'
-       in par prec precLet (str "μ" . str f . str " : " . go precLet ns t . dot . x' . dot . cs' . showFunctor functor)
+    go prec ns (Mu _ f t cs functor) =
+      let cs' = chr '[' . sep (str "; ") (fmap showCons cs) . chr ']'
+       in par prec precLet (str "μ" . str f . str " : " . go precLet ns t . dot . cs' . showFunctor functor)
       where
         showCons :: (Name, Binder, Type v, Name, Type v) -> ShowS
         showCons (ci, Hole, bi, gi, ixi) =
-          let bi' = go precApp (ns :> Name f :> x) bi
-              ixi' = go precAtom (ns :> Name f :> x :> Hole) ixi
+          let bi' = go precApp (ns :> Name f) bi
+              ixi' = go precAtom (ns :> Name f :> Hole) ixi
            in str ci . str " : " . bi' . str " → " . str gi . space . ixi'
         showCons (ci, xi, bi, gi, ixi) =
-          let bi' = showParen True (binder xi . str " : " . go precLet (ns :> Name f :> x) bi)
-              ixi' = go precAtom (ns :> Name f :> x :> xi) ixi
+          let bi' = showParen True (binder xi . str " : " . go precLet (ns :> Name f) bi)
+              ixi' = go precAtom (ns :> Name f :> xi) ixi
            in str ci . str " : " . bi' . str " → " . str gi . space . ixi'
         showFunctor :: Maybe (FunctorInstance v) -> ShowS
         showFunctor Nothing = id

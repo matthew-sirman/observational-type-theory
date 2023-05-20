@@ -190,15 +190,15 @@ evalProp env (FixedPoint i g v f p x c t) = do
   c <- propClosure env c
   t <- propClosure env t
   pure (PFixedPoint i g v f p x c t)
-evalProp env (Mu tag f t x cs functor) = do
+evalProp env (Mu tag f t cs functor) = do
   t <- evalProp env t
   cs <- mapM evalCons cs
   functor <- mapM evalFunctor functor
-  pure (PMu tag f t x cs functor)
+  pure (PMu tag f t cs functor)
   where
     evalCons
       :: (Name, Binder, Term Ix, Name, Term Ix)
-      -> m (Name, Binder, PropClosure (A 2), PropClosure (A 3))
+      -> m (Name, Binder, PropClosure (A 1), PropClosure (A 2))
     evalCons (ci, xi, bi, _, ixi) = do
       bi <- propClosure env bi
       ixi <- propClosure env ixi
@@ -309,18 +309,18 @@ freeze (VFixedPoint i g v f p x c t a) = do
   case a of
     Nothing -> pure fp
     Just a -> PApp fp <$> freeze a
-freeze (VMu tag f t x cs functor a) = do
+freeze (VMu tag f t cs functor a) = do
   t <- freeze t
   cs <- mapM consToVProp cs
   functor <- mapM vFunctorToPFunctor functor
-  let muF = PMu tag f t x cs functor
+  let muF = PMu tag f t cs functor
   case a of
     Nothing -> pure muF
     Just a -> PApp muF <$> freeze a
   where
     consToVProp
-      :: (Name, (Binder, ValClosure (A 2), ValClosure (A 3)))
-      -> m (Name, Binder, PropClosure (A 2), PropClosure (A 3))
+      :: (Name, (Binder, ValClosure (A 1), ValClosure (A 2)))
+      -> m (Name, Binder, PropClosure (A 1), PropClosure (A 2))
     consToVProp (ci, (xi, bi, ixi)) = do
       bi <- closureToVProp bi
       ixi <- closureToVProp ixi
@@ -475,18 +475,18 @@ quoteProp lvl (PFixedPoint i g v f p x c t) = do
   c <- quoteProp (lvl + 4) =<< app c (varP lvl) (varP (lvl + 1)) (varP (lvl + 2)) (varP (lvl + 3))
   t <- quoteProp (lvl + 5) =<< app t (varP lvl) (varP (lvl + 1)) (varP (lvl + 2)) (varP (lvl + 3)) (varP (lvl + 4))
   pure (FixedPoint i g v f p x c t)
-quoteProp lvl (PMu tag f t x cs functor) = do
+quoteProp lvl (PMu tag f t cs functor) = do
   t <- quoteProp lvl t
   cs <- mapM quoteCons cs
   functor <- mapM quoteFunctor functor
-  pure (Mu tag f t x cs functor)
+  pure (Mu tag f t cs functor)
   where
     quoteCons
-      :: (Name, Binder, PropClosure (A 2), PropClosure (A 3))
+      :: (Name, Binder, PropClosure (A 1), PropClosure (A 2))
       -> m (Name, Binder, Term Ix, Name, Term Ix)
     quoteCons (ci, xi, bi, ixi) = do
-      bi <- quoteProp (lvl + 2) =<< app bi (varP lvl) (varP (lvl + 1))
-      ixi <- quoteProp (lvl + 3) =<< app ixi (varP lvl) (varP (lvl + 1)) (varP (lvl + 2))
+      bi <- quoteProp (lvl + 1) =<< app bi (varP lvl)
+      ixi <- quoteProp (lvl + 2) =<< app ixi (varP lvl) (varP (lvl + 1))
       pure (ci, xi, bi, f, ixi)
 
     quoteFunctor :: PFunctorInstance -> m (FunctorInstance Ix)

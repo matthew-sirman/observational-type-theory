@@ -2,6 +2,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE MonoLocalBinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeOperators #-}
 
 module Conversion (
@@ -20,6 +21,7 @@ import Value
 
 import Control.Monad.Except
 import Control.Monad.Oops
+import Data.Function ((&))
 import Data.Void
 import Error.Diagnose
 
@@ -29,18 +31,29 @@ convSort
   -> Relevance
   -> Relevance
   -> Checker (Variant e) ()
-convSort _ Relevant Relevant = pure ()
-convSort _ Irrelevant Irrelevant = pure ()
-convSort pos Relevant Irrelevant = throw (ConversionBetweenUniverses pos)
-convSort pos Irrelevant Relevant = throw (ConversionBetweenUniverses pos)
+convSort pos s s' = do
+  Checker
+    ( catch @ErrorDuringConversion
+        (throw . ErrorDuringConversion (TS (show s)) (TS (show s')))
+        (runChecker (convSort' pos s s'))
+    )
+
+convSort'
+  :: e `CouldBe` ErrorDuringConversion
+  => Position
+  -> Relevance
+  -> Relevance
+  -> Checker (Variant e) ()
+convSort' _ Relevant Relevant = pure ()
+convSort' _ Irrelevant Irrelevant = pure ()
+convSort' pos Relevant Irrelevant = throw (ConversionBetweenUniverses pos)
+convSort' pos Irrelevant Relevant = throw (ConversionBetweenUniverses pos)
 -- TODO: occurs check for sort metas (?)
-convSort _ (SortMeta m) s = addSortSolution m s
-convSort _ s (SortMeta m) = addSortSolution m s
+convSort' _ (SortMeta m) s = addSortSolution m s
+convSort' _ s (SortMeta m) = addSortSolution m s
 
 conv
-  :: forall e
-   . ( e `CouldBe` ConversionError
-     , e `CouldBe` UnificationError
+  :: ( e `CouldBe` ConversionError
      )
   => Position
   -> [Binder]
@@ -48,10 +61,19 @@ conv
   -> Val
   -> Val
   -> Checker (Variant e) ()
-conv pos names = conv' names names
+conv pos names lvl a b = do
+  aTS <- TS . prettyPrintTerm names <$> quote lvl a
+  bTS <- TS . prettyPrintTerm names <$> quote lvl b
+  Checker
+    ( runChecker (conv' names names lvl a b)
+        & catch @ErrorDuringConversion (throw . ErrorDuringConversion aTS bTS)
+        & catch @ErrorDuringUnification (throw . ErrorDuringUnification aTS bTS)
+    )
   where
     convSp
-      :: [Binder]
+      :: forall e
+       . (e `CouldBe` ErrorDuringConversion, e `CouldBe` ErrorDuringUnification)
+      => [Binder]
       -> [Binder]
       -> Lvl
       -> VSpine
@@ -128,17 +150,25 @@ conv pos names = conv' names names
         safeHead (hd : _) = Just hd
 
     -- Conversion checking
-    conv' :: [Binder] -> [Binder] -> Lvl -> Val -> Val -> Checker (Variant e) ()
+    conv'
+      :: forall e
+       . (e `CouldBe` ErrorDuringConversion, e `CouldBe` ErrorDuringUnification)
+      => [Binder]
+      -> [Binder]
+      -> Lvl
+      -> Val
+      -> Val
+      -> Checker (Variant e) ()
     -- Flex conversion: attempt to unify
     conv' ns _ lvl (VNeutral (VFlex m env) sp) t = solve pos ns lvl m env sp t
     conv' _ ns lvl t (VNeutral (VFlex m env) sp) = solve pos ns lvl m env sp t
     conv' ns ns' lvl (VNeutral ne sp) (VNeutral ne' sp') = do
-      conv' ns ns' lvl ne ne'
       convSp ns ns' lvl sp sp'
+      conv' ns ns' lvl ne ne'
     -- Rigid-rigid conversion: heads must be equal and spines convertible
     conv' _ _ _ (VRigid x) (VRigid x')
       | x == x' = pure ()
-    conv' _ _ _ (VU s) (VU s') = convSort pos s s'
+    conv' _ _ _ (VU s) (VU s') = convSort' pos s s'
     conv' ns ns' lvl (VLambda s x t) (VLambda _ x' t') = do
       let vx = var s lvl
       t_x <- app t vx
@@ -159,7 +189,7 @@ conv pos names = conv' names names
       t'_x <- app t' (var s' lvl)
       conv' (ns :> x') (ns' :> x') (lvl + 1) t_x t'_x
     conv' ns ns' lvl (VPi s x a b) (VPi s' x' a' b') = do
-      convSort pos s s'
+      convSort' pos s s'
       conv' ns ns' lvl a a'
       let vx = varR lvl
       b_x <- app b vx
@@ -273,27 +303,26 @@ conv pos names = conv' names names
       conv' (ns :> g :> v :> f :> p :> x) (ns' :> g' :> v' :> f' :> p' :> x') (lvl + 5) t_g_f_p_x t'_g_f_p_x
       -- TODO: this *might* be problematic in the case that exactly one of [a], [a'] is Nothing
       sequence_ (liftM2 (conv' ns ns' lvl) a a')
-    conv' ns ns' lvl (VMu _ f aty x cs functor a) (VMu _ f' aty' x' cs' functor' a') = do
+    conv' ns ns' lvl (VMu _ f aty cs functor a) (VMu _ f' aty' cs' functor' a') = do
       conv' ns ns' lvl aty aty'
       zipWithM_ convCons cs cs'
       sequence_ (liftM2 convFunctor functor functor')
       sequence_ (liftM2 (conv' ns ns' lvl) a a')
       where
         convCons
-          :: (Name, (Binder, ValClosure (A 2), ValClosure (A 3)))
-          -> (Name, (Binder, ValClosure (A 2), ValClosure (A 3)))
+          :: (Name, (Binder, ValClosure (A 1), ValClosure (A 2)))
+          -> (Name, (Binder, ValClosure (A 1), ValClosure (A 2)))
           -> Checker (Variant e) ()
         convCons (ci, (xi, bi, ixi)) (ci', (xi', bi', ixi'))
           | ci == ci' = do
               let vf = varR lvl
-                  vx = varR (lvl + 1)
-                  vxi = varR (lvl + 2)
-              bi_muF_x <- app bi vf vx
-              bi'_muF_x <- app bi' vf vx
-              conv' (ns :> Name f :> x) (ns' :> Name f' :> x') (lvl + 2) bi_muF_x bi'_muF_x
-              ixi_muF_x_xi <- app ixi vf vx vxi
-              ixi'_muF_x_xi <- app ixi' vf vx vxi
-              conv' (ns :> Name f :> x :> xi) (ns' :> Name f' :> x' :> xi') (lvl + 3) ixi_muF_x_xi ixi'_muF_x_xi
+                  vxi = varR (lvl + 1)
+              bi_muF <- app bi vf
+              bi'_muF <- app bi' vf
+              conv' (ns :> Name f) (ns' :> Name f') (lvl + 1) bi_muF bi'_muF
+              ixi_muF_xi <- app ixi vf vxi
+              ixi'_muF_xi <- app ixi' vf vxi
+              conv' (ns :> Name f :> xi) (ns' :> Name f' :> xi') (lvl + 2) ixi_muF_xi ixi'_muF_xi
           | otherwise =
               -- TODO: consider allowing reordering of constructors in definitional equality
               throw (ConstructorMismatch ci ci' pos)

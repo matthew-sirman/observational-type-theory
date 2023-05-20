@@ -216,7 +216,7 @@ data Val
   | VFLift Val Val
   | VFmap Val Val Val Val Val Val
   | VFixedPoint VTy Binder Binder Binder Binder Binder (ValClosure (A 4)) (ValClosure (A 5)) (Maybe Val)
-  | VMu Tag Name VTy Binder [(Name, (Binder, ValClosure (A 2), ValClosure (A 3)))] (Maybe VFunctorInstance) (Maybe Val)
+  | VMu Tag Name VTy [(Name, (Binder, ValClosure (A 1), ValClosure (A 2)))] (Maybe VFunctorInstance) (Maybe Val)
 
 data VFunctorInstance = VFunctorInstance Binder Binder Binder Binder Binder (ValClosure (A 6))
 
@@ -280,7 +280,7 @@ data VProp
   | PFmap VProp VProp VProp VProp VProp VProp
   | PMatch VProp Binder (PropClosure (A 1)) [(Name, Binder, Binder, PropClosure (A 2))]
   | PFixedPoint VProp Binder Binder Binder Binder Binder (PropClosure (A 4)) (PropClosure (A 5))
-  | PMu Tag Name VProp Binder [(Name, Binder, PropClosure (A 2), PropClosure (A 3))] (Maybe PFunctorInstance)
+  | PMu Tag Name VProp [(Name, Binder, PropClosure (A 1), PropClosure (A 2))] (Maybe PFunctorInstance)
   | PLet Binder Sort VProp VProp (PropClosure (A 1))
   | PAnnotation VProp VProp
 

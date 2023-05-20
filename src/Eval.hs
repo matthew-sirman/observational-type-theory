@@ -229,19 +229,18 @@ eqReduce vt va vu = eqReduceType va
     --       t_eq_t'_and_u_eq_u' ve = VAnd <$> t_eq_t' ve <*> u_eq_u' ve
     --   VExists (Name "$e") a_eq_a' <$> makeFnClosure' t_eq_t'_and_u_eq_u'
     -- Rule Cons-Eq
-    eqReduceAll (VCons c t _) (VMu tag f aty x cs functor (Just a)) (VCons c' t' _)
+    eqReduceAll (VCons c t _) (VMu tag f aty cs functor (Just _)) (VCons c' t' _)
       | c == c' = do
           case lookup c cs of
             Nothing -> error "BUG: Impossible (constructor not well typed in equality)"
             Just (_, bi, _) -> do
-              let muF_val = VMu tag f aty x cs functor Nothing
+              let muF_val = VMu tag f aty cs functor Nothing
               muF <- embedVal muF_val
-              a <- embedVal a
-              b_muF_a <- app bi muF a
+              b_muF_a <- app bi muF
               eqReduce t b_muF_a t'
       | otherwise = pure VEmpty
     -- Rule Mu-Eq
-    eqReduceAll (VMu tag _ aTy _ _ _ (Just a)) (VU Relevant) (VMu tag' _ _ _ _ _ (Just a'))
+    eqReduceAll (VMu tag _ aTy _ _ (Just a)) (VU Relevant) (VMu tag' _ _ _ _ (Just a'))
       | tag == tag' = eqReduce a aTy a'
     -- Rule Box-Eq
     eqReduceAll (VBox a) (VU Relevant) (VBox b) =
@@ -296,17 +295,17 @@ cast (VBox a) (VBox b) e (VBoxProof t) = do
   b_prop <- freeze b
   pure (VBoxProof (PCast a_prop b_prop e t))
 cast VRUnit VRUnit _ t = pure t
-cast (VMu tag f aty x cs functor (Just a)) (VMu _ _ _ _ _ _ (Just a')) e (VCons ci t e') =
+cast (VMu tag f aty cs functor (Just a)) (VMu _ _ _ _ _ (Just a')) e (VCons ci t e') =
   case lookup ci cs of
     Nothing -> error "BUG: Impossible"
     Just (_, _, ixi) -> do
-      let muF_val = VMu tag f aty x cs functor Nothing
+      let muF_val = VMu tag f aty cs functor Nothing
       muF <- embedVal muF_val
       a <- embedVal a
       a' <- embedVal a'
       t_entry <- embedVal t
-      ixi_muF_a_t <- app ixi muF a t_entry
-      ixi_prop <- freeze ixi_muF_a_t
+      ixi_muF_t <- app ixi muF t_entry
+      ixi_prop <- freeze ixi_muF_t
       pure (VCons ci t (PTrans ixi_prop (prop a) (prop a') e' e))
 cast a b e t
   | headNeq a b = pure (VAbort b e)
@@ -412,8 +411,8 @@ eval env (FLift f a) = do
   a_entry <- embedVal a
   case f of
     -- TODO: this tag is wrong and can cause issues
-    VMu tag f' aty x cs functor Nothing ->
-      pure (functorLift tag f' aty x cs functor a_entry)
+    VMu tag f' aty cs functor Nothing ->
+      pure (functorLift tag f' aty cs functor a_entry)
     _ -> pure (VFLift f a)
 eval env (Fmap f a b g p x) = do
   (f_entry, f) <- eval env f >>= embedVal'
@@ -423,7 +422,7 @@ eval env (Fmap f a b g p x) = do
   (p_entry, p) <- eval env p >>= embedVal'
   (x_entry, x) <- eval env x >>= embedVal'
   case f of
-    VMu _ _ _ _ _ (Just (VFunctorInstance _ _ _ _ _ t)) Nothing ->
+    VMu _ _ _ _ (Just (VFunctorInstance _ _ _ _ _ t)) Nothing ->
       app t f_entry a_entry b_entry g_entry p_entry x_entry
     _ -> pure (VFmap f a b g p x)
 eval env (Match t x c bs) = do
@@ -439,11 +438,11 @@ eval env (FixedPoint i g v f p x c t) = do
   c <- closure env c
   t <- closure env t
   pure (VFixedPoint i g v f p x c t Nothing)
-eval env (Mu tag f t x cs functor) = do
+eval env (Mu tag f t cs functor) = do
   t <- eval env t
   cs <- mapM (\(ci, xi, bi, _, ixi) -> (ci,) <$> ((xi,,) <$> closure env bi <*> closure env ixi)) cs
   functor <- mapM evalFunctor functor
-  pure (VMu tag f t x cs functor Nothing)
+  pure (VMu tag f t cs functor Nothing)
   where
     evalFunctor :: FunctorInstance Ix -> m VFunctorInstance
     evalFunctor (FunctorInstanceF a b f p x t) =
@@ -462,17 +461,16 @@ functorLift
   :: Tag
   -> Name
   -> VTy
-  -> Binder
-  -> [(Name, (Binder, ValClosure (A 2), ValClosure (A 3)))]
+  -> [(Name, (Binder, ValClosure (A 1), ValClosure (A 2)))]
   -> Maybe VFunctorInstance
   -> EnvEntry
   -> VTy
-functorLift tag f aty x cs functor a =
-  VMu tag f aty x (map sub cs) functor Nothing
+functorLift tag f aty cs functor a =
+  VMu tag f aty (map sub cs) functor Nothing
   where
     sub
-      :: (Name, (Binder, ValClosure (A 2), ValClosure (A 3)))
-      -> (Name, (Binder, ValClosure (A 2), ValClosure (A 3)))
+      :: (Name, (Binder, ValClosure (A 1), ValClosure (A 2)))
+      -> (Name, (Binder, ValClosure (A 1), ValClosure (A 2)))
     sub (ci, (xi, bi, ixi)) =
       (ci, (xi, SubstClosure a bi, SubstClosure a ixi))
 
@@ -518,7 +516,7 @@ infixl 8 $$
   app t muF vv fix_f a u
 (VFixedPoint muF g v f p x c t Nothing) $$ (VApp u) =
   pure (VFixedPoint muF g v f p x c t (Just u))
-(VMu tag f t xs cs functor Nothing) $$ (VApp a) = pure (VMu tag f t xs cs functor (Just a))
+(VMu tag f t cs functor Nothing) $$ (VApp a) = pure (VMu tag f t cs functor (Just a))
 VZero $$ (VNElim _ _ t0 _ _ _) = pure t0
 (VSucc n) $$ elim@(VNElim _ _ _ _ _ ts) = do
   r_val <- n $$ elim
@@ -638,21 +636,20 @@ quote lvl (VFixedPoint i g v f p x c t a) = do
   case a of
     Nothing -> pure fix_f
     Just a -> App Relevant fix_f <$> quote lvl a
-quote lvl (VMu tag f aty x cs functor a) = do
+quote lvl (VMu tag f aty cs functor a) = do
   fty <- quote lvl aty
   let vf = varR lvl
-      vx = varR (lvl + 1)
       quoteCons
-        :: (Name, (Binder, ValClosure (A 2), ValClosure (A 3)))
+        :: (Name, (Binder, ValClosure (A 1), ValClosure (A 2)))
         -> m (Name, Binder, Type Ix, Name, Type Ix)
       quoteCons (ci, (xi, bi, ixi)) = do
-        let vxi = varR (lvl + 2)
-        bi_f_x <- app bi vf vx
-        ixi_f_x_xi <- app ixi vf vx vxi
-        (ci,xi,,f,) <$> quote (lvl + 2) bi_f_x <*> quote (lvl + 3) ixi_f_x_xi
+        let vxi = varR (lvl + 1)
+        bi_f <- app bi vf
+        ixi_f_xi <- app ixi vf vxi
+        (ci,xi,,f,) <$> quote (lvl + 1) bi_f <*> quote (lvl + 2) ixi_f_xi
   cs <- mapM quoteCons cs
   functor <- mapM quoteFunctor functor
-  let muF = Mu tag f fty x cs functor
+  let muF = Mu tag f fty cs functor
   case a of
     Nothing -> pure muF
     Just a -> App Relevant muF <$> quote lvl a

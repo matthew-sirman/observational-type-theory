@@ -108,9 +108,8 @@ exp :: { Raw }
   | fix '[' exp as binder ']' binder binder binder ':' exp '=' exp  { rloc (FixedPointF $3 $5 Hole $7 $8 $9 $11 $13) $1 $> }
   | fix '[' exp as binder view binder ']'
          binder binder binder ':' exp '=' exp                       { rloc (FixedPointF $3 $5 $7 $9 $10 $11 $13 $15) $1 $> }
-  | mu var ':' apps '->' U '.' '\\' binder '.' '[' constructors ']' { rloc (MuF () (syntax $2) $4 $9 $12 Nothing) $1 $> }
-  | mu var ':' apps '->' U '.' '\\' binder '.' '[' constructors ']'
-       functor_inst                                                 { rloc (MuF () (syntax $2) $4 $9 $12 (Just (syntax $14))) $1 $> }
+  | mu var ':' apps '->' U '.' '[' constructors ']'                 { rloc (MuF () (syntax $2) $4 $9 Nothing) $1 $> }
+  | mu var ':' apps '->' U '.' '[' constructors ']' functor_inst    { rloc (MuF () (syntax $2) $4 $9 (Just (syntax $11))) $1 $> }
   | term                                                            { $1 }
 
 functor_inst :: { Loc (FunctorInstanceF Raw) }

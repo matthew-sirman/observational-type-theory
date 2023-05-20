@@ -77,7 +77,6 @@ infer
    . ( e `CouldBe` InferenceError
      , e `CouldBe` CheckError
      , e `CouldBe` ConversionError
-     , e `CouldBe` UnificationError
      )
   => Context
   -> Raw
@@ -398,7 +397,7 @@ infer gamma (R _ (FmapF f@(R pos _) a b g p x)) = do
   (f, _, _) <- infer gamma f
   vf <- eval (env gamma) f
   case vf of
-    VMu _ f' pty x' cs functor Nothing -> do
+    VMu _ f' pty cs functor@(Just (VFunctorInstance _ _ _ _ x' _)) Nothing -> do
       let fty = VPi Relevant Hole pty (Lift (VU Relevant))
       a <- check gamma a fty
       (va_entry, va) <- eval (env gamma) a >>= embedVal'
@@ -409,11 +408,11 @@ infer gamma (R _ (FmapF f@(R pos _) a b g p x)) = do
       p <- check gamma p pty
       vp <- eval (env gamma) p
       f_lift_a_tag <- freshTag
-      let f_lift_a = functorLift f_lift_a_tag f' pty x' cs functor va_entry
+      let f_lift_a = functorLift f_lift_a_tag f' pty cs functor va_entry
       f_lift_a_p <- f_lift_a $$ VApp vp
       x <- check gamma x f_lift_a_p
       f_lift_b_tag <- freshTag
-      let f_lift_b = functorLift f_lift_b_tag f' pty x' cs functor vb_entry
+      let f_lift_b = functorLift f_lift_b_tag f' pty cs functor vb_entry
       f_lift_b_p <- f_lift_b $$ VApp vp
       pure (Fmap f a b g p x, f_lift_b_p, Relevant)
     _ -> throw (FmapNeedsFunctorInstance pos)
@@ -421,14 +420,13 @@ infer gamma (R pos (MatchF t@(R argPos _) x c bs)) = do
   (t, a, _) <- infer gamma t
   case a of
     -- We must have [Just a], otherwise this is not a type.
-    VMu tag f aty xs constructors functor (Just a) -> do
+    VMu tag f aty constructors functor (Just a) -> do
       let pVar = VVar (lvl gamma)
-          vmuF_p = VMu tag f aty xs constructors functor (Just pVar)
+          vmuF_p = VMu tag f aty constructors functor (Just pVar)
       (c, s) <- checkType (gamma & bindR x vmuF_p) c
 
-      let muF_val = VMu tag f aty xs constructors functor Nothing
+      let muF_val = VMu tag f aty constructors functor Nothing
       muF <- embedVal muF_val
-      a_entry <- embedVal a
       let
         -- checkBranches returns a set of remaining constructors.
         -- Each step we check if the constructor is in the remaining set,
@@ -441,12 +439,12 @@ infer gamma (R pos (MatchF t@(R argPos _) x c bs)) = do
               muFTS <- ppVal gamma muF_val
               throw (ConstructorNotInTypeMatch ci muFTS pos)
             Just (_, bi, ixi) -> do
-              b_muF_a <- app bi muF a_entry
+              b_muF_a <- app bi muF
               let xVar = VVar (lvl gamma)
                   eVar = PVar (lvl gamma + 1)
 
               vx <- embedVal xVar
-              ixi_muF_a_x <- app ixi muF a_entry vx
+              ixi_muF_a_x <- app ixi muF vx
 
               ixi_eq_a <- eqReduce ixi_muF_a_x aty a
 
@@ -471,7 +469,7 @@ infer gamma (R _ (FixedPointF i@(R pos _) g v f p x c t)) = do
   (muF, _, _) <- infer gamma i
   vmuF <- eval (env gamma) muF
   case vmuF of
-    VMu _ f' a x' cs functor Nothing -> do
+    VMu _ f' a cs functor Nothing -> do
       let vmuFty = VPi Relevant Hole a (Lift (VU Relevant))
       let gVar = VVar (lvl gamma)
           vVar = VVar (lvl gamma + 1)
@@ -487,7 +485,7 @@ infer gamma (R _ (FixedPointF i@(R pos _) g v f p x c t)) = do
 
       f_lift_g_tag <- freshTag
       let pVar = VVar (lvl gamma + 3)
-          f_lift_g_val = functorLift f_lift_g_tag f' a x' cs functor vg
+          f_lift_g_val = functorLift f_lift_g_tag f' a cs functor vg
       f_lift_g <- embedVal f_lift_g_val
       f_lift_g_p <- f_lift_g_val $$ VApp pVar
       vmuF <- embedVal vmuF
@@ -528,24 +526,24 @@ infer gamma (R _ (FixedPointF i@(R pos _) g v f p x c t)) = do
       -- and then applies the isomorphism F[μF] p ≅ μF p (semantically this is the identity)
       pure (VLambda Relevant p (Defun (ClosureLiftView x t vmuF vg view)))
     liftView _ _ _ _ _ = throw (FixViewWithNoFunctor pos)
-infer gamma (R muPos (MuF () f a x cs functor)) = do
+infer gamma (R muPos (MuF () f a cs functor)) = do
   a <- check gamma a (VU Relevant)
   va <- eval (env gamma) a
   let vfty = VPi Relevant Hole va (Lift (VU Relevant))
-  let gamma' = gamma & bindR (Name f) vfty & bindR x va
+  let gamma' = gamma & bindR (Name f) vfty
   cs <- mapM (checkConstructor gamma' va) cs
   -- A fresh tag is associated to each syntactic inductive type definition.
   tag <- freshTag
   vcs <- mapM evalConstructor cs
-  let vmuF_val = VMu tag f va x vcs Nothing Nothing
+  let vmuF_val = VMu tag f va vcs Nothing Nothing
   vmuF <- embedVal vmuF_val
   -- Functor action on objects (which are themselves functors)
   let f_lift ty = do
         f_lift_ty_tag <- freshTag
-        pure (functorLift f_lift_ty_tag f va x vcs Nothing ty)
+        pure (functorLift f_lift_ty_tag f va vcs Nothing ty)
   -- Check the provided functor action on morphisms (which are natural transformations)
   functor <- mapM (checkFunctor vmuF va f_lift) functor
-  pure (Mu tag f a x cs functor, vfty, Relevant)
+  pure (Mu tag f a cs functor, vfty, Relevant)
   where
     checkConstructor
       :: Context
@@ -562,7 +560,7 @@ infer gamma (R muPos (MuF () f a x cs functor)) = do
 
     evalConstructor
       :: (Name, Binder, Term Ix, Name, Term Ix)
-      -> Checker (Variant e) (Name, (Binder, ValClosure (A 2), ValClosure (A 3)))
+      -> Checker (Variant e) (Name, (Binder, ValClosure (A 1), ValClosure (A 2)))
     evalConstructor (ci, xi, bi, _, ixi) = do
       bi <- closure (env gamma) bi
       ixi <- closure (env gamma) ixi
@@ -621,7 +619,6 @@ checkType
   :: ( e `CouldBe` CheckError
      , e `CouldBe` InferenceError
      , e `CouldBe` ConversionError
-     , e `CouldBe` UnificationError
      )
   => Context
   -> Raw
@@ -639,7 +636,6 @@ check
    . ( e `CouldBe` CheckError
      , e `CouldBe` InferenceError
      , e `CouldBe` ConversionError
-     , e `CouldBe` UnificationError
      )
   => Context
   -> Raw
@@ -687,31 +683,30 @@ check gamma (R _ (IdPathF e)) (VId a t u) = do
 check gamma (R pos (IdPathF {})) tty = do
   tTS <- ppVal gamma tty
   throw (CheckIdPath tTS pos)
-check gamma (R pos (ConsF c t e)) (VMu tag f aty xs cs functor (Just a)) = do
-  let muF = VMu tag f aty xs cs functor Nothing
+check gamma (R pos (ConsF c t e)) (VMu tag f aty cs functor (Just a)) = do
+  let muF = VMu tag f aty cs functor Nothing
   case lookup c cs of
     Nothing -> do
       muFTS <- ppVal gamma muF
       throw (ConstructorNotInTypeCons c muFTS pos)
     Just (_, bi, ixi) -> do
       muF <- embedVal muF
-      a_entry <- embedVal a
       -- Apply [bi] to inductive type without parameters
-      bi_muF_a <- app bi muF a_entry
+      bi_muF_a <- app bi muF
       t <- check gamma t bi_muF_a
       vt_val <- eval (env gamma) t
       vt <- embedVal vt_val
-      ixi_muF_a_x <- app ixi muF a_entry vt
+      ixi_muF_a_x <- app ixi muF vt
       ixi_eq_a <- eqReduce ixi_muF_a_x aty a
       e <- check gamma e ixi_eq_a
       pure (Cons c t e)
 check gamma (R pos (ConsF c _ _)) tty = do
   tTS <- ppVal gamma tty
   throw (CheckCons tTS c pos)
-check gamma (R _ (InF t)) (VMu tag f aty xs cs functor (Just a)) = do
-  let muF_val = VMu tag f aty xs cs functor Nothing
+check gamma (R _ (InF t)) (VMu tag f aty cs functor (Just a)) = do
+  let muF_val = VMu tag f aty cs functor Nothing
   muF <- embedVal muF_val
-  let f_lift_muF = functorLift tag f aty xs cs functor muF
+  let f_lift_muF = functorLift tag f aty cs functor muF
   f_lift_muF_a <- f_lift_muF $$ VApp a
   check gamma t f_lift_muF_a
 check gamma (R pos (InF _)) tty = do
