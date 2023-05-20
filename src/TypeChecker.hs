@@ -523,7 +523,7 @@ infer gamma (R _ (FixedPointF i@(R pos _) g v f p x c t)) = do
     liftView _ (Just (VFunctorInstance _ _ _ _ _ t)) vg vmuF view =
       -- Lifts ι : (p : X) → G p → μF p
       -- to F[ι] : (p : X) → F[G] p → F[μF] p
-      -- and then applies the isomorphism F[μF] p ≅ μF p (semantically this is the identity)
+      -- and then applies the isomorphism F[μF] p ≅ μF p
       pure (VLambda Relevant p (Defun (ClosureLiftView x t vmuF vg view)))
     liftView _ _ _ _ _ = throw (FixViewWithNoFunctor pos)
 infer gamma (R muPos (MuF () f a cs functor)) = do

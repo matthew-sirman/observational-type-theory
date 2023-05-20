@@ -78,7 +78,7 @@ instance MonadEvaluator m => ClosureEval m VProp where
     let g_p = PApp g (prop vp)
     pure (PPi Relevant x g_p (Closure (env :> (Bound, vp)) c))
   closureDefunEval (ClosureLiftViewInner t muF g view vp) vx = do
-    app t muF g muF view vp vx
+    PIn <$> app t muF g muF view vp vx
   closureDefunEval (ClosureLiftView x t muF g view) vp =
     pure (PLambda Relevant x (Defun (ClosureLiftViewInner t muF g view vp)))
 

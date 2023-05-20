@@ -116,7 +116,10 @@ instance MonadEvaluator m => ClosureEval m Val where
     g_p <- g $$ VApp (val vp)
     pure (VPi Relevant x g_p (Closure (env :> (Bound, vp)) c))
   closureDefunEval (ClosureLiftViewInner t muF g view vp) vx = do
-    app t muF g muF view vp vx
+    x <- app t muF g muF view vp vx
+    case x of
+      VCons {} -> pure x
+      x -> pure (VIn x)
   closureDefunEval (ClosureLiftView x t muF g view) vp =
     pure (VLambda Relevant x (Defun (ClosureLiftViewInner t muF g view vp)))
 
