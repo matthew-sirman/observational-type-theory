@@ -174,7 +174,7 @@ pattern SortHole = SortMeta ()
 
 type Relevance = RelevanceF MetaVar
 
-data TermF sort meta tag v t
+data TermF sort meta goal tag v t
   = VarF v
   | -- Universe terms have a relevance and a level
     UF (RelevanceF meta)
@@ -238,22 +238,23 @@ data TermF sort meta tag v t
     LetF Binder sort t t t
   | AnnotationF t t
   | MetaF meta
+  | GoalF goal [(goal, t)]
 
 data FunctorInstanceF t = FunctorInstanceF Binder Binder Binder Binder Binder t
 
-newtype RawF t = RawF (Loc (TermF () () () Name t))
+newtype RawF t = RawF (Loc (TermF () () () () Name t))
 
 type Raw = Fix RawF
 
-pattern R :: Position -> TermF () () () Name Raw -> Raw
+pattern R :: Position -> TermF () () () () Name Raw -> Raw
 pattern R sl term = Fix (RawF (L sl term))
 
-pattern HoleF :: TermF () () () Name t
+pattern HoleF :: TermF () () () () Name t
 pattern HoleF = MetaF ()
 
 {-# COMPLETE R #-}
 
-type Term v = Fix (TermF Sort MetaVar Tag v)
+type Term v = Fix (TermF Sort MetaVar Void Tag v)
 
 type Type v = Term v
 
@@ -493,7 +494,7 @@ pattern Meta v = Fix (MetaF v)
 instance Functor FunctorInstanceF where
   fmap f (FunctorInstanceF a b f' p x t) = FunctorInstanceF a b f' p x (f t)
 
-instance Functor (TermF p m t v) where
+instance Functor (TermF p m g t v) where
   fmap _ (VarF x) = VarF x
   fmap _ (UF s) = UF s
   fmap f (LambdaF s x e) = LambdaF s x (f e)
@@ -543,11 +544,12 @@ instance Functor (TermF p m t v) where
   fmap f (LetF x s a t u) = LetF x s (f a) (f t) (f u)
   fmap f (AnnotationF t a) = AnnotationF (f t) (f a)
   fmap _ (MetaF m) = MetaF m
+  fmap f (GoalF g ts) = GoalF g (fmap (fmap f) ts)
 
 instance Foldable FunctorInstanceF where
   foldr f e (FunctorInstanceF _ _ _ _ _ t) = f t e
 
-instance Foldable (TermF p m t v) where
+instance Foldable (TermF p m g t v) where
   foldr _ e (VarF _) = e
   foldr _ e (UF _) = e
   foldr f e (LambdaF _ _ t) = f t e
@@ -596,11 +598,12 @@ instance Foldable (TermF p m t v) where
   foldr f e (LetF _ _ a t u) = (f a . f t . f u) e
   foldr f e (AnnotationF t a) = (f t . f a) e
   foldr _ e (MetaF _) = e
+  foldr f e (GoalF _ ts) = foldr (flip (foldr f)) e ts
 
 instance Traversable FunctorInstanceF where
   traverse f (FunctorInstanceF a b f' p x t) = FunctorInstanceF a b f' p x <$> f t
 
-instance Traversable (TermF p m t v) where
+instance Traversable (TermF p m g t v) where
   traverse _ (VarF x) = pure (VarF x)
   traverse _ (UF s) = pure (UF s)
   traverse f (LambdaF s x e) = LambdaF s x <$> f e
@@ -654,6 +657,7 @@ instance Traversable (TermF p m t v) where
   traverse f (LetF x s a t u) = LetF x s <$> f a <*> f t <*> f u
   traverse f (AnnotationF t a) = AnnotationF <$> f t <*> f a
   traverse _ (MetaF m) = pure (MetaF m)
+  traverse f (GoalF g ts) = GoalF g <$> traverse (traverse f) ts
 
 instance Functor RawF where
   fmap f (RawF t) = RawF (L {location = location t, syntax = fmap f (syntax t)})

@@ -613,6 +613,13 @@ infer gamma (R _ HoleF) = do
   t <- freshMeta (names gamma)
   s <- freshSortMeta
   pure (Meta t, va, SortMeta s)
+infer gamma (R pos (GoalF () terms)) = do
+  termsTS <- forM terms $ \((), t) -> do
+    (t, a, _) <- infer gamma t
+    let tTS = TS (prettyPrintTerm (names gamma) t)
+    aTS <- ppVal gamma a
+    pure (tTS, aTS)
+  throw (InferGoal termsTS pos)
 infer _ (R pos _) = throw (InferenceFailure pos)
 
 checkType
@@ -726,6 +733,14 @@ check gamma (R _ (LetF x () a t u)) uty = do
   vt <- eval' s' (env gamma) t
   u <- check (define x vt s va gamma) u uty
   pure (Let x s' a t u)
+check gamma (R pos (GoalF () terms)) goal = do
+  goalTS <- ppVal gamma goal
+  termsTS <- forM terms $ \((), t) -> do
+    (t, a, _) <- infer gamma t
+    let tTS = TS (prettyPrintTerm (names gamma) t)
+    aTS <- ppVal gamma a
+    pure (tTS, aTS)
+  throw (CheckGoal goalTS termsTS pos)
 check gamma t@(R pos _) tty = do
   (t, tty', _) <- infer gamma t
   conv pos (names gamma) (lvl gamma) tty tty'

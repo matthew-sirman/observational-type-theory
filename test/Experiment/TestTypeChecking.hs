@@ -886,6 +886,18 @@ tm45 =
     !
   |]
 
+tm46 :: String
+tm46 =
+  [r|
+    let f : ℕ → ℕ =
+      λx. S x
+    in
+    let x : ℕ =
+      S (S (S 0))
+    in
+    f ?{f, x}
+  |]
+
 test :: String -> IO ()
 test input = do
   (result, mctx) <-
@@ -894,7 +906,6 @@ test input = do
           ( result
               & catch @ParseError showReport
               & catch @ConversionError showReport
-              & catch @UnificationError showReport
               & catch @CheckError showReport
               & catch @InferenceError showReport
           )

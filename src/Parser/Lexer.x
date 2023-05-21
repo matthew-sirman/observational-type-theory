@@ -8,8 +8,8 @@ import Error.Diagnose.Position(Position(..))
 
 %wrapper "monad"
 
-$varchars = $printable # [\( \) \[ \] \. \; \~ \=] # $white
-$start = $varchars # [\\ λ \: → \, \| μ ▢ ◇ \<]
+$varchars = $printable # [\( \) \[ \] \{ \} \. \; \~ \=] # $white
+$start = $varchars # [\\ λ \: → \, \| μ ▢ ◇ \< \?]
 $end = $varchars # [\: → \, \| \>]
 
 @var = [^ ~$start ~$end] | $start $varchars* $end
@@ -94,6 +94,9 @@ tokens :-
        "="                      { symbol TokEquals }
        "in"                     { keyword KWIn}
        "_"                      { symbol TokHole }
+       "?"                      { symbol TokGoal }
+       "{"                      { symbol TokOpenBrace }
+       "}"                      { symbol TokCloseBrace }
 
        \'@var                   { identifier TokCons }
        @var                     { identifier TokName }
@@ -163,6 +166,9 @@ data Token
   | TokEquals
   | KWIn
   | TokHole
+  | TokGoal
+  | TokOpenBrace
+  | TokCloseBrace
   | TokName (Loc Name)
   | TokCons (Loc Name)
   | TokEOF

@@ -87,6 +87,9 @@ import qualified Error.Diagnose as Err
   '='                   { L _ TokEquals }
   in                    { L _ KWIn }
   '_'                   { L _ TokHole }
+  '?'                   { L _ TokGoal }
+  '{'                   { L _ TokOpenBrace }
+  '}'                   { L _ TokCloseBrace }
   var                   { L _ (TokName $$) }
   cons                  { L _ (TokCons $$) }
 
@@ -184,6 +187,8 @@ appsList
 atom :: { Raw }
   : var                                                             { rloc (VarF (syntax $1)) $1 $> }
   | '_'                                                             { rloc HoleF $1 $> }
+  | '?'                                                             { rloc (GoalF () []) $1 $> }
+  | '?' '{' goals '}'                                               { rloc (GoalF () $3) $1 $> }
   | U                                                               { rloc (UF Relevant) $1 $> }
   | O                                                               { rloc (UF Irrelevant) $1 $> }
   | '0'                                                             { rloc ZeroF $1 $> }
@@ -217,6 +222,11 @@ binder :: { Binder }
   : var                                                             {% addComposite (syntax $1) >>
                                                                        pure (Name (syntax $1)) }
   | '_'                                                             { Hole }
+
+goals :: { [((), Raw)] }
+  : {-# empty #-}                                                   { [] }
+  | exp                                                             { [((), $1)] }
+  | exp ',' goals                                                   { ((), $1):$3 }
 
 {
 
@@ -253,7 +263,7 @@ loc element start end =
          location = Err.Position (Err.begin s) (Err.end e) (Err.file s)
        }
 
-rloc :: (Located start, Located end) => TermF () () () Name Raw -> start -> end -> Raw
+rloc :: (Located start, Located end) => TermF () () () () Name Raw -> start -> end -> Raw
 rloc e start end = Fix (RawF (loc e start end))
 
 uloc :: (Located start, Located end) => Raw -> start -> end -> Raw

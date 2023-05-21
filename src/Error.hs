@@ -155,6 +155,7 @@ data InferenceError
   | InductiveTypeFamily TermString Position
   | InductiveTypeConstructor Name Name Position
   | BoxElimHead TermString Position
+  | InferGoal [(TermString, TermString)] Position
   | InferenceFailure Position
 
 instance Reportable InferenceError where
@@ -255,6 +256,24 @@ instance Reportable InferenceError where
     let msg = "Expected Box (▢A) type in quotient eliminator."
         ctx = "Expected Box type, but found ̈[" ++ unTS t ++ "]."
      in createError msg [(pos, This ctx)]
+  report (InferGoal [] pos) =
+    let msg = "Found proof goal."
+        ctx =
+          "Goal type could not be inferred.\n\n"
+            ++ "No relevant terms indicated!"
+     in createError msg [(pos, This ctx)]
+  report (InferGoal ts pos) =
+    let msg = "Found proof goal."
+        ctx =
+          "Goal type could not be inferred.\n\n"
+            ++ "List of relevant terms and their types:\n"
+            ++ terms ts
+     in createError msg [(pos, This ctx)]
+    where
+      terms :: [(TermString, TermString)] -> String
+      terms [] = ""
+      terms [(t, ty)] = unTS t ++ " : " ++ unTS ty
+      terms ((t, ty) : ts) = unTS t ++ " : " ++ unTS ty ++ "\n" ++ terms ts
   report (InferenceFailure pos) =
     let msg = "Type inference failed (try adding a type annotation)."
         ctx = "Could not infer type for term."
@@ -272,6 +291,7 @@ data CheckError
   | ConstructorIndexSortUnknown Position
   | CheckIn TermString Position
   | CheckBoxProof TermString Position
+  | CheckGoal TermString [(TermString, TermString)] Position
 
 instance Reportable CheckError where
   report (CheckType t pos) =
@@ -328,3 +348,24 @@ instance Reportable CheckError where
     let msg = "Box proof type checking failed."
         ctx = "Checking Box proof argument against type [" ++ unTS t ++ "] failed (expected Box (▢A) type)."
      in createError msg [(pos, This ctx)]
+  report (CheckGoal goal [] pos) =
+    let msg = "Found proof goal."
+        ctx =
+          "Expected type ["
+            ++ unTS goal
+            ++ "] at goal."
+     in createError msg [(pos, This ctx)]
+  report (CheckGoal goal ts pos) =
+    let msg = "Found proof goal."
+        ctx =
+          "Expected type ["
+            ++ unTS goal
+            ++ "] at goal.\n\n"
+            ++ "List of relevant terms and their types:\n"
+            ++ terms ts
+     in createError msg [(pos, This ctx)]
+    where
+      terms :: [(TermString, TermString)] -> String
+      terms [] = ""
+      terms [(t, ty)] = unTS t ++ " : " ++ unTS ty
+      terms ((t, ty) : ts) = unTS t ++ " : " ++ unTS ty ++ "\n" ++ terms ts
