@@ -53,6 +53,7 @@ import qualified Error.Diagnose as Err
   refl                  { L _ KWRefl }
   sym                   { L _ KWSym }
   trans                 { L _ KWTrans }
+  compose               { L _ SymCompose }
   ap                    { L _ KWAp }
   transp                { L _ KWTransp }
   cast                  { L _ KWCast }
@@ -134,6 +135,7 @@ term :: { Raw }
                                                                                          $9 $11
                                                                                          $13 $14 $15 $17
                                                                                          $19 $20 $21 $22 $23 $25) $1 $> }
+  | apps compose apps                                               { rloc (TransF (rloc HoleF $2 $2) (rloc HoleF $2 $2) (rloc HoleF $2 $2) $1 $3) $1 $> }
   | apps                                                            { $1 }
 
 apps :: { Raw }

@@ -57,6 +57,7 @@ tokens :-
        "refl"                   { keyword KWRefl }
        "sym"                    { symbol KWSym }
        "trans"                  { symbol KWTrans }
+       "∘"                      { symbol SymCompose }
        "ap"                     { keyword KWAp }
        "transp"                 { keyword KWTransp }
        "cast"                   { keyword KWCast }
@@ -128,6 +129,7 @@ data Token
   | KWRefl
   | KWSym
   | KWTrans
+  | SymCompose
   | KWAp
   | KWTransp
   | KWCast

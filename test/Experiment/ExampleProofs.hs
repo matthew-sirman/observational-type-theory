@@ -33,9 +33,9 @@ boolAsQuotient =
     let cast_compose : (A :U U) -> (B :U U) -> (C :U U)
                     -> (AB :Ω A ~[U] B) -> (BC :Ω B ~[U] C)
                     -> (x :U A)
-                    -> cast(A, C, trans(A, B, C, AB, BC), x) ~[C] cast(B, C, BC, cast(A, B, AB, x)) =
+                    -> cast(A, C, AB ∘ BC, x) ~[C] cast(B, C, BC, cast(A, B, AB, x)) =
       λA. λB. λC. λAB. λBC. λx.
-        transp(B, B' BB'. cast(A, B', trans(A, B, B', AB, BB'), x) ~[B'] cast(B, B', BB', cast(A, B, AB, x)),
+        transp(B, B' BB'. cast(A, B', AB ∘ BB', x) ~[B'] cast(B, B', BB', cast(A, B, AB, x)),
                castrefl B (cast(A, B, AB, x)), C, BC)
     in
 
