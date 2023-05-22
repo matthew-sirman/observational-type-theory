@@ -89,7 +89,7 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
           t0' = go precLet ns t0
           ts' = binder x . space . binder ih . dot . go precLet (ns :> x :> ih) ts
           n' = go precLet ns n
-       in par prec precApp (str "ℕ-elim" . showParen True (sep comma [a', t0', ts', n']))
+       in par prec precApp (str "rec" . showParen True (sep comma [a', t0', ts', n']))
     go _ _ Nat = chr 'ℕ'
     go _ ns (PropPair t u) = chr '⟨' . go precLet ns t . comma . go precLet ns u . chr '⟩'
     go prec ns (PropFst p) = par prec precApp (str "fst " . go precAtom ns p)
@@ -105,7 +105,7 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
     go prec ns (Abort a t) =
       let a' = go precLet ns a
           t' = go precLet ns t
-       in par prec precApp (str "⊥-elim" . showParen True (a' . comma . t'))
+       in par prec precApp (str "abort" . showParen True (a' . comma . t'))
     go _ _ Empty = chr '⊥'
     go _ _ One = chr '*'
     go _ _ Unit = chr '⊤'

@@ -494,7 +494,7 @@ infer gamma (R _ (FixedPointF i@(R pos _) g v f p x c t)) = do
       vp <- embedVal pVar
       let vx = varR (lvl gamma + 4)
       c_f_lift_g_v_p_x <- eval (env gamma :> (Bound, f_lift_g) :> (Bound, vv_lifted) :> (Bound, vp) :> (Bound, vx)) c
-      let gammaT = gamma & bindR g vmuFty & bindR v viewTy & bind f s fty & bind p s a & bindR x f_lift_g_p
+      let gammaT = gamma & bindR g vmuFty & bindR v viewTy & bindR f fty & bindR p a & bindR x f_lift_g_p
       t <- check gammaT t c_f_lift_g_v_p_x
 
       viewId_val <- valIdentity x
@@ -715,7 +715,7 @@ check gamma (R _ (InF t)) (VMu tag f aty cs functor (Just a)) = do
   muF <- embedVal muF_val
   let f_lift_muF = functorLift tag f aty cs functor muF
   f_lift_muF_a <- f_lift_muF $$ VApp a
-  check gamma t f_lift_muF_a
+  In <$> check gamma t f_lift_muF_a
 check gamma (R pos (InF _)) tty = do
   tTS <- ppVal gamma tty
   throw (CheckIn tTS pos)

@@ -27,48 +27,38 @@ import Text.RawString.QQ
 boolAsQuotient :: String
 boolAsQuotient =
   [r|
-    let castrefl : (A :U U) -> (t :U A) -> t ~ cast(A, A, refl A, t) =
-      λA. λt. refl t
-    in
-    let cast_compose : (A :U U) -> (B :U U) -> (C :U U)
-                    -> (AB :Ω A ~[U] B) -> (BC :Ω B ~[U] C)
-                    -> (x :U A)
-                    -> cast(A, C, AB ∘ BC, x) ~[C] cast(B, C, BC, cast(A, B, AB, x)) =
+    let cast_compose : (A :U U) → (B :U U) → (C :U U)
+                    → (AB :Ω A ~ B) → (BC :Ω B ~ C)
+                    → (x :U A)
+                    → cast(A, C, AB ∘ BC, x) ~ cast(B, C, BC, cast(A, B, AB, x)) =
       λA. λB. λC. λAB. λBC. λx.
-        transp(B, B' BB'. cast(A, B', AB ∘ BB', x) ~[B'] cast(B, B', BB', cast(A, B, AB, x)),
-               castrefl B (cast(A, B, AB, x)), C, BC)
+        transp(B,
+               B' BB'.
+                 cast(A, B', AB ∘ BB', x) ~ cast(B, B', BB', cast(A, B, AB, x)),
+               refl (cast(A, B, AB, x)), C, BC)
     in
-
-    let R : ℕ -> ℕ -> Ω =
+    let R : ℕ → ℕ → Ω =
       λx. λy. rec(_. Ω, rec(_. Ω, ⊤, _ _. ⊥, y), _ _. rec(_. Ω, ⊥, _ _. ⊤, y), x)
     in
-    let Rr : (x :U ℕ) -> R x x =
+    let Rr : (x :U ℕ) → R x x =
       λx. rec(z. R z z, *, _ _. *, x)
     in
-    let Rs : (x :U ℕ) -> (y :U ℕ)
-          -> R x y -> R y x =
-      λx. λy. rec(y'. R x y' -> R y' x,
-                  rec(x'. R x' 0 -> R 0 x', λw. w, _ _. λw. w, x),
-                  k _. rec(x'. R x' (S k) -> R (S k) x', λw. w, _ _. λw. w, x),
+    let Rs : (x :U ℕ) → (y :U ℕ) → R x y → R y x =
+      λx. λy. rec(y'. R x y' → R y' x,
+                  rec(x'. R x' 0 → R 0 x', λw. w, _ _. λw. w, x),
+                  k _. rec(x'. R x' (S k) → R (S k) x', λw. w, _ _. λw. w, x),
                   y)
     in
-    let Rt : (x :U ℕ) -> (y :U ℕ) -> (z :U ℕ)
-          -> R x y -> R y z -> R x z =
-      λx. λy. λz. rec(z'. R x y -> R y z' -> R x z',
-                      rec(y'. R x y' -> R y' 0 -> R x 0,
+    let Rt : (x :U ℕ) → (y :U ℕ) → (z :U ℕ) → R x y → R y z → R x z =
+      λx. λy. λz. rec(z'. R x y → R y z' → R x z',
+                      rec(y'. R x y' → R y' 0 → R x 0,
                           λx0. λ_. x0,
-                          k _. λ_. λw. ⊥-elim(R x 0, w),
+                          k _. λ_. λw. abort(R x 0, w),
                           y),
-                      k _. rec(y'. R x y' -> R y' (S k) -> R x (S k),
-                               λ_. λw. ⊥-elim(R x (S k), w),
-                               l _. rec(x'. R x' (S l) -> R (S l) (S k) -> R x' (S k),
-                                        λw. λ_. w,
-                                        _ _. λ_. λ_. *,
-                                        x),
-                               y),
-                      z)
+                      k _. rec(y'. R x y' → R y' (S k) → R x (S k),
+                               λ_. λw. abort(R x (S k), w),
+                               l _. λw. λ_. w, y), z)
     in
-
     let Bool : U =
       ℕ / (x y. R x y,
            x. Rr x,
@@ -77,38 +67,36 @@ boolAsQuotient =
     in
     let true : Bool = π 0 in
     let false : Bool = π (S 0) in
-    let if : (B :U Bool -> U) -> (c :U Bool) -> B true -> B false -> B c =
+    let if : (B :U Bool → U) → (c :U Bool) → B true → B false → B c =
       λB. λc. λt. λf.
-        let congB : (x :U ℕ) -> (y :U ℕ) -> R x y -> B (π x) ~[U] B (π y) =
+        let congB : (x :U ℕ) → (y :U ℕ) → R x y → B (π x) ~ B (π y) =
           λx. λy. λxRy. ap(U, x. B x, (π x : Bool), π y, xRy)
         in
-        let choose : (x :U ℕ) -> B (π x) =
+        let choose : (x :U ℕ) → B (π x) =
           λx. rec(x'. B (π x'), t, k _. cast(B false, B (π (S k)),
                                              congB (S 0) (S k) *,
                                              f), x)
         in
-        let presTRhs : (x :U ℕ) -> (y :U ℕ) -> R x y -> Ω =
+        let presTRhs : (x :U ℕ) → (y :U ℕ) → R x y → Ω =
           λx. λy. λxRy.
-            (choose x) ~[B (π x)] cast(B (π y), B (π x), congB y x (Rs x y xRy), choose y)
+            (choose x) ~ cast(B (π y), B (π x), congB y x (Rs x y xRy), choose y)
         in
-        let presT : (x :U ℕ) -> (y :U ℕ) -> Ω =
-          λx. λy. (xRy :Ω R x y) -> presTRhs x y xRy
+        let presT : (x :U ℕ) → (y :U ℕ) → Ω =
+          λx. λy. (xRy :Ω R x y) → presTRhs x y xRy
         in
-        let pres : (x :U ℕ) -> (y :U ℕ) -> presT x y =
+        let pres : (x :U ℕ) → (y :U ℕ) → presT x y =
           λx. λy. rec(x'. presT x' y,
                         rec(y'. presT 0 y',
-                            λ_. castrefl (B true) t,
-                            l _. λw. ⊥-elim(presTRhs 0 (S l) w, w),
+                            λ_. refl t,
+                            l _. λw. abort(presTRhs 0 (S l) w, w),
                             y),
                       k _.
                         rec(y'. presT (S k) y',
-                            λw. ⊥-elim(presTRhs (S k) 0 w, w),
+                            λw. abort(presTRhs (S k) 0 w, w),
                             l _. λ_. cast_compose (B false) (B (π (S l))) (B (π (S k)))
                                                         (congB (S 0) (S l) *)
                                                         (congB (S l) (S k) *)
-                                                        f,
-                            y),
-                      x)
+                                                        f, y), x)
         in
         Q-elim(z. B z,
                x. choose x,
@@ -122,7 +110,7 @@ stlcNbE :: String
 stlcNbE =
   [r|
     let Type : 1 → U =
-      μTy : 1 → U. λ_.
+      μTy : 1 → U.
         [ 'Unit : 1 → Ty !
         ; 'Product : (Ty ! × Ty !) → Ty !
         ; 'Function : (Ty ! × Ty !) → Ty !
@@ -141,7 +129,7 @@ stlcNbE =
       λdom. λcod. 'Function ((dom; cod), *)
     in
     let 𝔽↓T : 1 → U =
-      μCtx : 1 → U. λ_.
+      μCtx : 1 → U.
         [ 'Empty : 1 → Ctx !
         ; 'Extend : (Ctx ! × Type !) → Ctx !
         ]
@@ -151,13 +139,14 @@ stlcNbE =
         | 'Extend (Γ-τ, _) → 'Extend ((f ! (fst Γ-τ); snd Γ-τ), *)
     in
     let · : 𝔽↓T ! = 'Empty (!, *) in
-    let _∷_ : 𝔽↓T ! → Type ! -> 𝔽↓T ! =
+    let _∷_ : 𝔽↓T ! → Type ! → 𝔽↓T ! =
       λΓ. λτ. 'Extend ((Γ; τ), *)
     in
     let Ix : (Type ! × 𝔽↓T !) → U =
-      μIx : (Type ! × 𝔽↓T !) → U. λτ-Γ.
-        [ 'Ix0 : (Γ' : 𝔽↓T !) → Ix (fst τ-Γ; Γ' ∷ (fst τ-Γ))
-        ; 'IxS : (τ'-Γ' : Type ! × (Σ(Γ' : 𝔽↓T !). Ix (fst τ-Γ; Γ'))) → Ix (fst τ-Γ; (fst (snd τ'-Γ')) ∷ (fst τ'-Γ'))
+      μIx : (Type ! × 𝔽↓T !) → U.
+        [ 'Ix0 : (τ-Γ : Type ! × 𝔽↓T !) → Ix (fst τ-Γ; (snd τ-Γ) ∷ (fst τ-Γ))
+        ; 'IxS : (τ-Γ-τ' : Σ(τ : Type !). (Σ(Γ : 𝔽↓T !). Type ! × Ix (τ; Γ)))
+          → Ix (fst τ-Γ-τ'; (fst (snd τ-Γ-τ')) ∷ (fst (snd (snd τ-Γ-τ'))))
         ]
     in
     let 𝔽↓̃τ : (𝔽↓T ! × 𝔽↓T !) → U =
@@ -167,35 +156,58 @@ stlcNbE =
         (τ :U Type !) → Ix (τ; Δ) → Ix (τ; Γ)
     in
     let Term : (Type ! × 𝔽↓T !) → U =
-      μTm : (Type ! × 𝔽↓T !) → U. λτ-Γ.
-        [ 'Var : (Ix τ-Γ) → Tm τ-Γ
-        ; 'One : 1 → Tm (𝟙; snd τ-Γ)
-        ; 'Pair : (τ₁-τ₂ : Σ(τ₁ : Type !). Σ(τ₂ : Type !). (Tm (τ₁; snd τ-Γ) × Tm (τ₂; snd τ-Γ))) → Tm ((fst τ₁-τ₂) ✶ (fst (snd τ₁-τ₂)); snd τ-Γ)
-        ; 'Fst : (Σ(τ₂ : Type !). Tm (((fst τ-Γ) ✶ τ₂); snd τ-Γ)) → Tm τ-Γ
-        ; 'Snd : (Σ(τ₁ : Type !). Tm ((τ₁ ✶ (fst τ-Γ)); snd τ-Γ)) → Tm τ-Γ
-        ; 'Lambda : (τ₁-τ₂ : Σ(τ₁ : Type !). Σ(τ₂ : Type !). Tm (τ₂; ((snd τ-Γ) ∷ τ₁))) → Tm ((fst τ₁-τ₂) ⇒ (fst (snd τ₁-τ₂)); snd τ-Γ)
-        ; 'App : (Σ(τ₁ : Type !). Tm ((τ₁ ⇒ (fst τ-Γ)); snd τ-Γ) × Tm (τ₁; snd τ-Γ)) → Tm τ-Γ
+      μTm : (Type ! × 𝔽↓T !) → U.
+        [ 'Var : (τ-Γ : Σ(τ : Type !). Σ(Γ : 𝔽↓T !). Ix (τ; Γ))
+          → Tm (fst τ-Γ; fst (snd τ-Γ))
+        ; 'One : (Γ : 𝔽↓T !) → Tm (𝟙; Γ)
+        ; 'Pair : (τ₁-τ₂-Γ : Σ(τ₁ : Type !). Σ(τ₂ : Type !).
+                             Σ(Γ : 𝔽↓T !). (Tm (τ₁; Γ) × Tm (τ₂; Γ)))
+          → Tm ((fst τ₁-τ₂-Γ) ✶ (fst (snd τ₁-τ₂-Γ)); fst (snd (snd τ₁-τ₂-Γ)))
+        ; 'Fst : (τ₁-Γ : Σ(τ₁ : Type !). Σ(Γ : 𝔽↓T !).
+                         Σ(τ₂ : Type !). Tm ((τ₁ ✶ τ₂); Γ))
+          → Tm (fst τ₁-Γ; fst (snd τ₁-Γ))
+        ; 'Snd : (τ₂-Γ : Σ(τ₂ : Type !). Σ(Γ : 𝔽↓T !).
+                         Σ(τ₁ : Type !). Tm ((τ₁ ✶ τ₂); Γ))
+          → Tm (fst τ₂-Γ; fst (snd τ₂-Γ))
+        ; 'Lambda : (τ₁-τ₂-Γ : Σ(τ₁ : Type !). Σ(τ₂ : Type !).
+                               Σ(Γ : 𝔽↓T !). Tm (τ₂; (Γ ∷ τ₁)))
+          → Tm ((fst τ₁-τ₂-Γ) ⇒ (fst (snd τ₁-τ₂-Γ)); fst (snd (snd τ₁-τ₂-Γ)))
+        ; 'App : (τ₂-Γ : Σ(τ₂ : Type !). Σ(Γ : 𝔽↓T !). Σ(τ₁ : Type !).
+                         Tm ((τ₁ ⇒ τ₂); Γ) × Tm (τ₁; Γ))
+          → Tm (fst τ₂-Γ; fst (snd τ₂-Γ))
         ]
     in
     let Form : 1 → U =
-      μForm : 1 → U. λ_. ['Ne : 1 → Form !; 'Nf : 1 → Form !]
+      μForm : 1 → U. ['Ne : 1 → Form !; 'Nf : 1 → Form !]
     in
     let Ne : Form ! = 'Ne (!, *) in
     let Nf : Form ! = 'Nf (!, *) in
     let Normal : (Form ! × (Type ! × 𝔽↓T !)) → U =
-      μNormal : (Form ! × (Type ! × 𝔽↓T !)) → U. λf-τ-Γ.
-        [ 'VVar : Ix (snd f-τ-Γ) → Normal (Ne; snd f-τ-Γ)
-        ; 'VOne : 1 → Normal (Nf; (𝟙; snd (snd f-τ-Γ)))
-        ; 'VPair : (τ₁-τ₂ : Σ(τ₁ : Type !). Σ(τ₂ : Type !). (Normal (Nf; (τ₁; snd (snd f-τ-Γ))) × Normal (Nf; (τ₂; snd (snd f-τ-Γ))))) → Normal (Nf; ((fst τ₁-τ₂) ✶ (fst (snd τ₁-τ₂)); snd (snd f-τ-Γ)))
-        ; 'VFst : (Σ(τ₂ : Type !). Normal (Ne; ((fst (snd f-τ-Γ)) ✶ τ₂; snd (snd f-τ-Γ)))) → Normal (Ne; snd f-τ-Γ)
-        ; 'VSnd : (Σ(τ₁ : Type !). Normal (Ne; (τ₁ ✶ (fst (snd f-τ-Γ)); snd (snd f-τ-Γ)))) → Normal (Ne; snd f-τ-Γ)
-        ; 'VLambda : (τ₁-τ₂ : Σ(τ₁ : Type !). Σ(τ₂ : Type !). Normal (Nf; (τ₂; ((snd (snd f-τ-Γ)) ∷ τ₁)))) → Normal (Nf; ((fst τ₁-τ₂) ⇒ (fst (snd τ₁-τ₂)); snd (snd f-τ-Γ)))
-        ; 'VApp : (Σ(τ₁ : Type !). Normal (Ne; (τ₁ ⇒ (fst (snd f-τ-Γ)); snd (snd f-τ-Γ))) × Normal (Nf; (τ₁; snd (snd f-τ-Γ)))) → Normal (Ne; snd f-τ-Γ)
+      μNormal : (Form ! × (Type ! × 𝔽↓T !)) → U.
+        [ 'VVar : (τ-Γ : Σ(τ : Type !). Σ(Γ : 𝔽↓T !). Ix (τ; Γ))
+          → Normal (Ne; (fst τ-Γ; fst (snd τ-Γ)))
+        ; 'VOne : (Γ : 𝔽↓T !) → Normal (Nf; (𝟙;Γ))
+        ; 'VPair : (τ₁-τ₂-Γ : Σ(τ₁ : Type !). Σ(τ₂ : Type !). Σ(Γ : 𝔽↓T !).
+                              Normal (Nf; (τ₁; Γ)) × Normal (Nf; (τ₂; Γ)))
+          → Normal (Nf; ((fst τ₁-τ₂-Γ) ✶ (fst (snd τ₁-τ₂-Γ)); fst (snd (snd τ₁-τ₂-Γ))))
+        ; 'VFst : (τ₁-Γ : Σ(τ₁ : Type !). Σ(Γ : 𝔽↓T !). Σ(τ₂ : Type !).
+                          Normal (Ne; (τ₁ ✶ τ₂; Γ)))
+          → Normal (Ne; (fst τ₁-Γ; fst (snd τ₁-Γ)))
+        ; 'VSnd : (τ₂-Γ : Σ(τ₂ : Type !). Σ(Γ : 𝔽↓T !). Σ(τ₁ : Type !).
+                          Normal (Ne; (τ₁ ✶ τ₂; Γ)))
+          → Normal (Ne; (fst τ₂-Γ; fst (snd τ₂-Γ)))
+        ; 'VLambda : (τ₁-τ₂-Γ : Σ(τ₁ : Type !). Σ(τ₂ : Type !). Σ(Γ : 𝔽↓T !).
+                                Normal (Nf; (τ₂; (Γ ∷ τ₁))))
+          → Normal (Nf; ((fst τ₁-τ₂-Γ) ⇒ (fst (snd τ₁-τ₂-Γ)); fst (snd (snd τ₁-τ₂-Γ))))
+        ; 'VApp : (τ₂-Γ : Σ(τ₂ : Type !). Σ(Γ : 𝔽↓T !). Σ(τ₁ : Type !).
+                          Normal (Ne; (τ₁ ⇒ τ₂; Γ)) × Normal (Nf; (τ₁; Γ)))
+          → Normal (Ne; (fst τ₂-Γ; fst (snd τ₂-Γ)))
         ]
     in
     let ℳ : Type ! → 𝔽↓T ! → U = λτ. λΓ. Normal (Ne; (τ; Γ)) in
     let 𝒩 : Type ! → 𝔽↓T ! → U = λτ. λΓ. Normal (Nf; (τ; Γ)) in
-    let pshf : (τ :U Type !) → (Δ :U 𝔽↓T !) → ℳ τ Δ → (Γ :U 𝔽↓T !) → 𝔽↓̃τ (Δ; Γ) → ℳ τ Γ =
+    let pshf : (τ :U Type !) → (Δ :U 𝔽↓T !) → ℳ τ Δ
+             → (Γ :U 𝔽↓T !) → 𝔽↓̃τ (Δ; Γ) → ℳ τ Γ =
       λτ. λΔ.
         (fix [Normal as N] pshf f-τ'-Δ' v :
           let f : Form ! = fst f-τ'-Δ' in
@@ -207,45 +219,76 @@ stlcNbE =
         let Δ' : 𝔽↓T ! = snd (snd f-τ'-Δ') in
         λΓ. λρ.
           match v as _ return Normal (f; (τ'; Γ)) with
-          | 'VVar (ix, pf) → 'VVar (ρ τ' ix, <fst pf, <fst (snd pf), refl Γ>>)
-          | 'VOne (_, pf) → 'VOne (!, <fst pf, <fst (snd pf), refl Γ>>)
-          | 'VPair (τ₁-τ₂-t-u, pf) →
-            let τ₁ : Type ! = fst τ₁-τ₂-t-u in
-            let τ₂ : Type ! = fst (snd τ₁-τ₂-t-u) in
-            let t : N (Nf; (τ₁; Δ')) = fst (snd (snd τ₁-τ₂-t-u)) in
-            let u : N (Nf; (τ₂; Δ')) = snd (snd (snd τ₁-τ₂-t-u)) in
-            'VPair ((τ₁; (τ₂; (pshf (Nf; (τ₁; Δ')) t Γ ρ; pshf (Nf; (τ₂; Δ')) u Γ ρ))), <fst pf, <fst (snd pf), refl Γ>>)
-          | 'VFst (τ₂-t, pf) →
-            let τ₂ : Type ! = fst τ₂-t in
-            let t : N (Ne; (τ' ✶ τ₂; Δ')) = snd τ₂-t in
-            'VFst ((τ₂; pshf (Ne; (τ' ✶ τ₂; Δ')) t Γ ρ), <fst pf, <fst (snd pf), refl Γ>>)
-          | 'VSnd (τ₁-t, pf) →
-            let τ₁ : Type ! = fst τ₁-t in
-            let t : N (Ne; (τ₁ ✶ τ'; Δ')) = snd τ₁-t in
-            'VSnd ((τ₁; pshf (Ne; (τ₁ ✶ τ'; Δ')) t Γ ρ), <fst pf, <fst (snd pf), refl Γ>>)
-          | 'VLambda (τ₁-τ₂-t, pf) →
-            let τ₁ : Type ! = fst τ₁-τ₂-t in
-            let τ₂ : Type ! = fst (snd τ₁-τ₂-t) in
-            let t : N (Nf; (τ₂; Δ' ∷ τ₁)) = snd (snd τ₁-τ₂-t) in
-            let ρ' : 𝔽↓̃τ (Δ' ∷ τ₁; Γ ∷ τ₁) =
+          | 'VVar (τ'-Δ''-ix, pf) →
+            let τ' : Type ! = fst τ'-Δ''-ix in
+            let Δ'' : 𝔽↓T ! = fst (snd τ'-Δ''-ix) in
+            let ix : Ix (τ'; Δ'') = snd (snd τ'-Δ''-ix) in
+            let ρ' : 𝔽↓̃τ (Δ''; Γ) =
+              cast(𝔽↓̃τ (Δ'; Γ), 𝔽↓̃τ (Δ''; Γ),
+                   ap(U, Ξ. 𝔽↓̃τ (Ξ; Γ), _, _, sym (snd (snd pf))), ρ)
+            in
+            'VVar ((τ'; (Γ; ρ' τ' ix)), <fst pf, <fst (snd pf), refl Γ>>)
+          | 'VOne (_, pf) → 'VOne (Γ, <fst pf, <fst (snd pf), refl Γ>>)
+          | 'VPair (τ₁-τ₂-Δ''-t-u, pf) →
+            let τ₁ : Type ! = fst τ₁-τ₂-Δ''-t-u in
+            let τ₂ : Type ! = fst (snd τ₁-τ₂-Δ''-t-u) in
+            let Δ'' : 𝔽↓T ! = fst (snd (snd τ₁-τ₂-Δ''-t-u)) in
+            let t : N (Nf; (τ₁; Δ'')) = fst (snd (snd (snd τ₁-τ₂-Δ''-t-u))) in
+            let u : N (Nf; (τ₂; Δ'')) = snd (snd (snd (snd τ₁-τ₂-Δ''-t-u))) in
+            let ρ' : 𝔽↓̃τ (Δ''; Γ) =
+              cast(𝔽↓̃τ (Δ'; Γ), 𝔽↓̃τ (Δ''; Γ),
+                   ap(U, Ξ. 𝔽↓̃τ (Ξ; Γ), _, _, sym (snd (snd pf))), ρ)
+            in
+            'VPair ((τ₁; (τ₂; (Γ; (pshf (Nf; (τ₁; Δ'')) t Γ ρ'; pshf (Nf; (τ₂; Δ'')) u Γ ρ')))),
+                    <fst pf, <fst (snd pf), refl Γ>>)
+          | 'VFst (τ₁-Δ''-τ₂-t, pf) →
+            let τ₁ : Type ! = fst τ₁-Δ''-τ₂-t in
+            let Δ'' : 𝔽↓T ! = fst (snd τ₁-Δ''-τ₂-t) in
+            let τ₂ : Type ! = fst (snd (snd τ₁-Δ''-τ₂-t)) in
+            let t : N (Ne; (τ₁ ✶ τ₂; Δ'')) = snd (snd (snd τ₁-Δ''-τ₂-t)) in
+            let ρ' : 𝔽↓̃τ (Δ''; Γ) =
+              cast(𝔽↓̃τ (Δ'; Γ), 𝔽↓̃τ (Δ''; Γ), ap(U, Ξ. 𝔽↓̃τ (Ξ; Γ), Δ', Δ'', sym(Δ'', Δ', snd (snd pf))), ρ)
+            in
+            'VFst ((τ₁; (Γ; (τ₂; pshf (Ne; (τ₁ ✶ τ₂; Δ'')) t Γ ρ'))), <fst pf, <fst (snd pf), refl Γ>>)
+          | 'VSnd (τ₂-Δ''-τ₁-t, pf) →
+            let τ₂ : Type ! = fst τ₂-Δ''-τ₁-t in
+            let Δ'' : 𝔽↓T ! = fst (snd τ₂-Δ''-τ₁-t) in
+            let τ₁ : Type ! = fst (snd (snd τ₂-Δ''-τ₁-t)) in
+            let t : N (Ne; (τ₁ ✶ τ₂; Δ'')) = snd (snd (snd τ₂-Δ''-τ₁-t)) in
+            let ρ' : 𝔽↓̃τ (Δ''; Γ) =
+              cast(𝔽↓̃τ (Δ'; Γ), 𝔽↓̃τ (Δ''; Γ), ap(U, Ξ. 𝔽↓̃τ (Ξ; Γ), Δ', Δ'', sym(Δ'', Δ', snd (snd pf))), ρ)
+            in
+            'VSnd ((τ₂; (Γ; (τ₁; pshf (Ne; (τ₁ ✶ τ₂; Δ'')) t Γ ρ'))), <fst pf, <fst (snd pf), refl Γ>>)
+          | 'VLambda (τ₁-τ₂-Δ''-t, pf) →
+            let τ₁ : Type ! = fst τ₁-τ₂-Δ''-t in
+            let τ₂ : Type ! = fst (snd τ₁-τ₂-Δ''-t) in
+            let Δ'' : 𝔽↓T ! = fst (snd (snd τ₁-τ₂-Δ''-t)) in
+            let t : N (Nf; (τ₂; Δ'' ∷ τ₁)) = snd (snd (snd τ₁-τ₂-Δ''-t)) in
+            let ρ' : 𝔽↓̃τ (Δ'' ∷ τ₁; Γ ∷ τ₁) =
               λτ. λix.
                 match ix as _ return Ix (τ; Γ ∷ τ₁) with
-                | 'Ix0 (Δ'', pf) → 'Ix0 (Γ, <refl τ, <refl Γ, snd (snd pf)>>)
-                | 'IxS (τ'-Δ''-ix, pf) →
-                  let τ' : Type ! = fst τ'-Δ''-ix in
-                  let Δ'' : 𝔽↓T ! = fst (snd τ'-Δ''-ix) in
-                  let ix-Δ''-eq-ix-Δ' : Ix (τ; Δ'') ~ Ix (τ; Δ') =
-                    ap(U, Γ'. Ix (τ; Γ'), Δ'', Δ', fst (snd pf))
+                | 'Ix0 (τ''-Ξ, pf') → 'Ix0 ((fst τ''-Ξ; Γ), <fst pf', <refl Γ, snd (snd pf')>>)
+                  -- pf -- 'Ix0 ((τ; Γ), <refl τ, <refl Γ, snd (snd pf')>>)
+                | 'IxS (τ''-Ξ-τ'-ix, pf') →
+                  let τ'' : Type ! = fst τ''-Ξ-τ'-ix in
+                  let Ξ : 𝔽↓T ! = fst (snd τ''-Ξ-τ'-ix) in
+                  let τ' : Type ! = fst (snd (snd τ''-Ξ-τ'-ix)) in
+                  let ix : Ix (τ; Δ') =
+                    cast(Ix (τ''; Ξ), Ix (τ; Δ'), <fst pf', trans(Ξ, Δ'', Δ', fst (snd pf'), snd (snd pf))>, snd (snd (snd τ''-Ξ-τ'-ix)))
                   in
-                  let ix : Ix (τ; Δ') = cast(Ix (τ; Δ''), Ix (τ; Δ'), ix-Δ''-eq-ix-Δ', snd (snd τ'-Δ''-ix)) in
-                  'IxS ((τ'; (Γ; ρ τ ix)), <refl τ, <refl Γ, snd (snd pf)>>)
+                  'IxS ((τ; (Γ; (τ'; ρ τ ix))), <refl τ, <refl Γ, snd (snd pf')>>)
             in
-            'VLambda ((τ₁; (τ₂; pshf (Nf; (τ₂; Δ' ∷ τ₁)) t (Γ ∷ τ₁) ρ')), <fst pf, <fst (snd pf), refl Γ>>)
-          | 'VApp (τ₁-t-u, pf) →
-            let τ₁ : Type ! = fst τ₁-t-u in
-            let t : N (Ne; (τ₁ ⇒ τ'; Δ')) = fst (snd τ₁-t-u) in
-            let u : N (Nf; (τ₁; Δ')) = snd (snd τ₁-t-u) in
-            'VApp ((τ₁; (pshf (Ne; (τ₁ ⇒ τ'; Δ')) t Γ ρ; pshf (Nf; (τ₁; Δ')) u Γ ρ)), <fst pf, <fst (snd pf), refl Γ>>)
+            'VLambda ((τ₁; (τ₂; (Γ; pshf (Nf; (τ₂; Δ'' ∷ τ₁)) t (Γ ∷ τ₁) ρ'))), <fst pf, <fst (snd pf), refl Γ>>)
+          | 'VApp (τ₂-Δ'-τ₁-t-u, pf) →
+            let τ₂ : Type ! = fst τ₂-Δ'-τ₁-t-u in
+            let Δ'' : 𝔽↓T ! = fst (snd τ₂-Δ'-τ₁-t-u) in
+            let τ₁ : Type ! = fst (snd (snd τ₂-Δ'-τ₁-t-u)) in
+            let t : N (Ne; (τ₁ ⇒ τ₂; Δ'')) = fst (snd (snd (snd τ₂-Δ'-τ₁-t-u))) in
+            let u : N (Nf; (τ₁; Δ'')) = snd (snd (snd (snd τ₂-Δ'-τ₁-t-u))) in
+            let ρ' : 𝔽↓̃τ (Δ''; Γ) =
+              cast(𝔽↓̃τ (Δ'; Γ), 𝔽↓̃τ (Δ''; Γ), ap(U, Ξ. 𝔽↓̃τ (Ξ; Γ), Δ', Δ'', sym(Δ'', Δ', snd (snd pf))), ρ)
+            in
+            'VApp ((τ₂; (Γ; (τ₁; (pshf (Ne; (τ₁ ⇒ τ₂; Δ'')) t Γ ρ'; pshf (Nf; (τ₁; Δ'')) u Γ ρ')))), <fst pf, <fst (snd pf), refl Γ>>)
         ) (Ne; (τ; Δ))
     in
     let ⟦_⟧_ : Type ! → 𝔽↓T ! → U =
@@ -300,17 +343,21 @@ stlcNbE =
         let Γ : 𝔽↓T ! = snd τ-Γ in
         λΔ. λenv.
           match ix as _ return ⟦ τ ⟧ Δ with
-          | 'Ix0 (Γ', pf) →
+          | 'Ix0 (τ'-Γ', pf) →
+            let Γ' : 𝔽↓T ! = snd τ'-Γ' in
             let env-cast : Π (Γ' ∷ τ) Δ =
-              cast(Π Γ Δ, Π (Γ' ∷ τ) Δ, Π-eq-Π Γ (Γ' ∷ τ) Δ (sym(_, _, snd pf)), env)
+              cast(Π Γ Δ, Π (Γ' ∷ τ) Δ, Π-eq-Π Γ (Γ' ∷ τ) Δ (sym (snd pf)), env)
             in
             snd env-cast
-          | 'IxS (τ'-Γ'-ix, pf) →
-            let τ' : Type ! = fst τ'-Γ'-ix in
-            let Γ' : 𝔽↓T ! = fst (snd τ'-Γ'-ix) in
-            let ix' : I (τ; Γ') = snd (snd τ'-Γ'-ix) in
+          | 'IxS (τ'-Γ'-τ''-ix, pf) →
+            let τ' : Type ! = fst τ'-Γ'-τ''-ix in
+            let Γ' : 𝔽↓T ! = fst (snd τ'-Γ'-τ''-ix) in
+            let τ'' : Type ! = fst (snd (snd τ'-Γ'-τ''-ix)) in
+            let ix' : I (τ; Γ') =
+              cast(I (τ'; Γ'), I (τ; Γ'), ap(U, χ. I (χ; Γ'), _, _, fst pf), snd (snd (snd τ'-Γ'-τ''-ix)))
+            in
             let env-cast : Π (Γ' ∷ τ') Δ =
-              cast(Π Γ Δ, Π (Γ' ∷ τ') Δ, Π-eq-Π Γ (Γ' ∷ τ') Δ (sym(_, _, snd pf)), env)
+              cast(Π Γ Δ, Π (Γ' ∷ τ') Δ, Π-eq-Π Γ (Γ' ∷ τ') Δ (sym (snd pf)), env)
             in
             lookup (τ; Γ') ix' Δ (fst env-cast)) (τ; Γ)
     in
@@ -321,38 +368,63 @@ stlcNbE =
         let Γ : 𝔽↓T ! = snd τ-Γ in
         λΔ. λenv.
           match tm as _ return ⟦ τ ⟧ Δ with
-          | 'Var (ix, _) → lookup τ Γ ix Δ env
+          | 'Var (τ'-Γ'-ix, pf) →
+            let τ' : Type ! = fst τ'-Γ'-ix in
+            let Γ' : 𝔽↓T ! = fst (snd τ'-Γ'-ix) in
+            let ix : Ix (τ'; Γ') = snd (snd τ'-Γ'-ix) in
+            let env' : Π Γ' Δ =
+              cast(Π Γ Δ, Π Γ' Δ, ap(U, Ξ. Π Ξ Δ, _, _, sym (snd pf)), env)
+            in
+            cast(⟦ τ' ⟧ Δ, ⟦ τ ⟧ Δ, ap(U, τ''. ⟦ τ'' ⟧ Δ, _, _, fst pf), lookup τ' Γ' ix Δ env')
           | 'One (_, pf) → cast(1, ⟦ τ ⟧ Δ, ap(U, τ'. ⟦ τ' ⟧ Δ, 𝟙, τ, fst pf), !)
-          | 'Pair (t-u, pf) →
-            let τ₁ : Type ! = fst t-u in
-            let τ₂ : Type ! = fst (snd t-u) in
-            let t : Tm (τ₁; Γ) = fst (snd (snd t-u)) in
-            let u : Tm (τ₂; Γ) = snd (snd (snd t-u)) in
+          | 'Pair (τ₁-τ₂-Γ'-t-u, pf) →
+            let τ₁ : Type ! = fst τ₁-τ₂-Γ'-t-u in
+            let τ₂ : Type ! = fst (snd τ₁-τ₂-Γ'-t-u) in
+            let Γ' : 𝔽↓T ! = fst (snd (snd τ₁-τ₂-Γ'-t-u)) in
+            let t : Tm (τ₁; Γ') = fst (snd (snd (snd τ₁-τ₂-Γ'-t-u))) in
+            let u : Tm (τ₂; Γ') = snd (snd (snd (snd τ₁-τ₂-Γ'-t-u))) in
+            let env' : Π Γ' Δ =
+              cast(Π Γ Δ, Π Γ' Δ, ap(U, Ξ. Π Ξ Δ, _, _, sym (snd pf)), env)
+            in
             let vt : ⟦ τ₁ ⟧ Δ =
-              eval (τ₁; Γ) t Δ env
+              eval (τ₁; Γ') t Δ env'
             in
             let vu : ⟦ τ₂ ⟧ Δ =
-              eval (τ₂; Γ) u Δ env
+              eval (τ₂; Γ') u Δ env'
             in
             cast(⟦ τ₁ ⟧ Δ × ⟦ τ₂ ⟧ Δ, ⟦ τ ⟧ Δ, ap(U, τ'. ⟦ τ' ⟧ Δ, τ₁ ✶ τ₂, τ, fst pf), (vt; vu))
-          | 'Fst (τ₂-t, _) →
-            let τ₂ : Type ! = fst τ₂-t in
-            let t : Tm (τ ✶ τ₂; Γ) = snd τ₂-t in
-            let vt : ⟦ τ ⟧ Δ × ⟦ τ₂ ⟧ Δ =
-              eval (τ ✶ τ₂; Γ) t Δ env
+          | 'Fst (τ₁-Γ'-τ₂-t, pf) →
+            let τ₁ : Type ! = fst τ₁-Γ'-τ₂-t in
+            let Γ' : 𝔽↓T ! = fst (snd τ₁-Γ'-τ₂-t) in
+            let τ₂ : Type ! = fst (snd (snd τ₁-Γ'-τ₂-t)) in
+            let t : Tm (τ₁ ✶ τ₂; Γ') = snd (snd (snd τ₁-Γ'-τ₂-t)) in
+            let env' : Π Γ' Δ =
+              cast(Π Γ Δ, Π Γ' Δ, ap(U, Ξ. Π Ξ Δ, _, _, sym (snd pf)), env)
             in
-            fst vt
-          | 'Snd (τ₁-t, _) →
-            let τ₁ : Type ! = fst τ₁-t in
-            let t : Tm (τ₁ ✶ τ; Γ) = snd τ₁-t in
-            let vt : ⟦ τ₁ ⟧ Δ × ⟦ τ ⟧ Δ =
-              eval (τ₁ ✶ τ; Γ) t Δ env
+            let vt : ⟦ τ₁ ⟧ Δ × ⟦ τ₂ ⟧ Δ =
+              eval (τ₁ ✶ τ₂; Γ') t Δ env'
             in
-            snd vt
-          | 'Lambda (τ₁-τ₂-t, pf) →
-            let τ₁ : Type ! = fst τ₁-τ₂-t in
-            let τ₂ : Type ! = fst (snd τ₁-τ₂-t) in
-            let t : Tm (τ₂; Γ ∷ τ₁) = snd (snd τ₁-τ₂-t) in
+            cast(⟦ τ₁ ⟧ Δ, ⟦ τ ⟧ Δ, ap(U, τ'. ⟦ τ' ⟧ Δ, _, _, fst pf), fst vt)
+          | 'Snd (τ₂-Γ'-τ₁-t, pf) →
+            let τ₂ : Type ! = fst τ₂-Γ'-τ₁-t in
+            let Γ' : 𝔽↓T ! = fst (snd τ₂-Γ'-τ₁-t) in
+            let τ₁ : Type ! = fst (snd (snd τ₂-Γ'-τ₁-t)) in
+            let t : Tm (τ₁ ✶ τ₂; Γ') = snd (snd (snd τ₂-Γ'-τ₁-t)) in
+            let env' : Π Γ' Δ =
+              cast(Π Γ Δ, Π Γ' Δ, ap(U, Ξ. Π Ξ Δ, _, _, sym (snd pf)), env)
+            in
+            let vt : ⟦ τ₁ ⟧ Δ × ⟦ τ₂ ⟧ Δ =
+              eval (τ₁ ✶ τ₂; Γ') t Δ env'
+            in
+            cast(⟦ τ₂ ⟧ Δ, ⟦ τ ⟧ Δ, ap(U, τ'. ⟦ τ' ⟧ Δ, _, _, fst pf), snd vt)
+          | 'Lambda (τ₁-τ₂-Γ'-t, pf) →
+            let τ₁ : Type ! = fst τ₁-τ₂-Γ'-t in
+            let τ₂ : Type ! = fst (snd τ₁-τ₂-Γ'-t) in
+            let Γ' : 𝔽↓T ! = fst (snd (snd τ₁-τ₂-Γ'-t)) in
+            let t : Tm (τ₂; Γ' ∷ τ₁) = snd (snd (snd τ₁-τ₂-Γ'-t)) in
+            let env' : Π Γ' Δ =
+              cast(Π Γ Δ, Π Γ' Δ, ap(U, Ξ. Π Ξ Δ, _, _, sym (snd pf)), env)
+            in
             let Λt : (Δ' :U 𝔽↓T !) → 𝔽↓̃τ (Δ; Δ') → ⟦ τ₁ ⟧ Δ' → ⟦ τ₂ ⟧ Δ' =
               λΔ'. λf. λχ.
                 let rn-env : (Ξ :U 𝔽↓T !) → Π Ξ Δ → 𝔽↓̃τ (Δ; Δ') → Π Ξ Δ' =
@@ -369,14 +441,21 @@ stlcNbE =
                         let ε'-χ : Π ((ι ! Ξ') ∷ τ') Δ = ε in
                         (rn-env ! Ξ' (fst ε'-χ) ρ; rn Δ' Δ ρ τ' (snd ε'-χ))) !
                 in
-                eval (τ₂; Γ ∷ τ₁) t Δ' (rn-env Γ env f; χ)
+                eval (τ₂; Γ' ∷ τ₁) t Δ' (rn-env Γ' env' f; χ)
             in
             cast ((Δ' :U 𝔽↓T !) → 𝔽↓̃τ (Δ; Δ') → ⟦ τ₁ ⟧ Δ' → ⟦ τ₂ ⟧ Δ', ⟦ τ ⟧ Δ, ap(U, τ'. ⟦ τ' ⟧ Δ, τ₁ ⇒ τ₂, τ, fst pf), Λt)
-          | 'App (τ₁-t-u, _) →
-            let τ₁ : Type ! = fst τ₁-t-u in
-            let t : Tm (τ₁ ⇒ τ; Γ) = fst (snd τ₁-t-u) in
-            let u : Tm (τ₁; Γ) = snd (snd τ₁-t-u) in
-            (eval (τ₁ ⇒ τ; Γ) t Δ env) Δ (λ_. λx. x) (eval (τ₁; Γ) u Δ env)) (τ; Γ)
+          | 'App (τ₂-Γ'-τ₁-t-u, pf) →
+            let τ₂ : Type ! = fst τ₂-Γ'-τ₁-t-u in
+            let Γ' : 𝔽↓T ! = fst (snd τ₂-Γ'-τ₁-t-u) in
+            let τ₁ : Type ! = fst (snd (snd τ₂-Γ'-τ₁-t-u)) in
+            let t : Tm (τ₁ ⇒ τ₂; Γ') = fst (snd (snd (snd τ₂-Γ'-τ₁-t-u))) in
+            let u : Tm (τ₁; Γ') = snd (snd (snd (snd τ₂-Γ'-τ₁-t-u))) in
+            let env' : Π Γ' Δ =
+              cast(Π Γ Δ, Π Γ' Δ, ap(U, Ξ. Π Ξ Δ, _, _, sym (snd pf)), env)
+            in
+            let val : ⟦ τ₂ ⟧ Δ = (eval (τ₁ ⇒ τ₂; Γ') t Δ env') Δ (λ_. λx. x) (eval (τ₁; Γ') u Δ env') in
+            cast(⟦ τ₂ ⟧ Δ, ⟦ τ ⟧ Δ, ap(U, τ'. ⟦ τ' ⟧ Δ, _, _, fst pf), val)
+            ) (τ; Γ)
     in
     let q-u : (τ :U Type !) →
           (f :U Form !) → (Γ :U 𝔽↓T !) →
@@ -411,13 +490,13 @@ stlcNbE =
             | 'Product (τ₁-τ₂, _) →
               let τ₁ : Ty ! = fst τ₁-τ₂ in
               let τ₂ : Ty ! = snd τ₁-τ₂ in
-              λm. (u τ₁ Γ ('VFst ((ι ! τ₂; m), refl ((Ne; (ι ! τ₁; Γ)) : Form ! × (Type ! × 𝔽↓T !))));
-                   u τ₂ Γ ('VSnd ((ι ! τ₁; m), refl ((Ne; (ι ! τ₂; Γ)) : Form ! × (Type ! × 𝔽↓T !)))))
+              λm. (u τ₁ Γ ('VFst ((ι ! τ₁; (Γ; (ι ! τ₂; m))), refl ((Ne; (ι ! τ₁; Γ)) : Form ! × (Type ! × 𝔽↓T !))));
+                   u τ₂ Γ ('VSnd ((ι ! τ₂; (Γ; (ι ! τ₁; m))), refl ((Ne; (ι ! τ₂; Γ)) : Form ! × (Type ! × 𝔽↓T !)))))
             | 'Function (τ₁-τ₂, _) →
               let τ₁ : Ty ! = fst τ₁-τ₂ in
               let τ₂ : Ty ! = snd τ₁-τ₂ in
               let τ₁⇒τ₂ : Type ! = (ι ! τ₁) ⇒ (ι ! τ₂) in
-              λm. λΔ. λρ. λχ. u τ₂ Δ ('VApp ((ι ! τ₁; (pshf τ₁⇒τ₂ Γ m Δ ρ; q τ₁ Δ χ)),
+              λm. λΔ. λρ. λχ. u τ₂ Δ ('VApp ((ι ! τ₂; (Δ; (ι ! τ₁; (pshf τ₁⇒τ₂ Γ m Δ ρ; q τ₁ Δ χ)))),
                                              refl ((Ne; (ι ! τ₂; Δ)) : Form ! × (Type ! × 𝔽↓T !))))
             )
           -- Quote
@@ -426,14 +505,14 @@ stlcNbE =
               let τ' : Type ! = in (fmap[Type](Ty, Type, ι, !, τ)) in
               ⟦ τ' ⟧ Γ → 𝒩 τ' Γ
             with
-            | 'Unit (_, _) → λ_. 'VOne (!, <*, <*, refl Γ>>)
+            | 'Unit (_, _) → λ_. 'VOne (Γ, <*, <*, refl Γ>>)
             | 'Product (τ₁-τ₂, _) →
               let τ₁ : Ty ! = fst τ₁-τ₂ in
               let τ₂ : Ty ! = snd τ₁-τ₂ in
               λp.
                 let t : ⟦ (ι ! τ₁) ⟧ Γ = fst p in
                 let u : ⟦ (ι ! τ₂) ⟧ Γ = snd p in
-                'VPair ((ι ! τ₁; (ι ! τ₂; (q τ₁ Γ t; q τ₂ Γ u))), <*, <<refl (ι ! τ₁), refl (ι ! τ₂)>, refl Γ>>)
+                'VPair ((ι ! τ₁; (ι ! τ₂; (Γ; (q τ₁ Γ t; q τ₂ Γ u)))), <*, <<refl (ι ! τ₁), refl (ι ! τ₂)>, refl Γ>>)
             | 'Function (τ₁-τ₂, _) →
               let τ₁ : Ty ! = fst τ₁-τ₂ in
               let τ₁' : Type ! = ι ! τ₁ in
@@ -441,12 +520,12 @@ stlcNbE =
               let τ₂' : Type ! = ι ! τ₂ in
               λf.
                 let χ : ⟦ τ₁' ⟧ (Γ ∷ τ₁') =
-                  u τ₁ (Γ ∷ τ₁') ('VVar ('Ix0 (Γ, <refl τ₁', <refl Γ, refl τ₁'>>), <*, <refl τ₁', <refl Γ, refl τ₁'>>>))
+                  u τ₁ (Γ ∷ τ₁') ('VVar ((τ₁'; (Γ ∷ τ₁'; 'Ix0 ((τ₁'; Γ), <refl τ₁', <refl Γ, refl τ₁'>>))), <*, <refl τ₁', <refl Γ, refl τ₁'>>>))
                 in
                 let ↑ : 𝔽↓̃τ (Γ; Γ ∷ τ₁') =
-                  λτ'. λixΓ. 'IxS ((τ₁'; (Γ; ixΓ)), <refl τ', <refl Γ, refl τ₁'>>)
+                  λτ'. λixΓ. 'IxS ((τ'; (Γ; (τ₁'; ixΓ))), <refl τ', <refl Γ, refl τ₁'>>)
                 in
-                'VLambda ((τ₁'; (τ₂'; q τ₂ (Γ ∷ τ₁') (f (Γ ∷ τ₁') ↑ χ))), <*, <<refl τ₁', refl τ₂'>, refl Γ>>)
+                'VLambda ((τ₁'; (τ₂'; (Γ; q τ₂ (Γ ∷ τ₁') (f (Γ ∷ τ₁') ↑ χ)))), <*, <<refl τ₁', refl τ₂'>, refl Γ>>)
             )
         ) ! τ
     in
@@ -470,7 +549,7 @@ stlcNbE =
               let Γ'' : 𝔽↓T ! = ι ! Γ' in
               let τ : Type ! = snd Γ'-τ in
               let χ : ⟦ τ ⟧ (Γ'' ∷ τ) =
-                u τ (Γ'' ∷ τ) ('VVar ('Ix0 (Γ'', <refl τ, <refl Γ'', refl τ>>), <*, <refl τ, <refl Γ'', refl τ>>>))
+                u τ (Γ'' ∷ τ) ('VVar ((τ; (Γ'' ∷ τ; 'Ix0 ((τ; Γ''), <refl τ, <refl Γ'', refl τ>>))), <*, <refl τ, <refl Γ'', refl τ>>>))
               in
               let shift : (Δ :U 𝔽↓T !) → Π Δ Γ'' → Π Δ (Γ'' ∷ τ) =
                 (fix [𝔽↓T as Ctx view ι] shift _ Δ : Π (ι ! Δ) Γ'' → Π (ι ! Δ) (Γ'' ∷ τ) =
@@ -483,7 +562,7 @@ stlcNbE =
                     let Δ' : Ctx ! = fst Δ'-τ' in
                     let τ' : Type ! = snd Δ'-τ' in
                     let ↑ : 𝔽↓̃τ (Γ''; Γ'' ∷ τ) =
-                      λτ''. λixΓ''. 'IxS ((τ; (Γ''; ixΓ'')), <refl τ'', <refl Γ'', refl τ>>)
+                      λτ''. λixΓ''. 'IxS ((τ''; (Γ''; (τ; ixΓ''))), <refl τ'', <refl Γ'', refl τ>>)
                     in
                     λenv. (shift ! Δ' (fst env); rn (Γ'' ∷ τ) Γ'' ↑ τ' (snd env))
                 ) !
@@ -493,7 +572,7 @@ stlcNbE =
         in
         q τ Γ (Γ τ ⟦ t ⟧ Γ xs)
     in
-    nbe 𝟙 · ('App ((𝟙; ('Lambda ((𝟙; (𝟙; 'Var ('Ix0 (·, <*, <*, *>>), <*, <*, *>>))), <<*, *>, *>); 'One (!, <*, *>))), <*, *>))
+    nbe 𝟙 · ('App ((𝟙; (·; (𝟙; ('Lambda ((𝟙; (𝟙; (·; 'Var ((𝟙; (· ∷ 𝟙; 'Ix0 ((𝟙; ·), <*, <*, *>>))), <*, <*, *>>)))), <<*, *>, *>); 'One (·, <*, *>))))), <*, *>))
   |]
 
 test :: String -> IO ()
@@ -507,7 +586,6 @@ testDebug debug input = do
           ( result
               & catch @ParseError showReport
               & catch @ConversionError showReport
-              & catch @UnificationError showReport
               & catch @CheckError showReport
               & catch @InferenceError showReport
           )

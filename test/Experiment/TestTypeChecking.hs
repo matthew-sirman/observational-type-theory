@@ -575,7 +575,7 @@ tm29 :: String
 tm29 =
   [r|
     let Vec : U → ℕ → U =
-      λA. μF : ℕ → U. λn.
+      λA. μF : ℕ → U.
         [ 'Nil : 1 → F 0
         ; 'Cons : (m : Σ(m : ℕ). A × F m) → F (S (fst m))
         ]
@@ -588,7 +588,7 @@ tm30 :: String
 tm30 =
   [r|
     let Vec : U → ℕ → U =
-      λA. μF : ℕ → U. λn.
+      λA. μF : ℕ → U.
         [ 'Nil : 1 → F 0
         ; 'Cons : (m : Σ(m : ℕ). A × F m) → F (S (fst m))
         ]
@@ -610,7 +610,7 @@ tm31 =
     -- This is possibly a naive translation of inductive equality into a uniform
     -- inductive type, but could possibly be simplified by having ['Refl : [x ~ y]]
     let IEq : (A :U U) → (A × A) → U =
-      λA. μIEq : (A × A) → U. λx_y.
+      λA. μIEq : (A × A) → U.
         ['Refl : (a : A) → IEq (a; a)]
     in
     -- This implementation of J does not work, as we cannot transport observational
@@ -633,7 +633,7 @@ tm32 :: String
 tm32 =
   [r|
     let Nat' : U =
-      (μN : 1 → U. λ_. ['Zero : 1 → N !; 'Succ : N ! → N !]) !
+      (μN : 1 → U. ['Zero : 1 → N !; 'Succ : N ! → N !]) !
     in
     (λn. 'Succ (n, *) ~[Nat'] 'Succ (n, *) : Nat' → Ω)
   |]
@@ -642,7 +642,7 @@ tm33 :: String
 tm33 =
   [r|
     let Vec : U → (ℕ × ℕ) → U =
-      λA. μF : (ℕ × ℕ) → U. λn.
+      λA. μF : (ℕ × ℕ) → U.
         [ 'Nil : 1 → F (0; 0)
         ; 'Cons : (m : Σ(m : ℕ). A × F (m; 0)) → F (S (fst m); 0)
         ]
@@ -654,7 +654,7 @@ tm34 :: String
 tm34 =
   [r|
     let List : U → 1 → U =
-      λA. μF : 1 → U. λ_. ['Nil : 1 → F !; 'Cons : (A × F !) → F !]
+      λA. μF : 1 → U. ['Nil : 1 → F !; 'Cons : (A × F !) → F !]
     in
     let generate : (A :U U) → (ℕ → A) → ℕ → List A ! =
       λA. λf. λn. rec(_. List A !, 'Nil (!, *), k ls. 'Cons ((f k; ls), *), n)
@@ -697,7 +697,7 @@ tm35 :: String
 tm35 =
   [r|
     let Vec : U → ℕ → U =
-       λA. μF : ℕ → U. λn.
+       λA. μF : ℕ → U.
          [ 'Nil : 1 → F 0
          ; 'Cons : (m : Σ(m : ℕ). A × F m) → F (S (fst m))
          ]
@@ -750,7 +750,7 @@ tm37 =
       λn. λm. rec(k. add k m ~ add m k, zero_right_unit m, k p. trans(_, _, _, succ_dist k m, p), n)
     in
     let Vec : U → ℕ → U =
-      λA. μVecA : ℕ → U. λn.
+      λA. μVecA : ℕ → U.
         [ 'Nil : 1 → VecA 0
         ; 'Cons : (data : Σ(m : ℕ). A × VecA m) → VecA (S (fst data))
         ]
@@ -766,7 +766,7 @@ tm38 :: String
 tm38 =
   [r|
     let List : U → 1 → U =
-      λA. μList : 1 → U. λ_.
+      λA. μList : 1 → U.
         [ 'Nil : 1 → List !
         ; 'Cons : (A × List !) → List !
         ]
@@ -797,7 +797,7 @@ tm39 :: String
 tm39 =
   [r|
     let List : U → 1 → U =
-      λX. μList : 1 → U. λ_.
+      λX. μList : 1 → U.
         [ 'Nil : 1 → List !
         ; 'Cons : (X × List !) → List !
         ]
@@ -822,7 +822,7 @@ tm40 :: String
 tm40 =
   [r|
     let List : U → 1 → U =
-      λX. μList : 1 → U. λ_.
+      λX. μList : 1 → U.
         [ 'Nil : 1 → List !
         ; 'Cons : (X × List !) → List !
         ]
@@ -843,7 +843,7 @@ tm42 :: String
 tm42 =
   [r|
     let Vec : U → ℕ → U =
-      λA. μVec : ℕ → U. λn.
+      λA. μVec : ℕ → U.
         [ 'Nil : 1 → Vec 0
         ; 'Cons : (m : Σ(m : ℕ). A × Vec m) → Vec (S (fst m))
         ]
