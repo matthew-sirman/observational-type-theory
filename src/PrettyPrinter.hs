@@ -231,21 +231,14 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
               t' = go precLet (ns :> Name f :> a :> b :> g :> p :> x) t
            in str "\n  functor " . args . str " = " . t'
     go prec ns (Let x _ a t u) =
-      let a' = go precLet ns a
+      let a' = showType a
           t' = go precLet ns t
           u' = go precLet (ns :> x) u
-       in par
-            prec
-            precLet
-            ( str "let "
-                . binder x
-                . str " : "
-                . a'
-                . str " =\n    "
-                . t'
-                . str "\nin\n"
-                . u'
-            )
+       in par prec precLet (str "let " . binder x . a' . str " =\n    " . t' . str "\nin\n" . u')
+      where
+        showType :: Maybe (Term v) -> ShowS
+        showType Nothing = id
+        showType (Just a) = str " : " . go precLet ns a
     go _ ns (Annotation t a) =
       showParen True (go precLet ns t . str " : " . go precLet ns a)
     go _ _ (Meta (MetaVar m)) = str "?" . shows m

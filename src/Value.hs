@@ -281,7 +281,7 @@ data VProp
   | PMatch VProp Binder (PropClosure (A 1)) [(Name, Binder, Binder, PropClosure (A 2))]
   | PFixedPoint VProp Binder Binder Binder Binder Binder (PropClosure (A 4)) (PropClosure (A 5))
   | PMu Tag Name VProp [(Name, Binder, PropClosure (A 1), PropClosure (A 2))] (Maybe PFunctorInstance)
-  | PLet Binder Sort VProp VProp (PropClosure (A 1))
+  | PLet Binder Sort (Maybe VProp) VProp (PropClosure (A 1))
   | PAnnotation VProp VProp
 
 data PFunctorInstance = PFunctorInstance Binder Binder Binder Binder Binder (PropClosure (A 6))

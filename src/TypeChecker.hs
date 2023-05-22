@@ -594,14 +594,20 @@ infer gamma (R muPos (MuF () f a cs functor)) = do
               & bindR x' f_lift_a_p
       t <- check gamma' t f_lift_b_p
       pure (FunctorInstanceF a b nt p x' t)
-infer gamma (R _ (LetF x () a t u)) = do
+infer gamma (R _ (LetF x () (Just a) t u)) = do
   (a, s) <- checkType gamma a
   va <- eval (env gamma) a
   t <- check gamma t va
   s_known <- checkSortKnown s
   vt <- eval' s_known (env gamma) t
   (u, uty, s') <- infer (define x vt s va gamma) u
-  pure (Let x s_known a t u, uty, s')
+  pure (Let x s_known (Just a) t u, uty, s')
+infer gamma (R _ (LetF x () Nothing t u)) = do
+  (t, va, s) <- infer gamma t
+  s_known <- checkSortKnown s
+  vt <- eval' s_known (env gamma) t
+  (u, uty, s') <- infer (define x vt s va gamma) u
+  pure (Let x s_known Nothing t u, uty, s')
 infer gamma (R _ (AnnotationF t a)) = do
   (a, s) <- checkType gamma a
   va <- eval (env gamma) a
@@ -725,14 +731,20 @@ check gamma (R _ (BoxProofF e)) (VBox a) = do
 check gamma (R pos (BoxProofF {})) tty = do
   tTS <- ppVal gamma tty
   throw (CheckBoxProof tTS pos)
-check gamma (R _ (LetF x () a t u)) uty = do
+check gamma (R _ (LetF x () (Just a) t u)) uty = do
   (a, s) <- checkType gamma a
   va <- eval (env gamma) a
   t <- check gamma t va
   s' <- checkSortKnown s
   vt <- eval' s' (env gamma) t
   u <- check (define x vt s va gamma) u uty
-  pure (Let x s' a t u)
+  pure (Let x s' (Just a) t u)
+check gamma (R _ (LetF x () Nothing t u)) uty = do
+  (t, va, s) <- infer gamma t
+  s' <- checkSortKnown s
+  vt <- eval' s' (env gamma) t
+  u <- check (define x vt s va gamma) u uty
+  pure (Let x s' Nothing t u)
 check gamma (R pos (GoalF () terms)) goal = do
   goalTS <- ppVal gamma goal
   termsTS <- forM terms $ \((), t) -> do

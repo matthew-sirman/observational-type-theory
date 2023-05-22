@@ -235,7 +235,7 @@ data TermF sort meta goal tag v t
   | FixedPointF t Binder Binder Binder Binder Binder t t
   | MuF tag Name t [(Name, Binder, t, Name, t)] (Maybe (FunctorInstanceF t))
   | -- Annotations
-    LetF Binder sort t t t
+    LetF Binder sort (Maybe t) t t
   | AnnotationF t t
   | MetaF meta
   | GoalF goal [(goal, t)]
@@ -429,7 +429,7 @@ pattern FixedPoint i g v f p x c t = Fix (FixedPointF i g v f p x c t)
 pattern Mu :: Tag -> Name -> Type v -> [(Name, Binder, Type v, Name, Term v)] -> Maybe (FunctorInstance v) -> Type v
 pattern Mu tag f t cs functor = Fix (MuF tag f t cs functor)
 
-pattern Let :: Binder -> Sort -> Type v -> Term v -> Term v -> Term v
+pattern Let :: Binder -> Sort -> Maybe (Type v) -> Term v -> Term v -> Term v
 pattern Let x s a t u = Fix (LetF x s a t u)
 
 pattern Annotation :: Term v -> Type v -> Term v
@@ -541,7 +541,7 @@ instance Functor (TermF p m g t v) where
   fmap f (MatchF t x c bs) = MatchF (f t) x (f c) (fmap (fmap f) bs)
   fmap f (FixedPointF i g v f' p x c t) = FixedPointF (f i) g v f' p x (f c) (f t)
   fmap f (MuF tag g t cs functor) = MuF tag g (f t) (fmap (\(ci, xi, ti, gi, ixi) -> (ci, xi, f ti, gi, f ixi)) cs) (fmap (fmap f) functor)
-  fmap f (LetF x s a t u) = LetF x s (f a) (f t) (f u)
+  fmap f (LetF x s a t u) = LetF x s (fmap f a) (f t) (f u)
   fmap f (AnnotationF t a) = AnnotationF (f t) (f a)
   fmap _ (MetaF m) = MetaF m
   fmap f (GoalF g ts) = GoalF g (fmap (fmap f) ts)
@@ -595,7 +595,7 @@ instance Foldable (TermF p m g t v) where
   foldr f e (MatchF t _ c bs) = (f t . f c) (foldr (\(_, _, _, b) e -> f b e) e bs)
   foldr f e (FixedPointF i _ _ _ _ _ c t) = (f i . f c . f t) e
   foldr f e (MuF _ _ t cs functor) = f t (foldr (\(_, _, bi, _, ixi) e -> (f bi . f ixi) e) (foldr (flip (foldr f)) e functor) cs)
-  foldr f e (LetF _ _ a t u) = (f a . f t . f u) e
+  foldr f e (LetF _ _ a t u) = (flip (foldr f) a . f t . f u) e
   foldr f e (AnnotationF t a) = (f t . f a) e
   foldr _ e (MetaF _) = e
   foldr f e (GoalF _ ts) = foldr (flip (foldr f)) e ts
@@ -654,7 +654,7 @@ instance Traversable (TermF p m g t v) where
   traverse f (FixedPointF i g v f' p x c t) = FixedPointF <$> f i <*> pure g <*> pure v <*> pure f' <*> pure p <*> pure x <*> f c <*> f t
   traverse f (MuF tag g t cs functor) =
     MuF tag g <$> f t <*> traverse (\(ci, xi, bi, gi, ixi) -> (ci,xi,,gi,) <$> f bi <*> f ixi) cs <*> traverse (traverse f) functor
-  traverse f (LetF x s a t u) = LetF x s <$> f a <*> f t <*> f u
+  traverse f (LetF x s a t u) = LetF x s <$> traverse f a <*> f t <*> f u
   traverse f (AnnotationF t a) = AnnotationF <$> f t <*> f a
   traverse _ (MetaF m) = pure (MetaF m)
   traverse f (GoalF g ts) = GoalF g <$> traverse (traverse f) ts
