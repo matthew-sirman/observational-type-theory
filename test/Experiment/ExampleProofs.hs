@@ -605,6 +605,162 @@ stlcNbE =
              <*, *>))
   |]
 
+natWithInfinity :: String
+natWithInfinity =
+  [r|
+    let Nats' =
+      μNats' : 1 → U.
+        [ '0 : 1 → Nats' !
+        ; 'S : Nats' ! → Nats' !
+        ; '∞ : 1 → Nats' !
+        ]
+        functor A B f _ x =
+          match x as _ return (lift[Nats'] B) ! with
+          | '0 (_, _) → '0 (!, *)
+          | 'S (n, _) → 'S (f ! n, *)
+          | '∞ (_, _) → '∞ (!, *)
+    in
+    let succ-∞ : Nats' ! → Ω =
+      (fix [Nats' as N] succ-∞ _ n : Ω =
+        match n as _ return Ω with
+        | '0 (_, _) → ⊥
+        | 'S (n, _) → succ-∞ ! n
+        | '∞ (_, _) → ⊤) !
+    in
+    let R : Nats' ! → Nats' ! → Ω =
+      (fix [Nats' as N view ι] R _ x : Nats' ! → Ω =
+        match x as _ return Nats' ! → Ω with
+        | '0 (_, _) → λy.
+          (match y as _ return Ω with
+          | '0 (_, _) → ⊤
+          | 'S (_, _) → ⊥
+          | '∞ (_, _) → ⊥)
+        | 'S (n, _) → λy.
+          (match y as _ return Ω with
+          | '0 (_, _) → ⊥
+          | 'S (m, _) → R ! n m
+          | '∞ (_, _) → succ-∞ (ι ! n))
+        | '∞ (_, _) → succ-∞) !
+    in
+    let Rr : (x :U Nats' !) → R x x =
+      (fix [Nats' as N view ι] Rr _ x : R (ι ! x) (ι ! x) =
+        match x as x' return
+          let x' : Nats' ! = in (fmap[Nats'](N, Nats', ι, !, x')) in
+          R x' x'
+        with
+        | '0 (_, _) → *
+        | 'S (n, _) → Rr ! n
+        | '∞ (_, _) → *) !
+    in
+    let Rs : (x :U Nats' !) → (y :U Nats' !) → R x y → R y x =
+      (fix [Nats' as N view ι] Rs _ x : (y :U Nats' !) → R (ι ! x) y → R y (ι ! x) =
+        match x as x' return
+          let x' : Nats' ! = in (fmap[Nats'](N, Nats', ι, !, x')) in
+          (y :U Nats' !) → R x' y → R y x'
+        with
+        | '0 (_, _) → λy.
+          (match y as y' return R ('0 (!, *)) y' → R y' ('0 (!, *)) with
+          | '0 (_, _) → λp. p
+          | 'S (_, _) → λp. p
+          | '∞ (_, _) → λp. p)
+        | 'S (n, _) → λy.
+          (match y as y' return R ('S (ι ! n, *)) y' → R y' ('S (ι ! n, *)) with
+          | '0 (_, _) → λp. p
+          | 'S (m, _) → Rs ! n m
+          | '∞ (_, _) → λp. p)
+        | '∞ (_, _) → λy.
+          (match y as y' return R ('∞ (!, *)) y' → R y' ('∞ (!, *)) with
+          | '0 (_, _) → λp. p
+          | 'S (_, _) → λp. p
+          | '∞ (_, _) → λp. p)
+          ) !
+    in
+    let trans-∞ : (x :U Nats' !) → (y :U Nats' !) → succ-∞ x → R x y → succ-∞ y =
+      (fix [Nats' as N view ι] trans-∞ _ x : (y :U Nats' !) → succ-∞ (ι ! x) → R (ι ! x) y → succ-∞ y =
+        λy.
+          match x as x' return
+            let x' : Nats' ! = in (fmap[Nats'](N, Nats', ι, !, x')) in
+            succ-∞ x' → R x' y → succ-∞ y
+          with
+          | '0 (_, _) → λp. λ_. abort(succ-∞ y, p)
+          | 'S (n, _) →
+            (match y as y' return succ-∞ ('S (ι ! n, *)) → R ('S (ι ! n, *)) y' → succ-∞ y' with
+            | '0 (_, _) → λ_. λp. p
+            | 'S (m, _) → trans-∞ ! n m
+            | '∞ (_, _) → λ_. λ_. *
+            )
+          | '∞ (_, _) → λ_. λp. p) !
+    in
+    let succ-implies-R : (x :U Nats' !) → (y :U Nats' !) → succ-∞ x → succ-∞ y → R x y =
+      (fix [Nats' as N view ι] succ-implies-R _ x : (y :U Nats' !) → succ-∞ (ι ! x) → succ-∞ y → R (ι ! x) y =
+        λy.
+          match x as x' return
+            let x' : Nats' ! = in (fmap[Nats'](N, Nats', ι, !, x')) in
+            succ-∞ x' → succ-∞ y → R x' y
+          with
+          | '0 (_, _) → λp. λ_. abort(R ('0 (!, *)) y, p)
+          | 'S (n, _) →
+            (match y as y' return succ-∞ ('S (ι ! n, *)) → succ-∞ y' → R ('S (ι ! n, *)) y' with
+            | '0 (_, _) → λ_. λp. p
+            | 'S (m, _) → succ-implies-R ! n m
+            | '∞ (_, _) → λp. λ_. p
+            )
+          | '∞ (_, _) → λ_. λp. p) !
+    in
+    let Rt : (x :U Nats' !) → (y :U Nats' !) → (z :U Nats' !) → R x y → R y z → R x z =
+      (fix [Nats' as N view ι] Rt _ x : (y :U Nats' !) → (z :U Nats' !) → R (ι ! x) y → R y z → R (ι ! x) z =
+        match x as x' return
+          let x' : Nats' ! = in (fmap[Nats'](N, Nats', ι, !, x')) in
+          (y :U Nats' !) → (z :U Nats' !) → R x' y → R y z → R x' z
+        with
+        | '0 (_, _) → λy.
+          (match y as y' return (z :U Nats' !) → R ('0 (!, *)) y' → R y' z → R ('0 (!, *)) z with
+          | '0 (_, _) → λz. λ_. λp. p
+          | 'S (_, _) → λz. λp. λ_. abort(R ('0 (!, *)) z, p)
+          | '∞ (_, _) → λz. λp. λ_. abort(R ('0 (!, *)) z, p)
+          )
+        | 'S (n, _) → λy.
+          (match y as y' return (z :U Nats' !) → R ('S (ι ! n, *)) y' → R y' z → R ('S (ι ! n, *)) z with
+          | '0 (_, _) → λz. λp. λ_. abort(R ('S (ι ! n, *)) z, p)
+          | 'S (m, _) → λz.
+            (match z as z' return R ('S (ι ! n, *)) ('S (m, *)) → R ('S (m, *)) z' → R ('S (ι ! n, *)) z' with
+            | '0 (_, _) → λ_. λp. p
+            | 'S (k, _) → Rt ! n m k
+            | '∞ (_, _) → λp. λq. trans-∞ m (ι ! n) q (Rs (ι ! n) m p)
+            )
+          | '∞ (_, _) → λz.
+            (match z as z' return R ('S (ι ! n, *)) ('∞ (!, *)) → R ('∞ (!, *)) z' → R ('S (ι ! n, *)) z' with
+            | '0 (_, _) → λ_. λp. p
+            | 'S (m, _) → succ-implies-R (ι ! n) m
+            | '∞ (_, _) → λp. λ_. p
+            )
+          )
+        | '∞ (_, _) → λy.
+          (match y as y' return (z :U Nats' !) → R ('∞ (!, *)) y' → R y' z → R ('∞ (!, *)) z with
+          | '0 (_, _) → λz. λp. λ_. abort(succ-∞ z, p)
+          | 'S (n, _) → λz.
+            (match z as z' return R ('∞ (!, *)) ('S (n, *)) → R ('S (n, *)) z' → R ('∞ (!, *)) z' with
+            | '0 (_, _) → λ_. λp. abort(R ('∞ (!, *)) ('0 (!, *)), p)
+            | 'S (m, _) → trans-∞ n m
+            | '∞ (_, _) → λ_. λ_. Rr ('∞ (!, *))
+            )
+          | '∞ (_, _) → λz. λ_. λp. p
+          )
+      ) !
+    in
+    let Nats =
+      (Nats' !) / (x y. R x y, x. Rr x, x y xRy. Rs x y xRy, x y z xRy yRz. Rt x y z xRy yRz)
+    in
+    let succ : Nats → Nats =
+      λn. Q-elim(_. Nats, n. π ('S (n, *)), _ _ e. e, n)
+    in
+    let fromNat : ℕ → Nats =
+      λn. rec(_. Nats, π ('0 (!, *)), _ k. succ k, n)
+    in
+    let ∞ : Nats = π ('∞ (!, *)) in
+    fromNat (S (S 0))
+  |]
+
 test :: String -> IO ()
 test = testDebug False
 
