@@ -103,10 +103,10 @@ renameProp _ _ _ _ PNat = pure Nat
 renameProp pos ns m sub (PPropPair t u) = PropPair <$> renameProp pos ns m sub t <*> renameProp pos ns m sub u
 renameProp pos ns m sub (PPropFst t) = PropFst <$> renameProp pos ns m sub t
 renameProp pos ns m sub (PPropSnd t) = PropSnd <$> renameProp pos ns m sub t
-renameProp pos ns m sub (PExists x a b) = do
+renameProp pos ns m sub (PExists s x a b) = do
   a <- renameProp pos ns m sub a
   b <- renameProp pos (ns :> x) m (liftRenaming 1 sub) =<< app b (varP (cod sub))
-  pure (Exists x a b)
+  pure (Exists s x a b)
 renameProp pos ns m sub (PAbort a t) = Abort <$> renameProp pos ns m sub a <*> renameProp pos ns m sub t
 renameProp _ _ _ _ PEmpty = pure Empty
 renameProp _ _ _ _ POne = pure One
@@ -321,10 +321,10 @@ rename pos ns m sub (VPi s x a b) = do
 rename _ _ _ _ VZero = pure Zero
 rename pos ns m sub (VSucc n) = Succ <$> rename pos ns m sub n
 rename _ _ _ _ VNat = pure Nat
-rename pos ns m sub (VExists x a b) = do
+rename pos ns m sub (VExists s x a b) = do
   a <- rename pos ns m sub a
   b <- rename pos (ns :> x) m (liftRenaming 1 sub) =<< app b (varR (cod sub))
-  pure (Exists x a b)
+  pure (Exists s x a b)
 rename pos ns m sub (VAbort a t) = do
   a <- rename pos ns m sub a
   t <- renameProp pos ns m sub t

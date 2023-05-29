@@ -178,7 +178,7 @@ data Val
   | VZero
   | VSucc Val
   | VNat
-  | VExists Binder VTy (ValClosure (A 1))
+  | VExists Relevance Binder VTy (ValClosure (A 1))
   | VAbort VTy VProp
   | VEmpty
   | VUnit
@@ -230,7 +230,7 @@ pattern VFun :: Relevance -> VTy -> VTy -> VTy
 pattern VFun s a b = VPi s Hole a (Lift b)
 
 pattern VAnd :: VTy -> VTy -> VTy
-pattern VAnd a b = VExists Hole a (Lift b)
+pattern VAnd a b = VExists Irrelevant Hole a (Lift b)
 
 data VProp
   = PVar Lvl
@@ -246,7 +246,7 @@ data VProp
   | PPropPair VProp VProp
   | PPropFst VProp
   | PPropSnd VProp
-  | PExists Binder VProp (PropClosure (A 1))
+  | PExists Relevance Binder VProp (PropClosure (A 1))
   | PAbort VProp VProp
   | PEmpty
   | POne

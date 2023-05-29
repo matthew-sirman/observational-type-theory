@@ -143,7 +143,9 @@ infer _ (R _ NatF) = pure (Nat, VU Relevant, Relevant)
 infer gamma (R _ (FstF () t@(R pos _))) = do
   (t, tty, _) <- infer gamma t
   case tty of
-    VExists _ a _ -> pure (PropFst t, a, Irrelevant)
+    VExists s _ a _ -> do
+      convSort pos s Irrelevant
+      pure (PropFst t, a, Irrelevant)
     VSigma _ a _ -> pure (Fst t, a, Relevant)
     _ -> do
       tTS <- ppVal gamma tty
@@ -151,7 +153,8 @@ infer gamma (R _ (FstF () t@(R pos _))) = do
 infer gamma (R _ (SndF () t@(R pos _))) = do
   (t, tty, _) <- infer gamma t
   case tty of
-    VExists _ _ b -> do
+    VExists s _ _ b -> do
+      convSort pos s Irrelevant
       t_prop <- evalProp (env gamma) t
       b_fst_t <- app b (Prop (PPropFst t_prop))
       pure (PropSnd t, b_fst_t, Irrelevant)
@@ -163,11 +166,12 @@ infer gamma (R _ (SndF () t@(R pos _))) = do
     _ -> do
       tTS <- ppVal gamma tty
       throw (SndProjectionHead tTS pos)
-infer gamma (R _ (ExistsF x a b)) = do
-  a <- check gamma a (VU Irrelevant)
+infer gamma (R _ (ExistsF s x a b)) = do
+  s <- checkSort s
+  a <- check gamma a (VU s)
   va <- eval (env gamma) a
-  b <- check (bindP x va gamma) b (VU Irrelevant)
-  pure (Exists x a b, VU Irrelevant, Relevant)
+  b <- check (bind x s va gamma) b (VU Irrelevant)
+  pure (Exists s x a b, VU Irrelevant, Relevant)
 infer gamma (R _ (AbortF a t)) = do
   (a, s) <- checkType gamma a
   va <- eval (env gamma) a
@@ -662,10 +666,11 @@ check gamma (R _ (LambdaF () x t)) (VPi s _ a b) = do
 check gamma (R pos (LambdaF {})) tty = do
   tTS <- ppVal gamma tty
   throw (CheckLambda tTS pos)
-check gamma (R _ (PropPairF t u)) (VExists _ a b) = do
+check gamma (R _ (PropPairF t u)) (VExists s _ a b) = do
   t <- check gamma t a
-  t_prop <- evalProp (env gamma) t
-  b_t <- app b (Prop t_prop)
+  s <- checkSortKnown s
+  vt <- eval' s (env gamma) t
+  b_t <- app b vt
   u <- check gamma u b_t
   pure (PropPair t u)
 check gamma (R pos (PropPairF {})) tty = do

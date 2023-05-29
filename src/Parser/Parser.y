@@ -125,8 +125,8 @@ term :: { Raw }
   -- Would be nice to have this rule but adds loads of R-R conflicts
   -- | '(' binder ':' exp ')' '->' term                                { rloc (PiF SortHole $2 $4 $7) $1 $> }
   | apps '->' term                                                  { rloc (PiF SortHole Hole $1 $3) $1 $> }
-  | Exists '(' binder ':' exp ')' '.' term                          { rloc (ExistsF $3 $5 $8) $1 $> }
-  | apps '/\\' apps                                                 { rloc (ExistsF Hole $1 $3) $1 $> }
+  | Exists '(' binder ':' rel exp ')' '.' term                      { rloc (ExistsF (syntax $5) $3 $6 $9) $1 $> }
+  | apps '/\\' apps                                                 { rloc (ExistsF Irrelevant Hole $1 $3) $1 $> }
   | apps '~' '[' exp ']' apps                                       { rloc (EqF $1 $4 $6) $1 $> }
   | apps '~' apps                                                   { rloc (EqF $1 (rloc HoleF $2 $2) $3) $1 $> }
   | Sigma '(' binder ':' exp ')' '.' term                           { rloc (SigmaF $3 $5 $8) $1 $> }

@@ -198,7 +198,8 @@ conv pos names lvl a b = do
     conv' _ _ _ VZero VZero = pure ()
     conv' ns ns' lvl (VSucc n) (VSucc n') = conv' ns ns' lvl n n'
     conv' _ _ _ VNat VNat = pure ()
-    conv' ns ns' lvl (VExists x a b) (VExists x' a' b') = do
+    conv' ns ns' lvl (VExists s x a b) (VExists s' x' a' b') = do
+      convSort' pos s s'
       conv' ns ns' lvl a a'
       let vx = varR lvl
       b_x <- app b vx

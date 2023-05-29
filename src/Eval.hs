@@ -187,15 +187,15 @@ eqReduce vt va vu = eqReduceType va
       | s == s' = do
           a'_eq_a <- eqReduce a' (VU s) a
           s_res <- resolveSort s
-          pure (VExists (Name "$e") a'_eq_a (Defun (ClosureEqPi s_res x' a a' b b')))
+          pure (VExists Irrelevant (Name "$e") a'_eq_a (Defun (ClosureEqPi s_res x' a a' b b')))
     -- Rule Eq-Σ
     eqReduceAll (VSigma x a b) (VU Relevant) (VSigma _ a' b') = do
       a_eq_a' <- eqReduce a (VU Relevant) a'
-      pure (VExists (Name "$e") a_eq_a' (Defun (ClosureEqSigma x a a' b b')))
+      pure (VExists Irrelevant (Name "$e") a_eq_a' (Defun (ClosureEqSigma x a a' b b')))
     -- Rule Eq-Quotient
     eqReduceAll (VQuotient a x y r _ _ _ _ _ _ _ _ _ _ _ _) (VU Relevant) (VQuotient a' _ _ r' _ _ _ _ _ _ _ _ _ _ _ _) = do
       a_eq_a' <- eqReduce a (VU Relevant) a'
-      pure (VExists (Name "$e") a_eq_a' (Defun (ClosureEqQuotient x y a a' r r')))
+      pure (VExists Irrelevant (Name "$e") a_eq_a' (Defun (ClosureEqQuotient x y a a' r r')))
     -- Rule Eq-Zero
     eqReduceAll VZero VNat VZero = pure VUnit
     -- Rule Eq-Zero-Succ
@@ -213,7 +213,7 @@ eqReduce vt va vu = eqReduceType va
       t'_entry <- embedVal t'
       u' <- p' $$ VSnd
       t_eq_t' <- eqReduce t a t'
-      pure (VExists (Name "$e") t_eq_t' (Defun (ClosureEqPair x b t_entry t'_entry u u')))
+      pure (VExists Irrelevant (Name "$e") t_eq_t' (Defun (ClosureEqPair x b t_entry t'_entry u u')))
     -- Rule Quotient-Proj-Eq
     eqReduceAll (VQProj t) (VQuotient _ _ _ r _ _ _ _ _ _ _ _ _ _ _ _) (VQProj u) = do
       t <- embedVal t
@@ -351,7 +351,7 @@ eval _ Nat = pure VNat
 eval _ (PropPair {}) = error "BUG: impossible (eval on prop)"
 eval _ (PropFst _) = error "BUG: impossible (eval on prop)"
 eval _ (PropSnd _) = error "BUG: impossible (eval on prop)"
-eval env (Exists x a b) = VExists x <$> eval env a <*> closure env b
+eval env (Exists s x a b) = VExists s x <$> eval env a <*> closure env b
 eval env (Abort a t) = VAbort <$> eval env a <*> evalProp env t
 eval _ Empty = pure VEmpty
 eval _ One = error "BUG: impossible (eval on prop)"
@@ -601,8 +601,8 @@ quote lvl (VPi s x a b) = Pi s x <$> quote lvl a <*> (quote (lvl + 1) =<< app b 
 quote _ VZero = pure Zero
 quote lvl (VSucc t) = Succ <$> quote lvl t
 quote _ VNat = pure Nat
-quote lvl (VExists x a b) =
-  Exists x <$> quote lvl a <*> (quote (lvl + 1) =<< app b (varR lvl))
+quote lvl (VExists s x a b) =
+  Exists s x <$> quote lvl a <*> (quote (lvl + 1) =<< app b (varR lvl))
 quote lvl (VAbort a t) = Abort <$> quote lvl a <*> quoteProp lvl t
 quote _ VEmpty = pure Empty
 quote _ VUnit = pure Unit

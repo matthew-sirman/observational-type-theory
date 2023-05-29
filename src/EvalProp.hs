@@ -106,7 +106,7 @@ evalProp _ Nat = pure PNat
 evalProp env (PropPair t u) = PPropPair <$> evalProp env t <*> evalProp env u
 evalProp env (PropFst t) = PPropFst <$> evalProp env t
 evalProp env (PropSnd t) = PPropSnd <$> evalProp env t
-evalProp env (Exists x a b) = PExists x <$> evalProp env a <*> propClosure env b
+evalProp env (Exists s x a b) = PExists s x <$> evalProp env a <*> propClosure env b
 evalProp env (Abort a t) = PAbort <$> evalProp env a <*> evalProp env t
 evalProp _ Empty = pure PEmpty
 evalProp _ One = pure POne
@@ -276,7 +276,7 @@ freeze (VPi s x a b) = PPi s x <$> freeze a <*> closureToVProp b
 freeze VZero = pure PZero
 freeze (VSucc n) = PSucc <$> freeze n
 freeze VNat = pure PNat
-freeze (VExists x a b) = PExists x <$> freeze a <*> closureToVProp b
+freeze (VExists s x a b) = PExists s x <$> freeze a <*> closureToVProp b
 freeze (VAbort a t) = PAbort <$> freeze a <*> pure t
 freeze VEmpty = pure PEmpty
 freeze VUnit = pure PUnit
@@ -385,7 +385,7 @@ quoteProp _ PNat = pure Nat
 quoteProp lvl (PPropPair t u) = PropPair <$> quoteProp lvl t <*> quoteProp lvl u
 quoteProp lvl (PPropFst t) = PropFst <$> quoteProp lvl t
 quoteProp lvl (PPropSnd t) = PropSnd <$> quoteProp lvl t
-quoteProp lvl (PExists x a b) = Exists x <$> quoteProp lvl a <*> (quoteProp (lvl + 1) =<< app b (varP lvl))
+quoteProp lvl (PExists s x a b) = Exists s x <$> quoteProp lvl a <*> (quoteProp (lvl + 1) =<< app b (varP lvl))
 quoteProp lvl (PAbort a t) = Abort <$> quoteProp lvl a <*> quoteProp lvl t
 quoteProp _ PEmpty = pure Empty
 quoteProp _ POne = pure One

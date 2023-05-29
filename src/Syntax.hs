@@ -190,7 +190,7 @@ data TermF sort meta goal tag v t
   | FstF sort t
   | SndF sort t
   | -- Existential types are annotated with their domain and co-domain levels
-    ExistsF Binder t t
+    ExistsF (RelevanceF meta) Binder t t
   | AbortF t t
   | EmptyF
   | OneF
@@ -296,8 +296,8 @@ pattern PropFst p = Fix (FstF Irrelevant p)
 pattern PropSnd :: Term v -> Term v
 pattern PropSnd p = Fix (SndF Irrelevant p)
 
-pattern Exists :: Binder -> Term v -> Term v -> Term v
-pattern Exists x a b = Fix (ExistsF x a b)
+pattern Exists :: Relevance -> Binder -> Term v -> Term v -> Term v
+pattern Exists s x a b = Fix (ExistsF s x a b)
 
 pattern Abort :: Type v -> Term v -> Term v
 pattern Abort a t = Fix (AbortF a t)
@@ -507,7 +507,7 @@ instance Functor (TermF p m g t v) where
   fmap f (PropPairF t u) = PropPairF (f t) (f u)
   fmap f (FstF s p) = FstF s (f p)
   fmap f (SndF s p) = SndF s (f p)
-  fmap f (ExistsF x a b) = ExistsF x (f a) (f b)
+  fmap f (ExistsF s x a b) = ExistsF s x (f a) (f b)
   fmap f (AbortF a t) = AbortF (f a) (f t)
   fmap _ EmptyF = EmptyF
   fmap _ OneF = OneF
@@ -562,7 +562,7 @@ instance Foldable (TermF p m g t v) where
   foldr f e (PropPairF t u) = (f t . f u) e
   foldr f e (FstF _ p) = f p e
   foldr f e (SndF _ p) = f p e
-  foldr f e (ExistsF _ a b) = (f a . f b) e
+  foldr f e (ExistsF _ _ a b) = (f a . f b) e
   foldr f e (AbortF a t) = (f a . f t) e
   foldr _ e EmptyF = e
   foldr _ e OneF = e
@@ -616,7 +616,7 @@ instance Traversable (TermF p m g t v) where
   traverse f (PropPairF t u) = PropPairF <$> f t <*> f u
   traverse f (FstF s p) = FstF s <$> f p
   traverse f (SndF s p) = SndF s <$> f p
-  traverse f (ExistsF x a b) = ExistsF x <$> f a <*> f b
+  traverse f (ExistsF s x a b) = ExistsF s x <$> f a <*> f b
   traverse f (AbortF a t) = AbortF <$> f a <*> f t
   traverse _ EmptyF = pure EmptyF
   traverse _ OneF = pure OneF

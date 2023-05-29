@@ -898,6 +898,26 @@ tm46 =
     f ?{f, x}
   |]
 
+tm47 :: String
+tm47 =
+  [r|
+    let Bool =
+      μBool : 1 → U. ['True : 1 → Bool !; 'False : 1 → Bool !]
+    in
+    let tt : Bool ! = 'True (!, *) in
+    let ff : Bool ! = 'False (!, *) in
+    let if : (C :U Bool ! → U) → (b :U Bool !) → C tt → C ff → C b =
+      λC. λb. λif-true. λif-false.
+        match b as b return C b with
+        | 'True (_, _) → if-true
+        | 'False (_, _) → if-false
+    in
+    let _+_ : Ω → Ω → Ω =
+      λP. λQ. ∃(b :U Bool !). if (λ_. Ω) b P Q
+    in
+    (<t, *> : (0 ~ 0) + (S 0 ~ 0))
+  |]
+
 test :: String -> IO ()
 test input = do
   (result, mctx) <-

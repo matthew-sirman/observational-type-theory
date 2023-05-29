@@ -94,12 +94,12 @@ prettyPrintTermDebug debug names tm = go 0 names tm []
     go _ ns (PropPair t u) = chr '⟨' . go precLet ns t . comma . go precLet ns u . chr '⟩'
     go prec ns (PropFst p) = par prec precApp (str "fst " . go precAtom ns p)
     go prec ns (PropSnd p) = par prec precApp (str "snd " . go precAtom ns p)
-    go prec ns (Exists Hole a b) =
+    go prec ns (Exists _ Hole a b) =
       let domain = go precApp ns a
           codomain = go precApp (ns :> Hole) b
        in tag "∃" . par prec precPi (domain . str " ∧ " . codomain)
-    go prec ns (Exists x a b) =
-      let domain = showParen True (binder x . str " : " . go precLet ns a)
+    go prec ns (Exists s x a b) =
+      let domain = showParen True (binder x . str " :" . shows s . space . go precLet ns a)
           codomain = go precPi (ns :> x) b
        in par prec precPi (chr '∃' . domain . dot . codomain)
     go prec ns (Abort a t) =
